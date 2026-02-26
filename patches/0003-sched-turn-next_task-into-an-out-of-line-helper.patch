@@ -1,0 +1,87 @@
+From d00c4607b8b4d40d38100c8dd86128994ddc85b0 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 14:52:48 +0800
+Subject: [PATCH 03/27] sched: turn next_task() into an out-of-line helper
+
+next_task() is currently a one-line macro that dereferences
+p->tasks.next.  In the upcoming per-NUMA-domain task list change it
+needs to be able to advance across shard boundaries by consulting
+p->task_domain_nid and walking to the next online node's shard list.
+That logic does not fit in a one-liner and must live in one place so
+that stateful iterators -- notably the BPF task iterator in
+kernel/bpf/task_iter.c, which calls next_task() across syscall
+boundaries -- keep working unchanged.
+
+This commit only performs the macro-to-function conversion: the
+implementation still walks the single init_task.tasks list and is
+behaviourally identical to the old macro.  A subsequent commit will
+swap the body to walk task_domains[].
+
+The function is exported because for_each_process() expands to a
+loop over next_task() in many in-tree modules.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/sched/signal.h | 14 ++++++++++++--
+ kernel/fork.c                | 20 ++++++++++++++++++++
+ 2 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
+index a22248aebcf9..54a24ed5f7f3 100644
+--- a/include/linux/sched/signal.h
++++ b/include/linux/sched/signal.h
+@@ -633,8 +633,18 @@ extern void flush_itimer_signals(void);
+ #define tasklist_empty() \
+ 	list_empty(&init_task.tasks)
+ 
+-#define next_task(p) \
+-	list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
++/*
++ * Return the next process leader in iteration order, or &init_task to
++ * signal end-of-list.  Iteration starts by passing &init_task in.
++ *
++ * Phase 1 NOTE: still walks the single init_task.tasks list; a
++ * subsequent commit will switch this to walk task_domains[] shards
++ * and use task_struct::task_domain_nid to advance across them.
++ * Out-of-line so the cross-shard advance logic stays in one place
++ * and so stateful iterators (e.g. bpf_iter_task) keep working
++ * unchanged across syscall boundaries.
++ */
++extern struct task_struct *next_task(struct task_struct *p);
+ 
+ #define for_each_process(p) \
+ 	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 3166dbe24d2c..2fee705057b8 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -169,6 +169,26 @@ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+ struct task_domain **task_domains __read_mostly;
+ EXPORT_SYMBOL_GPL(task_domains);
+ 
++/*
++ * Iteration helper.  See the declaration in <linux/sched/signal.h>
++ * for the contract: pass &init_task to start, &init_task is returned
++ * to signal end-of-list.
++ *
++ * Phase 1 NOTE: this implementation still walks the single
++ * init_task.tasks list and is therefore behaviourally identical to
++ * the old `list_entry_rcu((p)->tasks.next, ...)` macro.  A subsequent
++ * commit will switch it to walk task_domains[] shards using
++ * task_struct::task_domain_nid to advance across shard boundaries.
++ *
++ * Caller must already be inside an RCU read-side critical section
++ * (or hold tasklist_lock), as before.
++ */
++struct task_struct *next_task(struct task_struct *p)
++{
++	return list_entry_rcu(p->tasks.next, struct task_struct, tasks);
++}
++EXPORT_SYMBOL_GPL(next_task);
++
+ static void __init init_task_domains(void)
+ {
+ 	int nid;
+-- 
+2.43.0
+

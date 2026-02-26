@@ -1,0 +1,166 @@
+From d499c4d9e7fd3d1c1894aab74cfe830218122e8b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 12:43:56 +0800
+Subject: [PATCH 09/27] pid: take pid->lock as inner writer-side lock for
+ pid->tasks[]
+
+Phase 2 prep (commit #9 of the per-NUMA-domain task list series).
+The pid->tasks[type] hlist is currently protected on the writer side
+by tasklist_lock; this commit additionally takes pid->lock around
+every hlist mutation in attach_pid(), __change_pid() (and therefore
+detach_pid()/change_pid()), exchange_tids() and transfer_pid().
+
+This is a pure double-lock step:
+
+  - tasklist_lock is still required (lockdep_assert_held_write stays)
+  - pid->lock is added as the inner leaf lock
+  - lock order: tasklist_lock -> pid->lock
+  - behaviour is unchanged; tasklist_lock is still the real serializer
+
+A subsequent commit will switch the required writer lock from
+tasklist_lock to pid->lock, allowing the fork() and exit() fast paths
+to drop tasklist_lock for the pid->tasks[] hlist.
+
+exchange_tids() acquires pid1->lock and pid2->lock in address order to
+avoid AB-BA against any future double-pid mutator; transfer_pid()
+needs only one lock because the replace happens within a single
+hlist (old and new share the same struct pid for that type during
+de_thread()).
+
+init_struct_pid is statically initialised with __SPIN_LOCK_UNLOCKED so
+the swapper's pid is safe even though it never goes through alloc_pid().
+---
+ include/linux/pid.h |  2 ++
+ kernel/pid.c        | 50 ++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/pid.h b/include/linux/pid.h
+index ddaef0bbc8ba..adcbca8c67d7 100644
+--- a/include/linux/pid.h
++++ b/include/linux/pid.h
+@@ -103,6 +103,8 @@ extern struct pid *get_task_pid(struct task_struct *task, enum pid_type type);
+ 
+ /*
+  * these helpers must be called with the tasklist_lock write-held.
++ * They additionally take pid->lock internally as the inner writer-side
++ * lock for the pid->tasks[type] hlist (Phase 2 prep, commit #9).
+  */
+ extern void attach_pid(struct task_struct *task, enum pid_type);
+ void detach_pid(struct pid **pids, struct task_struct *task, enum pid_type);
+diff --git a/kernel/pid.c b/kernel/pid.c
+index 3b96571d0fe6..66680d890ed7 100644
+--- a/kernel/pid.c
++++ b/kernel/pid.c
+@@ -48,6 +48,7 @@
+ 
+ struct pid init_struct_pid = {
+ 	.count		= REFCOUNT_INIT(1),
++	.lock		= __SPIN_LOCK_UNLOCKED(init_struct_pid.lock),
+ 	.tasks		= {
+ 		{ .first = NULL },
+ 		{ .first = NULL },
+@@ -379,6 +380,16 @@ static struct pid **task_pid_ptr(struct task_struct *task, enum pid_type type)
+ 
+ /*
+  * attach_pid() must be called with the tasklist_lock write-held.
++ *
++ * Phase 2 prep (commit #9): pid->lock is also taken internally as the
++ * inner writer-side lock for the pid->tasks[type] hlist.  This is a
++ * pure double-lock step -- the tasklist_lock requirement is preserved
++ * so behaviour is unchanged.  A subsequent commit will switch the
++ * required lock from tasklist_lock to pid->lock, allowing the fork()
++ * and exit() fast paths to drop tasklist_lock.
++ *
++ * Lock order: tasklist_lock -> pid->lock.  pid->lock is a leaf and
++ * must not nest any other task-related lock inside it.
+  */
+ void attach_pid(struct task_struct *task, enum pid_type type)
+ {
+@@ -387,7 +398,9 @@ void attach_pid(struct task_struct *task, enum pid_type type)
+ 	lockdep_assert_held_write(&tasklist_lock);
+ 
+ 	pid = *task_pid_ptr(task, type);
++	spin_lock(&pid->lock);
+ 	hlist_add_head_rcu(&task->pid_links[type], &pid->tasks[type]);
++	spin_unlock(&pid->lock);
+ }
+ 
+ static void __change_pid(struct pid **pids, struct task_struct *task,
+@@ -401,12 +414,16 @@ static void __change_pid(struct pid **pids, struct task_struct *task,
+ 	pid_ptr = task_pid_ptr(task, type);
+ 	pid = *pid_ptr;
+ 
++	spin_lock(&pid->lock);
+ 	hlist_del_rcu(&task->pid_links[type]);
+ 	*pid_ptr = new;
+ 
+ 	for (tmp = PIDTYPE_MAX; --tmp >= 0; )
+-		if (pid_has_task(pid, tmp))
++		if (pid_has_task(pid, tmp)) {
++			spin_unlock(&pid->lock);
+ 			return;
++		}
++	spin_unlock(&pid->lock);
+ 
+ 	WARN_ON(pids[type]);
+ 	pids[type] = pid;
+@@ -430,9 +447,26 @@ void exchange_tids(struct task_struct *left, struct task_struct *right)
+ 	struct pid *pid2 = right->thread_pid;
+ 	struct hlist_head *head1 = &pid1->tasks[PIDTYPE_PID];
+ 	struct hlist_head *head2 = &pid2->tasks[PIDTYPE_PID];
++	struct pid *first, *second;
+ 
+ 	lockdep_assert_held_write(&tasklist_lock);
+ 
++	/*
++	 * Acquire both pid->locks in address order to avoid AB-BA with
++	 * any other concurrent double-pid mutator.  pid1 == pid2 should
++	 * not happen for exchange_tids, but guard anyway.
++	 */
++	if (pid1 < pid2) {
++		first = pid1;
++		second = pid2;
++	} else {
++		first = pid2;
++		second = pid1;
++	}
++	spin_lock(&first->lock);
++	if (second != first)
++		spin_lock_nested(&second->lock, SINGLE_DEPTH_NESTING);
++
+ 	/* Swap the single entry tid lists */
+ 	hlists_swap_heads_rcu(head1, head2);
+ 
+@@ -443,15 +477,29 @@ void exchange_tids(struct task_struct *left, struct task_struct *right)
+ 	/* Swap the cached value */
+ 	WRITE_ONCE(left->pid, pid_nr(pid2));
+ 	WRITE_ONCE(right->pid, pid_nr(pid1));
++
++	if (second != first)
++		spin_unlock(&second->lock);
++	spin_unlock(&first->lock);
+ }
+ 
+ /* transfer_pid is an optimization of attach_pid(new), detach_pid(old) */
+ void transfer_pid(struct task_struct *old, struct task_struct *new,
+ 			   enum pid_type type)
+ {
++	struct pid *pid;
++
+ 	WARN_ON_ONCE(type == PIDTYPE_PID);
+ 	lockdep_assert_held_write(&tasklist_lock);
++
++	/*
++	 * old and new share the same struct pid for this type during
++	 * de_thread(); the replace happens within one hlist.
++	 */
++	pid = *task_pid_ptr(old, type);
++	spin_lock(&pid->lock);
+ 	hlist_replace_rcu(&old->pid_links[type], &new->pid_links[type]);
++	spin_unlock(&pid->lock);
+ }
+ 
+ struct task_struct *pid_task(struct pid *pid, enum pid_type type)
+-- 
+2.43.0
+

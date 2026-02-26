@@ -1,0 +1,107 @@
+From 3ecd2239da2b432b4791d1a9f4fd6440623a1bf2 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 15:41:07 +0800
+Subject: [PATCH 14/27] pid: drop tasklist_lock requirement from pid hlist
+ mutators
+
+Commit "pid: take pid->lock as inner writer-side lock for pid->tasks[]"
+introduced pid->lock as the inner writer-side lock on top of an
+existing tasklist_lock write requirement, so that attach_pid(),
+detach_pid(), __change_pid(), transfer_pid() and exchange_tids() were
+double-locked during the transition.  With the pid->lock side fully
+in place and exercised, drop the outer tasklist_lock requirement:
+
+  - Remove lockdep_assert_held_write(&tasklist_lock) from attach_pid,
+    __change_pid, transfer_pid, and exchange_tids.
+  - Update the kerneldoc to describe pid->lock as the sole writer-side
+    mutex for pid->tasks[].
+
+No caller is updated in this commit: copy_process() and release_task()
+still hold tasklist_lock write around their attach_pid/detach_pid
+calls for other reasons (children list, ptrace link, is_child_reaper,
+...).  The point of this commit is that the pid hlist operations no
+longer *require* tasklist_lock, so follow-up commits that shrink or
+eliminate the tasklist_lock critical section in fork()/exit() are free
+to call attach_pid()/detach_pid() without the outer lock.
+
+Readers of pid->tasks[] are unaffected.  pid_task() and friends still
+traverse under rcu_read_lock() (or, as a legacy bypass, under
+tasklist_lock), and writers publish via hlist_add_head_rcu() /
+hlist_del_rcu() paired with pid->lock as before.
+
+Lock order is unchanged: pid->lock remains a leaf; any caller that
+happens to already hold tasklist_lock write may still nest pid->lock
+inside it.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/pid.c | 26 +++++++++-----------------
+ 1 file changed, 9 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/pid.c b/kernel/pid.c
+index 66680d890ed7..4d29af767303 100644
+--- a/kernel/pid.c
++++ b/kernel/pid.c
+@@ -379,24 +379,21 @@ static struct pid **task_pid_ptr(struct task_struct *task, enum pid_type type)
+ }
+ 
+ /*
+- * attach_pid() must be called with the tasklist_lock write-held.
++ * attach_pid() and detach_pid() are synchronised by pid->lock, which
++ * acts as the single writer-side lock for the pid->tasks[type] hlist.
+  *
+- * Phase 2 prep (commit #9): pid->lock is also taken internally as the
+- * inner writer-side lock for the pid->tasks[type] hlist.  This is a
+- * pure double-lock step -- the tasklist_lock requirement is preserved
+- * so behaviour is unchanged.  A subsequent commit will switch the
+- * required lock from tasklist_lock to pid->lock, allowing the fork()
+- * and exit() fast paths to drop tasklist_lock.
+- *
+- * Lock order: tasklist_lock -> pid->lock.  pid->lock is a leaf and
+- * must not nest any other task-related lock inside it.
++ * Historically these helpers required tasklist_lock write to be held
++ * by the caller.  That requirement has been removed: callers are free
++ * to invoke attach_pid()/detach_pid() without holding tasklist_lock at
++ * all, and the fork()/exit() fast paths exploit this to shrink their
++ * tasklist_lock critical section.  Readers of pid->tasks[] synchronise
++ * via RCU; writers are serialised by pid->lock, which is a leaf lock
++ * and must not nest any other task-related lock inside it.
+  */
+ void attach_pid(struct task_struct *task, enum pid_type type)
+ {
+ 	struct pid *pid;
+ 
+-	lockdep_assert_held_write(&tasklist_lock);
+-
+ 	pid = *task_pid_ptr(task, type);
+ 	spin_lock(&pid->lock);
+ 	hlist_add_head_rcu(&task->pid_links[type], &pid->tasks[type]);
+@@ -409,8 +406,6 @@ static void __change_pid(struct pid **pids, struct task_struct *task,
+ 	struct pid **pid_ptr, *pid;
+ 	int tmp;
+ 
+-	lockdep_assert_held_write(&tasklist_lock);
+-
+ 	pid_ptr = task_pid_ptr(task, type);
+ 	pid = *pid_ptr;
+ 
+@@ -449,8 +444,6 @@ void exchange_tids(struct task_struct *left, struct task_struct *right)
+ 	struct hlist_head *head2 = &pid2->tasks[PIDTYPE_PID];
+ 	struct pid *first, *second;
+ 
+-	lockdep_assert_held_write(&tasklist_lock);
+-
+ 	/*
+ 	 * Acquire both pid->locks in address order to avoid AB-BA with
+ 	 * any other concurrent double-pid mutator.  pid1 == pid2 should
+@@ -490,7 +483,6 @@ void transfer_pid(struct task_struct *old, struct task_struct *new,
+ 	struct pid *pid;
+ 
+ 	WARN_ON_ONCE(type == PIDTYPE_PID);
+-	lockdep_assert_held_write(&tasklist_lock);
+ 
+ 	/*
+ 	 * old and new share the same struct pid for this type during
+-- 
+2.43.0
+

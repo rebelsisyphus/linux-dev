@@ -1,0 +1,56 @@
+From 4325292944826005a2511d355517f23ef82764c9 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 13:05:13 +0800
+Subject: [PATCH 10/27] fork, exec: use RCU list primitives on task ->children
+ writers
+
+Prepare to convert do_wait_thread() readers of parent->children to
+rcu_read_lock()-based traversal by publishing sibling-list writes with
+the RCU variants. Both sites still run under tasklist_lock write, so
+current non-RCU readers are unaffected; this only adds the required
+smp_store_release ordering on the add/replace paths so that a future
+RCU reader sees a fully initialized task_struct.
+
+The two remaining writers on the children list -- list_del_init() in
+__unhash_process() and list_splice_tail_init() in forget_original_parent()
+-- are intentionally left alone.  They depend on list_empty() sentinel
+semantics and on bulk splice semantics that have no drop-in RCU variant,
+and must be converted together with the reader-side switch in the next
+commit so the transition is atomic.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/exec.c     | 3 ++-
+ kernel/fork.c | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/exec.c b/fs/exec.c
+index 9ea3a775d51e..d4354304fa67 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -990,7 +990,8 @@ static int de_thread(struct task_struct *tsk)
+ 		transfer_pid(leader, tsk, PIDTYPE_SID);
+ 
+ 		list_replace_rcu(&leader->tasks, &tsk->tasks);
+-		list_replace_init(&leader->sibling, &tsk->sibling);
++		list_replace_rcu(&leader->sibling, &tsk->sibling);
++		INIT_LIST_HEAD(&leader->sibling);
+ 
+ 		tsk->group_leader = tsk;
+ 		leader->group_leader = tsk;
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 99beb84c5695..5cd2c7ec2a71 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2599,7 +2599,7 @@ __latent_entropy struct task_struct *copy_process(
+ 			p->signal->has_child_subreaper =
+ 				p->real_parent->signal->has_child_subreaper ||
+ 				p->real_parent->signal->is_child_subreaper;
+-			list_add_tail(&p->sibling, &p->real_parent->children);
++			list_add_tail_rcu(&p->sibling, &p->real_parent->children);
+ 			list_add_tail_rcu(&p->tasks, &task_domains[nid]->tasks);
+ 			task_domains[nid]->nr_tasks++;
+ 			attach_pid(p, PIDTYPE_TGID);
+-- 
+2.43.0
+

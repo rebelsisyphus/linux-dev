@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "semcode": {
+      "type": "local",
+      "command": [
+	      "/home/sisyphus/code/tool/semcode/target/release/semcode-mcp",
+	      "--database",
+	      "/home/sisyphus/code/linux/.semcode.db"
+      ]
+    }
+  }
+}

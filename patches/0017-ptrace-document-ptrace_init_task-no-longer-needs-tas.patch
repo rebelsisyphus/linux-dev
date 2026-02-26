@@ -1,0 +1,46 @@
+From fe1290ac2447832292970e2b6dc07ed88e07a3d0 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 16:02:21 +0800
+Subject: [PATCH 17/27] ptrace: document ptrace_init_task no longer needs
+ tasklist_lock
+
+ptrace_init_task() initializes ptrace fields on a still-private
+child task and, only in the inherited-tracer case, calls
+__ptrace_link().  The field initializers touch a task that has not
+been published to any global list, so they need no external
+serialization.  __ptrace_link() now takes task_lock(new_parent) as
+its own writer mutex for the tracer's ->ptraced list.
+
+Update the kerneldoc to reflect that tasklist_lock is no longer a
+requirement of ptrace_init_task() itself.  The call site in
+copy_process() still runs under tasklist_lock write for unrelated
+reasons; removing that outer write section is the subject of a
+later commit in the per-NUMA tasklist sharding series.
+
+Signed-off-by: NUMA tasklist sharding <dev@localhost>
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/ptrace.h | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
+index 90507d4afcd6..46a197d72908 100644
+--- a/include/linux/ptrace.h
++++ b/include/linux/ptrace.h
+@@ -195,7 +195,12 @@ static inline void ptrace_event_pid(int event, struct pid *pid)
+  * This is called immediately after adding @child to its parent's children
+  * list.  @ptrace is false in the normal case, and true to ptrace @child.
+  *
+- * Called with current's siglock and write_lock_irq(&tasklist_lock) held.
++ * Called with current's siglock held.  @child has not yet been published
++ * to any global list reachable by other tasks, so the non-__ptrace_link
++ * field initializers do not require any external serialization.  The
++ * __ptrace_link() call (taken only when inheriting the tracer) relies on
++ * task_lock(current->parent) as its writer mutex for the tracer's
++ * ->ptraced list, independent of tasklist_lock.
+  */
+ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
+ {
+-- 
+2.43.0
+

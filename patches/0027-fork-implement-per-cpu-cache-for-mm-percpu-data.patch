@@ -1,0 +1,296 @@
+From 0b39b400075404161d0dd1a1dd0d49356a4d582e Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 16 Apr 2026 14:49:07 +0800
+Subject: [PATCH 27/27] fork: implement per-cpu cache for mm percpu data
+
+On systems with many CPUs (e.g. 320-core 4-NUMA), concurrent
+fork/exit workloads suffer from pcpu_alloc_mutex + pcpu_lock
+contention because every mm_init allocates percpu data for rss_stat
+and mm_cid, and every __mmdrop frees it.
+
+Implement a per-CPU cache (mm_stat_ext_cache) that recycles the
+percpu data across mm_struct lifetimes:
+
+  - mm_stat_ext_cache_get() tries the local CPU's cache first
+    (lock-free via preempt_disable), falling back to alloc_percpu.
+  - mm_stat_ext_cache_put() returns percpu data to the local CPU's
+    cache; if the cache is full, the data is freed via free_percpu.
+
+  - Cache hit path in mm_init(): percpu_counter_init_many_pcpu()
+    initialises the rss_stat counters with cached percpu data (all
+    per-CPU values are zeroed).  The mm_cid pcpu pointer is taken
+    from cache and all per-CPU cid fields are zeroed.  mm_init_cid()
+    then reinitialises the remaining mm_cid fields.
+  - Cache miss path: the original alloc_percpu flow is used; on
+    success the newly allocated percpu data pointers are saved in
+    mm->stat_ext for future recycling.
+
+  - __mmdrop() checks mm->stat_ext fields to determine which free
+    path to take.  If percpu data was cached, percpu_counter_detach_many()
+    removes counters from the hotplug list without freeing the data,
+    which is returned to the per-CPU cache.  Otherwise, the normal
+    percpu_counter_destroy_many() + mm_destroy_cid() path is used.
+
+  - mm->stat_ext fields are explicitly zeroed in mm_init() (not via
+    memset on the containing struct) to avoid corrupting percpu_counter
+    list_head members which may have been copied by dup_mm's memcpy.
+    After zeroing, the fields are either filled from cache or left NULL
+    for the fallback path.
+
+CPU affinity: the cache is per-CPU and completely lock-free.  If the
+creating and destroying CPUs differ (e.g. fork on CPU 0, exit on
+CPU 100), the destroying CPU's cache gains an entry while the
+creating CPU's cache may miss.  This is acceptable because: no locks
+are taken on either path, cache imbalance self-corrects over time,
+and the fallback alloc_percpu path still works correctly.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+
+---
+ kernel/fork.c | 201 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 194 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index ecaa2a559faf..8598884f12fb 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -617,6 +617,156 @@ struct kmem_cache *fs_cachep;
+ /* SLAB cache for mm_struct structures (tsk->mm) */
+ static struct kmem_cache *mm_cachep;
+ 
++/*
++ * Per-CPU cache for mm percpu data (rss_stat counters and mm_cid pcpu).
++ *
++ * When an mm is freed in __mmdrop, the percpu data for rss_stat and mm_cid
++ * is cached on the local CPU instead of being freed via free_percpu (which
++ * acquires pcpu_alloc_mutex + pcpu_lock).  When a new mm is created in
++ * mm_init, the percpu data is taken from the local CPU's cache, bypassing
++ * alloc_percpu entirely.
++ *
++ * CPU affinity: cache put always goes to the current CPU's cache (the CPU
++ * where __mmdrop runs).  This is lock-free via preempt_disable.  If the
++ * creating and destroying CPUs differ, the creating CPU may see cache
++ * misses and fall back to alloc_percpu.  This is acceptable because:
++ *  1. No locks are taken on either the get or put fast path.
++ *  2. Cache imbalance self-corrects over time.
++ *  3. The fallback path still works correctly, just slower.
++ */
++#define MM_STAT_EXT_CACHE_MAX	8
++
++struct mm_stat_ext_cache {
++	unsigned int count;
++	struct mm_stat_ext entries[MM_STAT_EXT_CACHE_MAX];
++};
++
++static DEFINE_PER_CPU(struct mm_stat_ext_cache, mm_stat_ext_free);
++
++#ifdef CONFIG_SMP
++static atomic_long_t mm_stat_ext_cache_get_hits ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_cache_get_misses ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_cache_put_stores ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_cache_put_overflows ____cacheline_aligned;
++
++static int mm_stat_ext_cache_stats_show(struct seq_file *m, void *v)
++{
++	seq_printf(m, "get_hits      %lu\n",
++		   atomic_long_read(&mm_stat_ext_cache_get_hits));
++	seq_printf(m, "get_misses    %lu\n",
++		   atomic_long_read(&mm_stat_ext_cache_get_misses));
++	seq_printf(m, "put_stores    %lu\n",
++		   atomic_long_read(&mm_stat_ext_cache_put_stores));
++	seq_printf(m, "put_overflows %lu\n",
++		   atomic_long_read(&mm_stat_ext_cache_put_overflows));
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(mm_stat_ext_cache_stats);
++
++static int __init mm_stat_ext_cache_stats_init(void)
++{
++	debugfs_create_file("mm_pcpu_cache", 0444, NULL, NULL,
++			    &mm_stat_ext_cache_stats_fops);
++	return 0;
++}
++late_initcall(mm_stat_ext_cache_stats_init);
++
++static inline void mm_stat_ext_cache_hit(void)
++{
++	atomic_long_inc(&mm_stat_ext_cache_get_hits);
++}
++
++static inline void mm_stat_ext_cache_miss(void)
++{
++	atomic_long_inc(&mm_stat_ext_cache_get_misses);
++}
++
++static inline void mm_stat_ext_cache_store(void)
++{
++	atomic_long_inc(&mm_stat_ext_cache_put_stores);
++}
++
++static inline void mm_stat_ext_cache_overflow(void)
++{
++	atomic_long_inc(&mm_stat_ext_cache_put_overflows);
++}
++#else
++static inline void mm_stat_ext_cache_hit(void) { }
++static inline void mm_stat_ext_cache_miss(void) { }
++static inline void mm_stat_ext_cache_store(void) { }
++static inline void mm_stat_ext_cache_overflow(void) { }
++#endif
++
++/*
++ * Try to get a cached mm_stat_ext from the local CPU's cache.
++ * Returns true on cache hit (ext is filled with cached data),
++ * false on cache miss (caller must fall back to alloc_percpu).
++ */
++static bool mm_stat_ext_cache_get(struct mm_stat_ext *ext)
++{
++	struct mm_stat_ext_cache *cache;
++
++	preempt_disable();
++	cache = this_cpu_ptr(&mm_stat_ext_free);
++	if (cache->count > 0) {
++		*ext = cache->entries[--cache->count];
++		preempt_enable();
++		mm_stat_ext_cache_hit();
++		return true;
++	}
++	preempt_enable();
++	mm_stat_ext_cache_miss();
++	return false;
++}
++
++/*
++ * Return mm_stat_ext percpu data to the local CPU's cache.
++ * If the local cache is full, free the percpu data via free_percpu.
++ */
++static void mm_stat_ext_cache_put(struct mm_stat_ext *ext)
++{
++	struct mm_stat_ext_cache *cache;
++
++	preempt_disable();
++	cache = this_cpu_ptr(&mm_stat_ext_free);
++	if (cache->count < MM_STAT_EXT_CACHE_MAX) {
++		cache->entries[cache->count++] = *ext;
++		preempt_enable();
++		mm_stat_ext_cache_store();
++		return;
++	}
++	preempt_enable();
++	mm_stat_ext_cache_overflow();
++
++#ifdef CONFIG_SCHED_MM_CID
++	free_percpu(ext->mm_cid_pcpu);
++#endif
++#ifdef CONFIG_SMP
++	free_percpu(ext->rss_counters);
++#endif
++}
++
++static void __init mm_stat_ext_cache_init(void)
++{
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		per_cpu(mm_stat_ext_free, cpu).count = 0;
++}
++
++static bool mm_stat_ext_cached(const struct mm_struct *mm)
++{
++#ifdef CONFIG_SMP
++	if (mm->stat_ext.rss_counters)
++		return true;
++#endif
++#ifdef CONFIG_SCHED_MM_CID
++	if (mm->stat_ext.mm_cid_pcpu)
++		return true;
++#endif
++	return false;
++}
++
+ static void account_kernel_stack(struct task_struct *tsk, int account)
+ {
+ 	if (IS_ENABLED(CONFIG_VMAP_STACK)) {
+@@ -870,8 +1020,19 @@ void __mmdrop(struct mm_struct *mm)
+ 	check_mm(mm);
+ 	put_user_ns(mm->user_ns);
+ 	mm_pasid_drop(mm);
+-	mm_destroy_cid(mm);
+-	percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
++
++	if (mm_stat_ext_cached(mm)) {
++#ifdef CONFIG_SMP
++		percpu_counter_detach_many(mm->rss_stat, NR_MM_COUNTERS);
++#endif
++#ifdef CONFIG_SCHED_MM_CID
++		mm->mm_cid.pcpu = NULL;
++#endif
++		mm_stat_ext_cache_put(&mm->stat_ext);
++	} else {
++		mm_destroy_cid(mm);
++		percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
++	}
+ 
+ 	free_mm(mm);
+ }
+@@ -1225,6 +1386,10 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
++	mm->stat_ext.rss_counters = NULL;
++#ifdef CONFIG_SCHED_MM_CID
++	mm->stat_ext.mm_cid_pcpu = NULL;
++#endif
+ 	spin_lock_init(&mm->page_table_lock);
+ 	spin_lock_init(&mm->arg_lock);
+ 	mm_init_cpumask(mm);
+@@ -1263,12 +1428,33 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	if (init_new_context(p, mm))
+ 		goto fail_nocontext;
+ 
+-	if (mm_alloc_cid(mm, p))
+-		goto fail_cid;
++	if (mm_stat_ext_cache_get(&mm->stat_ext)) {
++		percpu_counter_init_many_cached(mm->rss_stat, 0,
++						mm->stat_ext.rss_counters,
++						NR_MM_COUNTERS);
++#ifdef CONFIG_SCHED_MM_CID
++		mm->mm_cid.pcpu = mm->stat_ext.mm_cid_pcpu;
++		{
++			int cpu;
+ 
+-	if (percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
+-				     NR_MM_COUNTERS))
+-		goto fail_pcpu;
++			for_each_possible_cpu(cpu)
++				per_cpu_ptr(mm->mm_cid.pcpu, cpu)->cid = 0;
++		}
++#endif
++		mm_init_cid(mm, p);
++	} else {
++		if (mm_alloc_cid(mm, p))
++			goto fail_cid;
++		if (percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
++					     NR_MM_COUNTERS))
++			goto fail_pcpu;
++#ifdef CONFIG_SMP
++		mm->stat_ext.rss_counters = mm->rss_stat[0].counters;
++#endif
++#ifdef CONFIG_SCHED_MM_CID
++		mm->stat_ext.mm_cid_pcpu = mm->mm_cid.pcpu;
++#endif
++	}
+ 
+ 	mm->user_ns = get_user_ns(user_ns);
+ 	lru_gen_init_mm(mm);
+@@ -3218,6 +3404,7 @@ void __init mm_cache_init(void)
+ 			offsetof(struct mm_struct, saved_auxv),
+ 			sizeof_field(struct mm_struct, saved_auxv),
+ 			NULL);
++	mm_stat_ext_cache_init();
+ }
+ 
+ void __init proc_caches_init(void)
+-- 
+2.43.0
+

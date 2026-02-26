@@ -1,0 +1,205 @@
+From 28c7bf63184082c28d910b3a5d2193e6dfa28f47 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 11:16:17 +0800
+Subject: [PATCH 08/27] fork: convert global nr_threads/total_forks to
+ atomic_long_t
+
+Phase 2 prep (commit #8 of the per-NUMA-domain task list series).
+The global nr_threads / total_forks counters were historically
+protected by write_lock_irq(&tasklist_lock).  Convert them to
+atomic_long_t so that fork()/exit() no longer depend on tasklist_lock
+for these counter mutations.  Update the small set of readers
+(/proc/loadavg, /proc/stat, sysinfo, kdb, the fork-bomb throttle in
+copy_process()) to use atomic_long_read().
+
+Also use READ_ONCE() for the cross-process has_child_subreaper /
+is_child_subreaper reads in copy_process(): the parent is current or
+current->real_parent and cannot go away during fork, so a relaxed
+read is sufficient and removes another tasklist_lock dependency.
+
+No behavioural change in this commit: the increments/decrements stay
+inside the existing tasklist_lock window.  This is a pure preparation
+step for the later commit that will drop the tasklist_lock write hold
+from copy_process() / release_task() entirely.
+---
+ fs/proc/loadavg.c           |  4 ++--
+ fs/proc/stat.c              |  2 +-
+ include/linux/sched/stat.h  | 11 +++++++++--
+ kernel/debug/kdb/kdb_main.c |  2 +-
+ kernel/exit.c               |  2 +-
+ kernel/fork.c               | 34 ++++++++++++++++++++++++++--------
+ kernel/sys.c                |  2 +-
+ 7 files changed, 41 insertions(+), 16 deletions(-)
+
+diff --git a/fs/proc/loadavg.c b/fs/proc/loadavg.c
+index 817981e57223..49bd9cd3a9c5 100644
+--- a/fs/proc/loadavg.c
++++ b/fs/proc/loadavg.c
+@@ -17,11 +17,11 @@ static int loadavg_proc_show(struct seq_file *m, void *v)
+ 
+ 	get_avenrun(avnrun, FIXED_1/200, 0);
+ 
+-	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %u/%d %d\n",
++	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %u/%ld %d\n",
+ 		LOAD_INT(avnrun[0]), LOAD_FRAC(avnrun[0]),
+ 		LOAD_INT(avnrun[1]), LOAD_FRAC(avnrun[1]),
+ 		LOAD_INT(avnrun[2]), LOAD_FRAC(avnrun[2]),
+-		nr_running(), nr_threads,
++		nr_running(), atomic_long_read(&nr_threads),
+ 		idr_get_cursor(&task_active_pid_ns(current)->idr) - 1);
+ 	return 0;
+ }
+diff --git a/fs/proc/stat.c b/fs/proc/stat.c
+index 8b444e862319..dbe1f68cf12f 100644
+--- a/fs/proc/stat.c
++++ b/fs/proc/stat.c
+@@ -178,7 +178,7 @@ static int show_stat(struct seq_file *p, void *v)
+ 		"procs_blocked %u\n",
+ 		nr_context_switches(),
+ 		(unsigned long long)boottime.tv_sec,
+-		total_forks,
++		(unsigned long)atomic_long_read(&total_forks),
+ 		nr_running(),
+ 		nr_iowait());
+ 
+diff --git a/include/linux/sched/stat.h b/include/linux/sched/stat.h
+index 0108a38bb64d..f40ab8a0e92b 100644
+--- a/include/linux/sched/stat.h
++++ b/include/linux/sched/stat.h
+@@ -2,6 +2,7 @@
+ #ifndef _LINUX_SCHED_STAT_H
+ #define _LINUX_SCHED_STAT_H
+ 
++#include <linux/atomic.h>
+ #include <linux/percpu.h>
+ #include <linux/kconfig.h>
+ 
+@@ -11,10 +12,16 @@
+  *
+  * ( Note that all these values are acquired without locking,
+  *   so they can only be relied on in narrow circumstances. )
++ *
++ * total_forks/nr_threads were historically protected by
++ * write_lock_irq(&tasklist_lock); they are now atomic_long_t so that
++ * fork()/exit() do not depend on the global tasklist_lock for these
++ * counters.  Readers (/proc/loadavg, /proc/stat, sysinfo, ...) only
++ * want a coarse value, so a relaxed atomic read is sufficient.
+  */
+ 
+-extern unsigned long total_forks;
+-extern int nr_threads;
++extern atomic_long_t total_forks;
++extern atomic_long_t nr_threads;
+ DECLARE_PER_CPU(unsigned long, process_counts);
+ extern int nr_processes(void);
+ extern unsigned int nr_running(void);
+diff --git a/kernel/debug/kdb/kdb_main.c b/kernel/debug/kdb/kdb_main.c
+index ddce56b47b25..95ea78d7bc69 100644
+--- a/kernel/debug/kdb/kdb_main.c
++++ b/kernel/debug/kdb/kdb_main.c
+@@ -2371,7 +2371,7 @@ static void kdb_sysinfo(struct sysinfo *val)
+ 	val->loads[0] = avenrun[0];
+ 	val->loads[1] = avenrun[1];
+ 	val->loads[2] = avenrun[2];
+-	val->procs = nr_threads-1;
++	val->procs = atomic_long_read(&nr_threads) - 1;
+ 	si_meminfo(val);
+ 
+ 	return;
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 8d52754eee2a..a12d2ed40504 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -136,7 +136,7 @@ static void __unhash_process(struct release_task_post *post, struct task_struct
+ {
+ 	struct pid *pid = task_pid(p);
+ 
+-	nr_threads--;
++	atomic_long_dec(&nr_threads);
+ 
+ 	detach_pid(post->pids, p, PIDTYPE_PID);
+ 	wake_up_all(&pid->wait_pidfd);
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 9d62ced5dbce..99beb84c5695 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -136,10 +136,17 @@
+ #define MAX_THREADS FUTEX_TID_MASK
+ 
+ /*
+- * Protected counters by write_lock_irq(&tasklist_lock)
++ * Global fork/thread counters.
++ *
++ * Historically these were protected by write_lock_irq(&tasklist_lock);
++ * they are now atomic_long_t so that fork()/exit() do not depend on
++ * the global tasklist_lock for these counters.  Readers (/proc/loadavg,
++ * /proc/stat, sysinfo, kdb) only want a coarse value, so a relaxed
++ * atomic read is sufficient.  This is a Phase 2 prerequisite for
++ * dropping tasklist_lock from copy_process()/release_task().
+  */
+-unsigned long total_forks;	/* Handle normal Linux uptimes. */
+-int nr_threads;			/* The idle threads do not count.. */
++atomic_long_t total_forks;	/* Handle normal Linux uptimes. */
++atomic_long_t nr_threads;	/* The idle threads do not count.. */
+ 
+ static int max_threads;		/* tunable limit on nr_threads */
+ 
+@@ -2234,7 +2241,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	 * to stop root fork bombs.
+ 	 */
+ 	retval = -EAGAIN;
+-	if (data_race(nr_threads >= max_threads))
++	if (atomic_long_read(&nr_threads) >= max_threads)
+ 		goto bad_fork_cleanup_count;
+ 
+ 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
+@@ -2579,8 +2586,19 @@ __latent_entropy struct task_struct *copy_process(
+ 			 * tasklist_lock with adding child to the process tree
+ 			 * for propagate_has_child_subreaper optimization.
+ 			 */
+-			p->signal->has_child_subreaper = p->real_parent->signal->has_child_subreaper ||
+-							 p->real_parent->signal->is_child_subreaper;
++			/*
++			 * Cross-process read of parent->signal bit-fields.
++			 * Parent is current or current->real_parent and cannot
++			 * go away during fork.  These are 1-bit booleans:
++			 * tearing is impossible and a stale value only delays
++			 * subreaper inheritance by one fork, which is benign.
++			 * Plain reads here remove the dependency on
++			 * tasklist_lock; READ_ONCE/data_race cannot be applied
++			 * to bit-fields.
++			 */
++			p->signal->has_child_subreaper =
++				p->real_parent->signal->has_child_subreaper ||
++				p->real_parent->signal->is_child_subreaper;
+ 			list_add_tail(&p->sibling, &p->real_parent->children);
+ 			list_add_tail_rcu(&p->tasks, &task_domains[nid]->tasks);
+ 			task_domains[nid]->nr_tasks++;
+@@ -2598,9 +2616,9 @@ __latent_entropy struct task_struct *copy_process(
+ 					  &p->signal->thread_head);
+ 		}
+ 		attach_pid(p, PIDTYPE_PID);
+-		nr_threads++;
++		atomic_long_inc(&nr_threads);
+ 	}
+-	total_forks++;
++	atomic_long_inc(&total_forks);
+ 	hlist_del_init(&delayed.node);
+ 	spin_unlock(&current->sighand->siglock);
+ 	syscall_tracepoint_update(p);
+diff --git a/kernel/sys.c b/kernel/sys.c
+index c86eba9aa7e9..80f28f60cbb2 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2941,7 +2941,7 @@ static int do_sysinfo(struct sysinfo *info)
+ 
+ 	get_avenrun(info->loads, 0, SI_LOAD_SHIFT - FSHIFT);
+ 
+-	info->procs = nr_threads;
++	info->procs = atomic_long_read(&nr_threads);
+ 
+ 	si_meminfo(info);
+ 	si_swapinfo(info);
+-- 
+2.43.0
+

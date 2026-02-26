@@ -1,0 +1,120 @@
+From 2388534e8d390d36a0bf1535d6d62b42ce7b15a5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 14:54:30 +0800
+Subject: [PATCH 04/27] sched: link process leaders into per-NUMA-domain task
+ list shards
+
+Switch the fork/exit fast path and the next_task() iterator to use
+the per-NUMA-domain shards introduced in the previous commits.  This
+is the behavioural switch-over: the global init_task.tasks list is
+no longer used as the link target for new process leaders, and
+for_each_process() now walks task_domains[] instead.
+
+Changes:
+
+  - copy_process(): list_add_tail_rcu() now targets
+    task_domains[p->task_domain_nid]->tasks, and the shard's
+    nr_tasks counter is bumped.  The link is still performed under
+    the existing tasklist_lock write-side; per-shard locking is
+    introduced in a later commit.
+
+  - __unhash_process(): list_del_rcu() unconditionally walks the
+    same shard via p->task_domain_nid (recorded at fork time and
+    never changed), and decrements nr_tasks.
+
+  - next_task(): walks the shards in ascending node-id order using
+    p->task_domain_nid to identify the current shard, hopping to
+    the next online node when a shard is exhausted.  &init_task is
+    used as both the start sentinel ("begin from first online
+    node") and the end sentinel ("no more shards").  init_task is
+    deliberately never linked into any shard, so for_each_process()
+    still does not visit pid 0, matching the historic semantics.
+
+This commit must land together with the previous next_task()
+helper conversion: between the two there is no point at which
+for_each_process() returns a stale view of the system.
+
+No locking change yet -- fork/exit still serialise on tasklist_lock.
+The fast-path scalability win comes in a subsequent commit that
+introduces the per-shard locks and reduces the tasklist_lock hold
+window to the cross-process relationship-graph statements only.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/exit.c |  1 +
+ kernel/fork.c | 40 ++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index ede3117fa7d4..e1971d2de9e3 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -147,6 +147,7 @@ static void __unhash_process(struct release_task_post *post, struct task_struct
+ 		detach_pid(post->pids, p, PIDTYPE_SID);
+ 
+ 		list_del_rcu(&p->tasks);
++		task_domains[p->task_domain_nid]->nr_tasks--;
+ 		list_del_init(&p->sibling);
+ 		__this_cpu_dec(process_counts);
+ 	}
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 2fee705057b8..fbab14caa953 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -185,7 +185,41 @@ EXPORT_SYMBOL_GPL(task_domains);
+  */
+ struct task_struct *next_task(struct task_struct *p)
+ {
+-	return list_entry_rcu(p->tasks.next, struct task_struct, tasks);
++	struct list_head *next;
++	int nid;
++
++	/*
++	 * Iteration start: the caller passes &init_task to mean "begin
++	 * walking from the first online NUMA-domain shard".  init_task
++	 * itself is intentionally NEVER linked into any shard, so we
++	 * cannot use its tasks.next; jump straight to the head of the
++	 * first online node's shard.
++	 */
++	if (p == &init_task) {
++		nid = first_online_node;
++		if (nid >= MAX_NUMNODES)
++			return &init_task;	/* no online nodes -> end */
++		next = rcu_dereference(task_domains[nid]->tasks.next);
++	} else {
++		nid = READ_ONCE(p->task_domain_nid);
++		next = rcu_dereference(p->tasks.next);
++	}
++
++	/*
++	 * Walk forward, hopping to the next online node's shard whenever
++	 * we hit the end of the current shard.  An empty shard is fine:
++	 * its head's .next is the head itself, so we just hop again.
++	 * When no further online node has any process leader, fall back
++	 * to &init_task to signal end-of-list.
++	 */
++	while (next == &task_domains[nid]->tasks) {
++		nid = next_online_node(nid);
++		if (nid >= MAX_NUMNODES)
++			return &init_task;	/* end sentinel */
++		next = rcu_dereference(task_domains[nid]->tasks.next);
++	}
++
++	return list_entry(next, struct task_struct, tasks);
+ }
+ EXPORT_SYMBOL_GPL(next_task);
+ 
+@@ -2509,7 +2543,9 @@ __latent_entropy struct task_struct *copy_process(
+ 			 * per-shard task list instead of init_task.tasks.
+ 			 */
+ 			p->task_domain_nid = cpu_to_node(task_cpu(p));
+-			list_add_tail_rcu(&p->tasks, &init_task.tasks);
++			list_add_tail_rcu(&p->tasks,
++					  &task_domains[p->task_domain_nid]->tasks);
++			task_domains[p->task_domain_nid]->nr_tasks++;
+ 			attach_pid(p, PIDTYPE_TGID);
+ 			attach_pid(p, PIDTYPE_PGID);
+ 			attach_pid(p, PIDTYPE_SID);
+-- 
+2.43.0
+

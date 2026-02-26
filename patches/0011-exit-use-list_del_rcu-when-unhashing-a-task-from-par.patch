@@ -1,0 +1,54 @@
+From 1b6ba2bc4f00d2b31493a620a53c72584587750e Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 14:51:54 +0800
+Subject: [PATCH 11/27] exit: use list_del_rcu() when unhashing a task from
+ parent->children
+
+Completes the writer-side conversion of the task ->children list that
+started in the previous commit (fork/de_thread).  __unhash_process() is
+the last remaining writer still using the non-RCU list_del_init(), and
+it must switch to list_del_rcu() before any reader can be moved to a
+pure RCU read side in a follow-up commit.
+
+list_del_rcu() leaves the node's ->next pointer intact so that an
+in-flight RCU traversal started before the deletion can finish walking
+safely; ->prev is poisoned, which is fine because no reader walks
+backwards.  All current non-RCU readers (do_wait_thread,
+forget_original_parent, walk_process_tree, fs/proc children_seq) still
+run under tasklist_lock, so they never observe the transient state:
+__unhash_process() holds tasklist_lock write, and the delete is paired
+with the matching writer-side release that the earlier commit already
+put in place on the add path.
+
+The only caller that looked like it depended on the list_del_init()
+sentinel -- fs/proc/array.c:get_children_pid() checking
+!list_empty(&task->sibling) on a fast-path continuation -- is safe in
+practice because __unhash_process() detaches PIDTYPE_PID before
+list_del, so pid_task(pid_prev, PIDTYPE_PID) returns NULL and the
+list_empty() check is unreachable for a released task.  Zombies that
+are still attached to their parent's ->children are unaffected.
+
+No functional change for current readers; this is pure preparation for
+the RCU reader conversion in the next commit.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/exit.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index a12d2ed40504..9e01e013977d 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -148,7 +148,7 @@ static void __unhash_process(struct release_task_post *post, struct task_struct
+ 
+ 		list_del_rcu(&p->tasks);
+ 		task_domains[p->task_domain_nid]->nr_tasks--;
+-		list_del_init(&p->sibling);
++		list_del_rcu(&p->sibling);
+ 		__this_cpu_dec(process_counts);
+ 	}
+ 	list_del_rcu(&p->thread_node);
+-- 
+2.43.0
+

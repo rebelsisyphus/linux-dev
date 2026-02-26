@@ -1,0 +1,98 @@
+From 54b854a03b80d5562734280b2d06d84bc4a9a8ab Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 16:04:39 +0800
+Subject: [PATCH 18/27] fork,exit,exec: layer task_lock(real_parent) under
+ children list writers
+
+Take task_lock(real_parent) around list_add_tail_rcu /
+list_del_rcu / list_replace_rcu on the real_parent->children list
+in copy_process(), __unhash_process() and de_thread().
+
+All three sites still run under write_lock_irq(tasklist_lock), so
+this is a pure additive change that does not replace any existing
+serialization.  The purpose is to give real_parent->children a
+dedicated writer mutex independent of tasklist_lock, so that a
+later commit can drop the tasklist_lock write-side dependency as
+part of the per-NUMA tasklist sharding effort.
+
+forget_original_parent()'s list_splice-based reparenting is not
+converted here; it will keep relying on tasklist_lock until a
+follow-up commit rewrites it as a per-entry list_move under the
+per-parent task_lock on both sides.
+
+Lock order extension: tasklist_lock(write) -> task_lock(parent)
+-> pid->lock -> sighand->siglock.  task_lock is already the inner
+writer mutex used by ptrace_link/unlink, so no new ordering.
+
+Signed-off-by: NUMA tasklist sharding <dev@localhost>
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/exec.c     | 8 ++++++++
+ kernel/exit.c | 8 ++++++++
+ kernel/fork.c | 8 ++++++++
+ 3 files changed, 24 insertions(+)
+
+diff --git a/fs/exec.c b/fs/exec.c
+index d4354304fa67..aebac2884b82 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -990,8 +990,16 @@ static int de_thread(struct task_struct *tsk)
+ 		transfer_pid(leader, tsk, PIDTYPE_SID);
+ 
+ 		list_replace_rcu(&leader->tasks, &tsk->tasks);
++		/*
++		 * task_lock(real_parent) serializes concurrent writers of
++		 * real_parent->children independently of tasklist_lock.
++		 * leader and tsk share the same real_parent (same thread
++		 * group).  Layered under the tasklist_lock write-side.
++		 */
++		task_lock(leader->real_parent);
+ 		list_replace_rcu(&leader->sibling, &tsk->sibling);
+ 		INIT_LIST_HEAD(&leader->sibling);
++		task_unlock(leader->real_parent);
+ 
+ 		tsk->group_leader = tsk;
+ 		leader->group_leader = tsk;
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 12397d966498..f0c99c486aae 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -148,7 +148,15 @@ static void __unhash_process(struct release_task_post *post, struct task_struct
+ 
+ 		list_del_rcu(&p->tasks);
+ 		task_domains[p->task_domain_nid]->nr_tasks--;
++		/*
++		 * task_lock(real_parent) pairs with copy_process() and
++		 * serializes concurrent writers of real_parent->children
++		 * independently of tasklist_lock.  Layered under the
++		 * tasklist_lock write-side for now.
++		 */
++		task_lock(p->real_parent);
+ 		list_del_rcu(&p->sibling);
++		task_unlock(p->real_parent);
+ 		__this_cpu_dec(process_counts);
+ 	}
+ 	list_del_rcu(&p->thread_node);
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 2b23e8989841..8d6ec3011edb 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2612,7 +2612,15 @@ __latent_entropy struct task_struct *copy_process(
+ 			p->signal->has_child_subreaper =
+ 				p->real_parent->signal->has_child_subreaper ||
+ 				p->real_parent->signal->is_child_subreaper;
++			/*
++			 * task_lock(real_parent) serializes concurrent writers
++			 * of real_parent->children independently of tasklist_lock.
++			 * Layered under tasklist_lock write for now; a later
++			 * commit will drop the outer lock dependency.
++			 */
++			task_lock(p->real_parent);
+ 			list_add_tail_rcu(&p->sibling, &p->real_parent->children);
++			task_unlock(p->real_parent);
+ 			list_add_tail_rcu(&p->tasks, &task_domains[nid]->tasks);
+ 			task_domains[nid]->nr_tasks++;
+ 			attach_pid(p, PIDTYPE_TGID);
+-- 
+2.43.0
+

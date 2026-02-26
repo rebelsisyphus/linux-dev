@@ -1,0 +1,106 @@
+From c21bb790e5d483b66d27d622eaf530dd37564a83 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 17 Apr 2026 10:57:56 +0800
+Subject: [PATCH 1/3] bpf: Add BPF_PROG_TYPE_RPS program type and uapi
+ definitions
+
+Add BPF_PROG_TYPE_RPS program type for custom Receive Packet Steering
+decisions via BPF. The RPS BPF program receives a context with flow
+hash, device ifindex, rx queue index and current CPU, and returns a
+CPU number to steer the packet to (or negative to skip steering).
+
+Add BPF_RPS and BPF_RFS_RECORD attach types, BPF_LINK_TYPE_RPS link
+type, struct bpf_rps_ctx context and struct bpf_link_info.rps field.
+
+This allows implementing custom CPU selection policies for packet
+steering without depending on CONFIG_RPS, replacing the inflexible
+rps_map mask-based configuration with programmable BPF logic.
+---
+ include/linux/bpf_types.h |  3 +++
+ include/uapi/linux/bpf.h  | 21 +++++++++++++++++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/include/linux/bpf_types.h b/include/linux/bpf_types.h
+index b13de31e163f..450ce4a6197e 100644
+--- a/include/linux/bpf_types.h
++++ b/include/linux/bpf_types.h
+@@ -83,6 +83,8 @@ BPF_PROG_TYPE(BPF_PROG_TYPE_SYSCALL, bpf_syscall,
+ BPF_PROG_TYPE(BPF_PROG_TYPE_NETFILTER, netfilter,
+ 	      struct bpf_nf_ctx, struct bpf_nf_ctx)
+ #endif
++BPF_PROG_TYPE(BPF_PROG_TYPE_RPS, rps,
++	      struct bpf_rps_ctx, struct bpf_rps_ctx)
+ 
+ BPF_MAP_TYPE(BPF_MAP_TYPE_ARRAY, array_map_ops)
+ BPF_MAP_TYPE(BPF_MAP_TYPE_PERCPU_ARRAY, percpu_array_map_ops)
+@@ -148,6 +150,7 @@ BPF_LINK_TYPE(BPF_LINK_TYPE_NETFILTER, netfilter)
+ BPF_LINK_TYPE(BPF_LINK_TYPE_TCX, tcx)
+ BPF_LINK_TYPE(BPF_LINK_TYPE_NETKIT, netkit)
+ BPF_LINK_TYPE(BPF_LINK_TYPE_SOCKMAP, sockmap)
++BPF_LINK_TYPE(BPF_LINK_TYPE_RPS, rps)
+ #endif
+ #ifdef CONFIG_PERF_EVENTS
+ BPF_LINK_TYPE(BPF_LINK_TYPE_PERF_EVENT, perf)
+diff --git a/include/uapi/linux/bpf.h b/include/uapi/linux/bpf.h
+index c8d400b7680a..f06ae59b5055 100644
+--- a/include/uapi/linux/bpf.h
++++ b/include/uapi/linux/bpf.h
+@@ -1091,6 +1091,7 @@ enum bpf_prog_type {
+ 	BPF_PROG_TYPE_SK_LOOKUP,
+ 	BPF_PROG_TYPE_SYSCALL, /* a program that can execute syscalls */
+ 	BPF_PROG_TYPE_NETFILTER,
++	BPF_PROG_TYPE_RPS,
+ 	__MAX_BPF_PROG_TYPE
+ };
+ 
+@@ -1154,6 +1155,8 @@ enum bpf_attach_type {
+ 	BPF_TRACE_KPROBE_SESSION,
+ 	BPF_TRACE_UPROBE_SESSION,
+ 	BPF_TRACE_FSESSION,
++	BPF_RPS,
++	BPF_RFS_RECORD,
+ 	__MAX_BPF_ATTACH_TYPE
+ };
+ 
+@@ -1178,6 +1181,7 @@ enum bpf_link_type {
+ 	BPF_LINK_TYPE_UPROBE_MULTI = 12,
+ 	BPF_LINK_TYPE_NETKIT = 13,
+ 	BPF_LINK_TYPE_SOCKMAP = 14,
++	BPF_LINK_TYPE_RPS = 15,
+ 	__MAX_BPF_LINK_TYPE,
+ };
+ 
+@@ -6852,6 +6856,9 @@ struct bpf_link_info {
+ 			__u32 map_id;
+ 			__u32 attach_type;
+ 		} sockmap;
++		struct {
++			__u32 ifindex;
++		} rps;
+ 	};
+ } __attribute__((aligned(8)));
+ 
+@@ -7547,6 +7554,20 @@ struct bpf_sk_lookup {
+ 	__u32 ingress_ifindex;		/* The arriving interface. Determined by inet_iif. */
+ };
+ 
++/* User accessible context for RPS prog type.
++ * RPS BPF programs are invoked at packet receive path to make
++ * CPU steering decisions. The program returns a CPU number (>= 0)
++ * to steer the packet to, or a negative value to skip steering
++ * and fall through to the native RPS/default processing.
++ * New fields must be added at the end of this structure.
++ */
++struct bpf_rps_ctx {
++	__u32 hash;		/* Flow hash from skb */
++	__u32 ifindex;		/* Device ifindex */
++	__u32 rx_queue_index;	/* RX queue index */
++	__u32 cpu;		/* Current CPU (smp_processor_id()) */
++};
++
+ /*
+  * struct btf_ptr is used for typed pointer representation; the
+  * type id is used to render the pointer data as the appropriate type
+-- 
+2.43.0
+

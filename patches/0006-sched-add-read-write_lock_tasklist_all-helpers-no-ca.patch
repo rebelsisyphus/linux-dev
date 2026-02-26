@@ -1,0 +1,121 @@
+From c375de9a7b35ae65dbe90f152cc4be724d4bfa91 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 16:58:16 +0800
+Subject: [PATCH 06/27] sched: add read/write_lock_tasklist_all() helpers (no
+ callers yet)
+
+Introduce four static inline helpers that take or release every
+NUMA-domain shard's lock plus the inner tasklist_lock, in the
+established acquisition order (shards 0..N-1, then tasklist_lock,
+release in reverse).
+
+These are intended for the cold-path callers that genuinely need a
+globally consistent snapshot of the entire process list -- oom kill
+scan, sysrq-t, kdb backtrace, full /proc walk, coredump enumeration,
+etc.  By going through the per-shard locks they will, once migrated,
+serialise correctly against the per-fork shard locking introduced in
+the previous commit, instead of relying on the global tasklist_lock
+alone.
+
+This commit only adds the API.  No caller is migrated; existing
+cold-path callers continue to use plain read_lock(&tasklist_lock) /
+write_lock(&tasklist_lock).  The migration is intentionally split
+out so each converted caller can be reviewed and lockdep-validated
+on its own; in particular, lockdep nesting annotations will need to
+be added for any caller that takes the shard locks in a loop, since
+nr_node_ids may exceed MAX_LOCKDEP_SUBCLASSES on big NUMA boxes.
+
+Because there are no callers in this commit, the helpers are not
+instantiated and the change is a pure header-only API addition with
+zero behavioural impact.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/sched/task.h | 71 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 71 insertions(+)
+
+diff --git a/include/linux/sched/task.h b/include/linux/sched/task.h
+index 6e5178549d08..6f3912f4911e 100644
+--- a/include/linux/sched/task.h
++++ b/include/linux/sched/task.h
+@@ -126,6 +126,77 @@ static inline void write_unlock_irq_task_domain(int nid)
+ 	write_unlock_irq(&task_domains[nid]->lock);
+ }
+ 
++/*
++ * "Take every shard's lock plus tasklist_lock" helpers, for the cold-
++ * path callers that genuinely need a globally consistent snapshot of
++ * the entire process list (oom kill scan, sysrq-t, kdb backtrace,
++ * full /proc walk, coredump enumeration, ...).
++ *
++ * Acquisition order is fixed: shard 0, shard 1, ..., shard N-1, then
++ * tasklist_lock.  Release in reverse.  This matches the per-fork
++ * locking discipline (shard -> tasklist_lock -> siglock) used by
++ * copy_process()/release_task(), so the two never deadlock against
++ * each other.
++ *
++ * Phase 1 NOTE: introduced as a public API only.  No caller is
++ * migrated to use these in this commit -- existing cold-path
++ * callers continue to use plain read_lock(&tasklist_lock) /
++ * write_lock(&tasklist_lock), which still works because those
++ * callers do not need per-shard exclusion against fork/exit on
++ * other nodes.  A subsequent series will migrate the hot read-side
++ * cold paths (oom scan, signal broadcast, /proc walk) to these
++ * helpers, at which point lockdep nesting annotations will need to
++ * be added (see lockdep_set_class_and_subclass below).
++ *
++ * Lockdep nesting: nr_node_ids may exceed MAX_LOCKDEP_SUBCLASSES (8)
++ * on big NUMA boxes, so we cannot rely on _nested subclass numbering.
++ * For Phase 1 the helpers below are unused; when first migrated, the
++ * caller should either use lockdep_off()/lockdep_on() around the loop
++ * (acceptable for slow oom path) or arrange for each shard's lock to
++ * have a distinct lock class allocated at init_task_domains() time.
++ */
++static inline void read_lock_tasklist_all(void)
++{
++	int nid;
++
++	/*
++	 * init_task_domains() allocates a slot for every possible node,
++	 * so iterating [0, nr_node_ids) is safe whether the node is
++	 * online or not.  Acquire in ascending nid order, then the
++	 * inner tasklist_lock, matching copy_process()/release_task().
++	 */
++	for (nid = 0; nid < nr_node_ids; nid++)
++		read_lock(&task_domains[nid]->lock);
++	read_lock(&tasklist_lock);
++}
++
++static inline void read_unlock_tasklist_all(void)
++{
++	int nid;
++
++	read_unlock(&tasklist_lock);
++	for (nid = nr_node_ids - 1; nid >= 0; nid--)
++		read_unlock(&task_domains[nid]->lock);
++}
++
++static inline void write_lock_tasklist_all(void)
++{
++	int nid;
++
++	for (nid = 0; nid < nr_node_ids; nid++)
++		write_lock(&task_domains[nid]->lock);
++	write_lock(&tasklist_lock);
++}
++
++static inline void write_unlock_tasklist_all(void)
++{
++	int nid;
++
++	write_unlock(&tasklist_lock);
++	for (nid = nr_node_ids - 1; nid >= 0; nid--)
++		write_unlock(&task_domains[nid]->lock);
++}
++
+ extern union thread_union init_thread_union;
+ extern struct task_struct init_task;
+ 
+-- 
+2.43.0
+

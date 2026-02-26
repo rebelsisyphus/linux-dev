@@ -1,0 +1,48 @@
+From 575bcc283155916176b35cf3ba6f4d183a70e6ea Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 15:31:54 +0800
+Subject: [PATCH 13/27] exit: annotate do_wait children/ptraced traversals as
+ RCU
+
+Switch the two hot do_wait() traversals to list_for_each_entry_rcu(),
+passing lockdep_is_held(&tasklist_lock) as the protection annotation.
+Both callers still run under read_lock(&tasklist_lock), and writers
+already publish with list_add_rcu() / list_del_rcu() (earlier commits),
+so this is a no-op change in behavior: the writer/reader pair is now
+consistently RCU-annotated, which is a prerequisite for dropping the
+tasklist_lock read side in a follow-up commit.
+
+No functional change.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/exit.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 9e01e013977d..12397d966498 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -1579,7 +1579,8 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
+ {
+ 	struct task_struct *p;
+ 
+-	list_for_each_entry(p, &tsk->children, sibling) {
++	list_for_each_entry_rcu(p, &tsk->children, sibling,
++				lockdep_is_held(&tasklist_lock)) {
+ 		int ret = wait_consider_task(wo, 0, p);
+ 
+ 		if (ret)
+@@ -1593,7 +1594,8 @@ static int ptrace_do_wait(struct wait_opts *wo, struct task_struct *tsk)
+ {
+ 	struct task_struct *p;
+ 
+-	list_for_each_entry(p, &tsk->ptraced, ptrace_entry) {
++	list_for_each_entry_rcu(p, &tsk->ptraced, ptrace_entry,
++				lockdep_is_held(&tasklist_lock)) {
+ 		int ret = wait_consider_task(wo, 1, p);
+ 
+ 		if (ret)
+-- 
+2.43.0
+

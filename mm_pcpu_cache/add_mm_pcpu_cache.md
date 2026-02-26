@@ -1,0 +1,14 @@
+1.目标场景
+spawn测试用例在4numa, 320核机器上并发执行时存在锁竞争，测试模型：fork, exit, wait
+1.1 tasklist_lock
+copy_process， release_task, do_wait持有tasklist_lock锁，导致严重锁竞争
+1.2 pcpu变量分配
+mm->rss_stat和mm_cid都是pcpu变量，在mm_init时分配pcpu变量时持有pcpu_alloc_mutex, pcpu_lock,导致竞争严重
+2.已经做的优化
+当前仓库最新的24个补丁，将tasklist替换为numa分片链表，将tasklist_lock拆分为numa级别，去除了tasklist_lock
+3.优化方向
+将rss_stat和mm_cid提取成一个单独结构体mm_stat_ext，在init_task初始化时，创建mm_stat_ext cache缓存池，每次alloc时直接从cache中取，不必重新分配和持锁，若cache不足，走原始分配流程
+由于rss_stat和mm_cid是pcpu变量，mm_struct会做memset,因此必须将这两个pcpu变量单独提取出来
+4.开发原则
+以优化spawn并发性能为第一原则，激进开发，不要回退
+不要破坏之前tasklist_lock的优化

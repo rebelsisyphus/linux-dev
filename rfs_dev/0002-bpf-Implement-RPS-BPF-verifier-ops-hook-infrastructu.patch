@@ -1,0 +1,613 @@
+From f8808bf1d2c763b6906bf7c84640ff48b469b827 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 17 Apr 2026 10:58:08 +0800
+Subject: [PATCH 2/3] bpf: Implement RPS BPF verifier ops, hook infrastructure
+ and link support
+
+Implement the RPS BPF program type with verifier ops (get_func_proto,
+is_valid_access, convert_ctx_access) and per-net_device bpf_link
+attachment via BPF_LINK_TYPE_RPS.
+
+Hook points are added at the three packet receive entry points
+(netif_rx_internal, netif_receive_skb_internal,
+netif_receive_skb_list_internal) and work independently of CONFIG_RPS.
+When a BPF RPS program returns a valid CPU, the packet is enqueued to
+that CPU's backlog via enqueue_to_backlog; otherwise the packet falls
+through to native RPS or default processing.
+
+Add BPF kfuncs for RPS programs:
+- bpf_rps_cpu_online(): check if a CPU is online
+- bpf_rps_input_queue_head(): read per-CPU input queue head (for
+  ordering guarantees when migrating flows between CPUs)
+- bpf_rps_num_possible_cpus(): get number of possible CPUs
+
+Store the RPS program pointer in net_device->rps_prog (RCU-protected)
+and gate the hot-path with rps_bpf_needed static key.
+---
+ include/linux/netdevice.h |   1 +
+ include/net/rps_bpf.h     |  43 +++++
+ kernel/bpf/syscall.c      |   4 +
+ net/core/Makefile         |   1 +
+ net/core/dev.c            |  39 +++-
+ net/core/rps_bpf.c        | 395 ++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 482 insertions(+), 1 deletion(-)
+ create mode 100644 include/net/rps_bpf.h
+ create mode 100644 net/core/rps_bpf.c
+
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index 7ca01eb3f7d2..b5e39fd480de 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -2165,6 +2165,7 @@ struct net_device {
+ 	/* RX read-mostly hotpath */
+ 	__cacheline_group_begin(net_device_read_rx);
+ 	struct bpf_prog __rcu	*xdp_prog;
++	struct bpf_prog __rcu	*rps_prog;
+ 	struct list_head	ptype_specific;
+ 	int			ifindex;
+ 	unsigned int		real_num_rx_queues;
+diff --git a/include/net/rps_bpf.h b/include/net/rps_bpf.h
+new file mode 100644
+index 000000000000..219c46d70b63
+--- /dev/null
++++ b/include/net/rps_bpf.h
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _NET_RPS_BPF_H
++#define _NET_RPS_BPF_H
++
++#include <linux/bpf.h>
++#include <linux/static_key.h>
++#include <uapi/linux/bpf.h>
++
++struct sk_buff;
++struct sock;
++struct net_device;
++
++#ifdef CONFIG_BPF_SYSCALL
++
++extern struct static_key_false rps_bpf_needed;
++extern struct static_key_false rfs_bpf_needed;
++
++int bpf_rps_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
++int rps_bpf_skb_steering(struct sk_buff *skb, int *cpu_out);
++void rfs_bpf_record_flow(const struct sock *sk);
++void rfs_bpf_record_flow_hash(__u32 hash);
++void rfs_bpf_delete_flow(const struct sock *sk);
++
++#else
++
++static inline int bpf_rps_link_attach(const union bpf_attr *attr,
++				      struct bpf_prog *prog)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int rps_bpf_skb_steering(struct sk_buff *skb, int *cpu_out)
++{
++	return -ENOENT;
++}
++
++static inline void rfs_bpf_record_flow(const struct sock *sk) {}
++static inline void rfs_bpf_record_flow_hash(__u32 hash) {}
++static inline void rfs_bpf_delete_flow(const struct sock *sk) {}
++
++#endif
++
++#endif /* _NET_RPS_BPF_H */
+diff --git a/kernel/bpf/syscall.c b/kernel/bpf/syscall.c
+index 700938782bed..e91f0d463630 100644
+--- a/kernel/bpf/syscall.c
++++ b/kernel/bpf/syscall.c
+@@ -45,6 +45,7 @@
+ #include <net/netfilter/nf_bpf_link.h>
+ #include <net/netkit.h>
+ #include <net/tcx.h>
++#include <net/rps_bpf.h>
+ 
+ #define IS_FD_ARRAY(map) ((map)->map_type == BPF_MAP_TYPE_PERF_EVENT_ARRAY || \
+ 			  (map)->map_type == BPF_MAP_TYPE_CGROUP_ARRAY || \
+@@ -5778,6 +5779,9 @@ static int link_create(union bpf_attr *attr, bpfptr_t uattr)
+ 	case BPF_PROG_TYPE_NETFILTER:
+ 		ret = bpf_nf_link_attach(attr, prog);
+ 		break;
++	case BPF_PROG_TYPE_RPS:
++		ret = bpf_rps_link_attach(attr, prog);
++		break;
+ #endif
+ 	case BPF_PROG_TYPE_PERF_EVENT:
+ 	case BPF_PROG_TYPE_TRACEPOINT:
+diff --git a/net/core/Makefile b/net/core/Makefile
+index dc17c5a61e9a..0c4b4efd265d 100644
+--- a/net/core/Makefile
++++ b/net/core/Makefile
+@@ -44,6 +44,7 @@ obj-$(CONFIG_FAILOVER) += failover.o
+ obj-$(CONFIG_NET_SOCK_MSG) += skmsg.o
+ obj-$(CONFIG_BPF_SYSCALL) += sock_map.o
+ obj-$(CONFIG_BPF_SYSCALL) += bpf_sk_storage.o
++obj-$(CONFIG_BPF_SYSCALL) += rps_bpf.o
+ obj-$(CONFIG_OF)	+= of_net.o
+ obj-$(CONFIG_NET_TEST) += net_test.o
+ obj-$(CONFIG_NET_DEVMEM) += devmem.o
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 831129f2a69b..69fdd6941528 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -162,6 +162,7 @@
+ #include <net/page_pool/helpers.h>
+ #include <net/page_pool/memory_provider.h>
+ #include <net/rps.h>
++#include <net/rps_bpf.h>
+ #include <linux/phy_link_topology.h>
+ 
+ #include "dev.h"
+@@ -5669,6 +5670,16 @@ static int netif_rx_internal(struct sk_buff *skb)
+ 
+ 	trace_netif_rx(skb);
+ 
++	if (static_branch_unlikely(&rps_bpf_needed)) {
++		int bpf_cpu;
++
++		if (!rps_bpf_skb_steering(skb, &bpf_cpu)) {
++			unsigned int qtail;
++			ret = enqueue_to_backlog(skb, bpf_cpu, &qtail);
++			return ret;
++		}
++	}
++
+ #ifdef CONFIG_RPS
+ 	if (static_branch_unlikely(&rps_needed)) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+@@ -6365,6 +6376,18 @@ static int netif_receive_skb_internal(struct sk_buff *skb)
+ 		return NET_RX_SUCCESS;
+ 
+ 	rcu_read_lock();
++
++	if (static_branch_unlikely(&rps_bpf_needed)) {
++		int bpf_cpu;
++
++		if (!rps_bpf_skb_steering(skb, &bpf_cpu)) {
++			unsigned int qtail;
++			ret = enqueue_to_backlog(skb, bpf_cpu, &qtail);
++			rcu_read_unlock();
++			return ret;
++		}
++	}
++
+ #ifdef CONFIG_RPS
+ 	if (static_branch_unlikely(&rps_needed)) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+@@ -6397,6 +6420,19 @@ void netif_receive_skb_list_internal(struct list_head *head)
+ 	list_splice_init(&sublist, head);
+ 
+ 	rcu_read_lock();
++
++	if (static_branch_unlikely(&rps_bpf_needed)) {
++		list_for_each_entry_safe(skb, next, head, list) {
++			int bpf_cpu;
++
++			if (!rps_bpf_skb_steering(skb, &bpf_cpu)) {
++				unsigned int qtail;
++				skb_list_del_init(skb);
++				enqueue_to_backlog(skb, bpf_cpu, &qtail);
++			}
++		}
++	}
++
+ #ifdef CONFIG_RPS
+ 	if (static_branch_unlikely(&rps_needed)) {
+ 		list_for_each_entry_safe(skb, next, head, list) {
+@@ -13143,7 +13179,8 @@ static void __init net_dev_struct_check(void)
+ #ifdef CONFIG_NET_XGRESS
+ 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, tcx_ingress);
+ #endif
+-	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 92);
++	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, rps_prog);
++	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 100);
+ }
+ 
+ /*
+diff --git a/net/core/rps_bpf.c b/net/core/rps_bpf.c
+new file mode 100644
+index 000000000000..1946c94e3718
+--- /dev/null
++++ b/net/core/rps_bpf.c
+@@ -0,0 +1,395 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/bpf.h>
++#include <linux/filter.h>
++#include <linux/netdevice.h>
++#include <linux/cpu.h>
++#include <linux/rtnetlink.h>
++#include <net/rps.h>
++#include <net/rps_bpf.h>
++#include <uapi/linux/bpf.h>
++
++struct static_key_false rps_bpf_needed __read_mostly;
++EXPORT_SYMBOL(rps_bpf_needed);
++
++struct static_key_false rfs_bpf_needed __read_mostly;
++EXPORT_SYMBOL(rfs_bpf_needed);
++
++static DEFINE_PER_CPU(struct bpf_prog *, rfs_bpf_prog);
++
++static const struct bpf_func_proto *
++rps_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
++{
++	switch (func_id) {
++	case BPF_FUNC_get_smp_processor_id:
++		return &bpf_get_smp_processor_id_proto;
++	case BPF_FUNC_get_numa_node_id:
++		return &bpf_get_numa_node_id_proto;
++	default:
++		return bpf_base_func_proto(func_id, prog);
++	}
++}
++
++static bool rps_is_valid_access(int off, int size,
++				enum bpf_access_type type,
++				const struct bpf_prog *prog,
++				struct bpf_insn_access_aux *info)
++{
++	if (off < 0 || off >= sizeof(struct bpf_rps_ctx))
++		return false;
++
++	if (off % size != 0)
++		return false;
++
++	if (type == BPF_WRITE)
++		return false;
++
++	switch (off) {
++	case offsetof(struct bpf_rps_ctx, hash):
++	case offsetof(struct bpf_rps_ctx, ifindex):
++	case offsetof(struct bpf_rps_ctx, rx_queue_index):
++	case offsetof(struct bpf_rps_ctx, cpu):
++		return size == sizeof(__u32);
++	default:
++		return false;
++	}
++}
++
++static u32 rps_convert_ctx_access(enum bpf_access_type type,
++				  const struct bpf_insn *si,
++				  struct bpf_insn *insn_buf,
++				  struct bpf_prog *prog, u32 *target_size)
++{
++	struct bpf_insn *insn = insn_buf;
++
++	switch (si->off) {
++	case offsetof(struct bpf_rps_ctx, hash):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rps_ctx, hash));
++		break;
++	case offsetof(struct bpf_rps_ctx, ifindex):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rps_ctx, ifindex));
++		break;
++	case offsetof(struct bpf_rps_ctx, rx_queue_index):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rps_ctx, rx_queue_index));
++		break;
++	case offsetof(struct bpf_rps_ctx, cpu):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rps_ctx, cpu));
++		break;
++	}
++
++	return insn - insn_buf;
++}
++
++const struct bpf_verifier_ops rps_verifier_ops = {
++	.get_func_proto		= rps_func_proto,
++	.is_valid_access	= rps_is_valid_access,
++	.convert_ctx_access	= rps_convert_ctx_access,
++};
++
++const struct bpf_prog_ops rps_prog_ops = {
++};
++
++int rps_bpf_skb_steering(struct sk_buff *skb, int *cpu_out)
++{
++	struct net_device *dev = skb->dev;
++	struct bpf_rps_ctx ctx = {
++		.hash		= skb_get_hash(skb),
++		.ifindex	= dev->ifindex,
++		.rx_queue_index	= skb_rx_queue_recorded(skb) ?
++					  skb_get_rx_queue(skb) : 0,
++		.cpu		= smp_processor_id(),
++	};
++	struct bpf_prog *rps_prog;
++	int cpu;
++
++	if (!static_branch_unlikely(&rps_bpf_needed))
++		return -ENOENT;
++
++	rps_prog = rcu_dereference_bh(dev->rps_prog);
++	if (!rps_prog)
++		return -ENOENT;
++
++	cpu = bpf_prog_run(rps_prog, &ctx);
++	if (cpu >= 0 && cpu < nr_cpu_ids && cpu_online(cpu)) {
++		*cpu_out = cpu;
++		return 0;
++	}
++
++	return -ENOENT;
++}
++EXPORT_SYMBOL(rps_bpf_skb_steering);
++
++struct bpf_rps_link {
++	struct bpf_link	link;
++	struct net_device *dev;
++};
++
++static void bpf_rps_link_release(struct bpf_link *link)
++{
++	struct bpf_rps_link *rps_link =
++		container_of(link, struct bpf_rps_link, link);
++	struct net_device *dev;
++	struct bpf_prog *old;
++
++	rtnl_lock();
++	dev = rps_link->dev;
++	if (!dev)
++		goto out_unlock;
++
++	old = rcu_replace_pointer_rtnl(dev->rps_prog, NULL);
++	if (old) {
++		bpf_prog_put(old);
++		static_branch_dec(&rps_bpf_needed);
++	}
++	rps_link->dev = NULL;
++out_unlock:
++	rtnl_unlock();
++}
++
++static void bpf_rps_link_dealloc(struct bpf_link *link)
++{
++	struct bpf_rps_link *rps_link =
++		container_of(link, struct bpf_rps_link, link);
++	kfree(rps_link);
++}
++
++static int bpf_rps_link_detach(struct bpf_link *link)
++{
++	bpf_rps_link_release(link);
++	return 0;
++}
++
++static void bpf_rps_link_show_fdinfo(const struct bpf_link *link,
++				     struct seq_file *seq)
++{
++	struct bpf_rps_link *rps_link =
++		container_of(link, struct bpf_rps_link, link);
++	u32 ifindex = 0;
++
++	rtnl_lock();
++	if (rps_link->dev)
++		ifindex = rps_link->dev->ifindex;
++	rtnl_unlock();
++
++	seq_printf(seq, "ifindex:\t%u\n", ifindex);
++}
++
++static int bpf_rps_link_fill_link_info(const struct bpf_link *link,
++				       struct bpf_link_info *info)
++{
++	struct bpf_rps_link *rps_link =
++		container_of(link, struct bpf_rps_link, link);
++	u32 ifindex = 0;
++
++	rtnl_lock();
++	if (rps_link->dev)
++		ifindex = rps_link->dev->ifindex;
++	rtnl_unlock();
++
++	info->rps.ifindex = ifindex;
++	return 0;
++}
++
++static int bpf_rps_link_update(struct bpf_link *link, struct bpf_prog *new_prog,
++			       struct bpf_prog *old_prog)
++{
++	struct bpf_rps_link *rps_link =
++		container_of(link, struct bpf_rps_link, link);
++	struct net_device *dev;
++	int err = 0;
++
++	rtnl_lock();
++
++	dev = rps_link->dev;
++	if (!dev) {
++		err = -ENOLINK;
++		goto out_unlock;
++	}
++
++	if (old_prog && link->prog != old_prog) {
++		err = -EPERM;
++		goto out_unlock;
++	}
++
++	if (old_prog == new_prog) {
++		bpf_prog_put(new_prog);
++		goto out_unlock;
++	}
++
++	old_prog = rcu_replace_pointer_rtnl(dev->rps_prog, new_prog);
++	bpf_prog_put(old_prog);
++
++out_unlock:
++	rtnl_unlock();
++	return err;
++}
++
++static const struct bpf_link_ops bpf_rps_link_lops = {
++	.release	= bpf_rps_link_release,
++	.dealloc_deferred = bpf_rps_link_dealloc,
++	.detach		= bpf_rps_link_detach,
++	.show_fdinfo	= bpf_rps_link_show_fdinfo,
++	.fill_link_info	= bpf_rps_link_fill_link_info,
++	.update_prog	= bpf_rps_link_update,
++};
++
++int bpf_rps_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
++{
++	struct net_device *dev;
++	struct bpf_rps_link *link;
++	struct bpf_link_primer link_primer;
++	int ifindex, err;
++
++	if (attr->link_create.flags)
++		return -EINVAL;
++
++	ifindex = attr->link_create.target_ifindex;
++	if (!ifindex)
++		return -EINVAL;
++
++	rtnl_lock();
++	dev = __dev_get_by_index(current->nsproxy->net_ns, ifindex);
++	if (!dev) {
++		rtnl_unlock();
++		return -EINVAL;
++	}
++
++	if (rcu_access_pointer(dev->rps_prog)) {
++		rtnl_unlock();
++		return -EBUSY;
++	}
++
++	link = kzalloc(sizeof(*link), GFP_USER);
++	if (!link) {
++		rtnl_unlock();
++		return -ENOMEM;
++	}
++
++	bpf_link_init(&link->link, BPF_LINK_TYPE_RPS, &bpf_rps_link_lops,
++		      prog, attr->link_create.attach_type);
++	link->dev = dev;
++
++	err = bpf_link_prime(&link->link, &link_primer);
++	if (err) {
++		kfree(link);
++		rtnl_unlock();
++		return err;
++	}
++
++	rcu_assign_pointer(dev->rps_prog, prog);
++	static_branch_inc(&rps_bpf_needed);
++
++	rtnl_unlock();
++
++	return bpf_link_settle(&link_primer);
++}
++
++__diag_push();
++__diag_ignore_all("-Wmissing-prototypes",
++		  "kfuncs are defined globally but only used via BTF");
++
++__bpf_kfunc u32 bpf_rps_cpu_online(u32 cpu)
++{
++	if (cpu >= nr_cpu_ids)
++		return 0;
++	return cpu_online(cpu);
++}
++
++__bpf_kfunc u32 bpf_rps_input_queue_head(u32 cpu)
++{
++#ifdef CONFIG_RPS
++	if (cpu >= nr_cpu_ids)
++		return 0;
++	return READ_ONCE(per_cpu(softnet_data, cpu).input_queue_head);
++#else
++	return 0;
++#endif
++}
++
++__bpf_kfunc int bpf_rps_num_possible_cpus(void)
++{
++	return num_possible_cpus();
++}
++
++__diag_pop();
++
++struct bpf_rfs_ctx {
++	__u32 hash;
++	__u32 cpu;
++};
++
++static int rfs_bpf_run(__u32 hash)
++{
++	struct bpf_prog *prog;
++	struct bpf_rfs_ctx ctx = {
++		.hash = hash,
++		.cpu = smp_processor_id(),
++	};
++
++	if (!static_branch_unlikely(&rfs_bpf_needed))
++		return -ENOENT;
++
++	prog = this_cpu_read(rfs_bpf_prog);
++	if (!prog)
++		return -ENOENT;
++
++	return bpf_prog_run(prog, &ctx);
++}
++
++void rfs_bpf_record_flow(const struct sock *sk)
++{
++	__u32 hash;
++
++	if (!static_branch_unlikely(&rfs_bpf_needed))
++		return;
++
++	if (sk->sk_state == TCP_ESTABLISHED) {
++		hash = READ_ONCE(sk->sk_rxhash);
++		if (hash)
++			rfs_bpf_run(hash);
++	}
++}
++EXPORT_SYMBOL(rfs_bpf_record_flow);
++
++void rfs_bpf_record_flow_hash(__u32 hash)
++{
++	if (!static_branch_unlikely(&rfs_bpf_needed))
++		return;
++
++	if (hash)
++		rfs_bpf_run(hash);
++}
++EXPORT_SYMBOL(rfs_bpf_record_flow_hash);
++
++void rfs_bpf_delete_flow(const struct sock *sk)
++{
++	__u32 hash;
++
++	if (!static_branch_unlikely(&rfs_bpf_needed))
++		return;
++
++	hash = READ_ONCE(sk->sk_rxhash);
++	if (hash)
++		rfs_bpf_run(hash);
++}
++EXPORT_SYMBOL(rfs_bpf_delete_flow);
++
++BTF_KFUNCS_START(bpf_kfunc_check_set_rps)
++BTF_ID_FLAGS(func, bpf_rps_cpu_online)
++BTF_ID_FLAGS(func, bpf_rps_input_queue_head)
++BTF_ID_FLAGS(func, bpf_rps_num_possible_cpus)
++BTF_KFUNCS_END(bpf_kfunc_check_set_rps)
++
++static const struct btf_kfunc_id_set bpf_kfunc_set_rps = {
++	.owner = THIS_MODULE,
++	.set   = &bpf_kfunc_check_set_rps,
++};
++
++static int __init rps_bpf_init(void)
++{
++	return register_btf_kfunc_id_set(BPF_PROG_TYPE_RPS, &bpf_kfunc_set_rps);
++}
++late_initcall(rps_bpf_init);
+-- 
+2.43.0
+

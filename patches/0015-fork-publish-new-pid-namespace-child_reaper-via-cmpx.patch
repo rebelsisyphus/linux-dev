@@ -1,0 +1,69 @@
+From a7ad0faceae94194ab7a2d87155c8cf07034de7a Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 15:47:13 +0800
+Subject: [PATCH 15/27] fork: publish new pid namespace child_reaper via
+ cmpxchg
+
+copy_process() sets pid_ns->child_reaper to the newly forked task when
+it is the first process (PID 1) of a fresh pid namespace.  Today this
+store is a plain assignment relying on tasklist_lock write-held by the
+caller for both mutual exclusion and memory ordering.
+
+Mutual exclusion is not actually required: the is_child_reaper() branch
+can only fire once per pid namespace, because PID 1 is allocated
+exactly once by alloc_pid() in a given namespace and no other fork
+will ever observe is_child_reaper() as true for it.  Memory ordering,
+however, is load-bearing: any subsequent reader of pid_ns->child_reaper
+(for example find_child_reaper() from exit.c or zap_pid_ns_processes())
+must observe a fully-initialized task_struct.
+
+Replace the plain store with cmpxchg(NULL, p).  cmpxchg provides the
+release-side publication barrier we need and, as a bonus, defends
+against any future accidental caller slipping a second writer in via
+is_child_reaper() -- the WARN_ON_ONCE on a non-NULL previous value
+would fire loudly.
+
+This removes one of the load-bearing reasons copy_process() must hold
+tasklist_lock write across this region.  It is still held for other
+reasons (children list, ptrace_init_task, ...); follow-up commits
+peel those off one by one.
+
+No functional change from a reader's point of view: find_child_reaper()
+still observes pid_ns->child_reaper under tasklist_lock write (its own
+re-assignment path is left alone here), so its load remains well
+ordered with respect to any fork() that could publish a new reaper.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 5cd2c7ec2a71..2b23e8989841 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2576,7 +2576,20 @@ __latent_entropy struct task_struct *copy_process(
+ 			init_task_pid(p, PIDTYPE_SID, task_session(current));
+ 
+ 			if (is_child_reaper(pid)) {
+-				ns_of_pid(pid)->child_reaper = p;
++				/*
++				 * Publish @p as the new pid namespace's child
++				 * reaper with a single atomic store that also
++				 * acts as a release barrier for the
++				 * task_struct fields initialized above.  This
++				 * branch can only fire once per pid namespace
++				 * (PID 1 is allocated exactly once), so the
++				 * cmpxchg is a publication primitive, not
++				 * contention resolution.  Removing the plain
++				 * store lets fork() drop its dependency on
++				 * tasklist_lock for this particular write.
++				 */
++				WARN_ON_ONCE(cmpxchg(&ns_of_pid(pid)->child_reaper,
++						     NULL, p) != NULL);
+ 				p->signal->flags |= SIGNAL_UNKILLABLE;
+ 			}
+ 			p->signal->shared_pending.signal = delayed.signal;
+-- 
+2.43.0
+

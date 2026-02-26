@@ -1,0 +1,167 @@
+From 48964e7b14be411a519ff07781f714fa2fa8f7b1 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 11:29:43 +0800
+Subject: [PATCH 01/27] sched: introduce per-NUMA-domain task list shards
+ (infrastructure)
+
+On many-NUMA-node systems the global init_task.tasks list and its
+tasklist_lock become the dominant fork/exit serialisation point under
+spawn-storm workloads (e.g. Unixbench spawn, multi-container churn).
+Phase 1 of the scalability work partitions that list into one shard
+per online NUMA node so that the fork/exit fast path can avoid the
+global lock and the cross-socket cacheline ping-pong on the list head.
+
+This commit introduces only the data structures and the boot-time
+allocation; no fast path uses them yet, so behaviour is unchanged:
+
+  - struct task_domain { tasks, lock, nr_tasks } in <linux/sched/task.h>,
+    cacheline aligned, with extensive design notes covering the lock
+    ordering (shard -> tasklist_lock -> siglock), the home-shard
+    invariant, and the deliberate exclusion of init_task from any
+    shard so that for_each_process() semantics are preserved.
+
+  - task_domains[] in kernel/fork.c, allocated by init_task_domains()
+    from fork_init() once the slab allocator and NUMA node masks are
+    up.  Each slot is allocated via kzalloc_node() so that the lock
+    and list head live in their owning node's local memory; this is
+    the second half of the win, the first being going from one global
+    lock to nr_node_ids independent locks.
+
+Subsequent commits will add task_struct::task_domain_nid, migrate
+copy_process()/release_task() to the per-shard helpers, and rewrite
+the for_each_process() iteration to walk task_domains[].
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/sched/task.h | 50 ++++++++++++++++++++++++++++++++++++++
+ kernel/fork.c              | 46 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 96 insertions(+)
+
+diff --git a/include/linux/sched/task.h b/include/linux/sched/task.h
+index 41ed884cffc9..232d67f8adb7 100644
+--- a/include/linux/sched/task.h
++++ b/include/linux/sched/task.h
+@@ -55,6 +55,56 @@ struct kernel_clone_args {
+ extern rwlock_t tasklist_lock;
+ extern spinlock_t mmlist_lock;
+ 
++/*
++ * Per-NUMA-domain task list shard (Phase 1 scalability work).
++ *
++ * The historic global init_task.tasks list, protected by tasklist_lock,
++ * becomes the dominant fork/exit serialisation point on many-NUMA-node
++ * boxes (typical bottleneck on Unixbench spawn).  Phase 1 partitions the
++ * list into one shard per online NUMA node:
++ *
++ *   - .tasks    : RCU-safe list of process group leaders homed to this node
++ *   - .lock     : per-shard rwlock; replaces tasklist_lock for the link/
++ *                 unlink fast path of fork()/exit().  Cold-path callers
++ *                 keep using the existing tasklist_lock (compatibility
++ *                 shim) which is acquired in addition to / around shard
++ *                 locks; see Documentation in kernel/fork.c.
++ *   - .nr_tasks : per-shard process leader count, maintained under the
++ *                 shard write lock.  Used by debugfs only.
++ *
++ * Each slot is allocated on its owning node's local memory via
++ * kzalloc_node() so that the lock and list head cacheline is physically
++ * resident on the node whose CPUs will touch it.  This is the second
++ * half of the win (the first half being going from one global lock to
++ * nr_node_ids independent locks).
++ *
++ * The home shard of a process is decided once at copy_process() time
++ * (cpu_to_node(task_cpu(p))) and stored in task_struct::task_domain_nid.
++ * It does NOT migrate when the task is later rescheduled, so that
++ * release_task() always knows which shard lock to take without rebalance.
++ *
++ * Lock ordering when multiple locks are held simultaneously:
++ *
++ *      shard lock(s)  ->  tasklist_lock  ->  sighand->siglock
++ *
++ * When more than one shard lock is held at once (only via the
++ * read_lock_tasklist_all()/write_lock_tasklist_all() helpers), they
++ * MUST be acquired in ascending node-id order and released in reverse.
++ *
++ * Phase 1 NOTE: this commit only introduces the data structures and
++ * allocation; no fast path uses them yet.  copy_process()/release_task()
++ * will be migrated in subsequent commits.  init_task is intentionally
++ * NEVER linked into any shard, preserving the existing for_each_process()
++ * semantics that pid 0 (swapper) is invisible to iteration.
++ */
++struct task_domain {
++	struct list_head	tasks;
++	rwlock_t		lock;
++	unsigned long		nr_tasks;
++} ____cacheline_aligned_in_smp;
++
++extern struct task_domain **task_domains;
++
+ extern union thread_union init_thread_union;
+ extern struct task_struct init_task;
+ 
+diff --git a/kernel/fork.c b/kernel/fork.c
+index bc2bf58b93b6..8bd5b736f7d2 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -155,6 +155,50 @@ DEFINE_PER_CPU(unsigned long, process_counts) = 0;
+ 
+ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+ 
++/*
++ * Per-NUMA-domain task list shards.  See struct task_domain in
++ * <linux/sched/task.h> for the design notes.  Allocated in
++ * init_task_domains() from fork_init() once the slab allocator and the
++ * NUMA node masks are up.  Each slot is allocated on its owning node's
++ * local memory via kzalloc_node().
++ *
++ * Phase 1 NOTE: defined and initialised here but not yet wired into
++ * copy_process()/release_task().  Subsequent commits will migrate the
++ * fast path; iteration macros and cold-path callers are migrated last.
++ */
++struct task_domain **task_domains __read_mostly;
++EXPORT_SYMBOL_GPL(task_domains);
++
++static void __init init_task_domains(void)
++{
++	int nid;
++
++	task_domains = kcalloc(nr_node_ids, sizeof(*task_domains), GFP_KERNEL);
++	if (!task_domains)
++		panic("fork_init: failed to allocate task_domains array\n");
++
++	for_each_node(nid) {
++		struct task_domain *td;
++
++		td = kzalloc_node(sizeof(*td), GFP_KERNEL, nid);
++		if (!td)
++			panic("fork_init: failed to allocate task_domain for node %d\n",
++			      nid);
++
++		INIT_LIST_HEAD(&td->tasks);
++		rwlock_init(&td->lock);
++		td->nr_tasks = 0;
++		task_domains[nid] = td;
++	}
++
++	/*
++	 * init_task is intentionally NOT linked into any shard.  The
++	 * existing for_each_process() iteration excludes init_task (it
++	 * uses init_task.tasks as the list head sentinel), and the new
++	 * shard-walking iteration must preserve that semantics.
++	 */
++}
++
+ #ifdef CONFIG_PROVE_RCU
+ int lockdep_tasklist_lock_is_held(void)
+ {
+@@ -889,6 +933,8 @@ void __init fork_init(void)
+ 
+ 	lockdep_init_task(&init_task);
+ 	uprobes_init();
++
++	init_task_domains();
+ }
+ 
+ int __weak arch_dup_task_struct(struct task_struct *dst,
+-- 
+2.43.0
+

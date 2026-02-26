@@ -1,0 +1,135 @@
+From 66e694046e2fde2391f025fbc6d7770597d8d7b6 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 19:26:17 +0800
+Subject: [PATCH 21/27] exit: replace forget_original_parent splice with
+ per-child task_lock move
+
+Rewrite forget_original_parent() to drop list_splice_tail_init() in favor
+of a per-child list_del_rcu() + list_add_tail_rcu() under a double
+task_lock(father, reaper) address-ordered acquisition.  RCU readers see
+each child on exactly one ->children list.  A PF_EXITING check on the
+reaper falls back to find_new_reaper() to avoid racing with another
+thread-group's concurrent exit.
+
+The outer write_lock_irq(&tasklist_lock) in exit_notify() is still held
+in this commit; this step only introduces the fine-grained writer mutex.
+Dropping the outer lock follows in subsequent commits.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+
+---
+ kernel/exit.c | 70 +++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 65 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index f0c99c486aae..21b9db5fc28f 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -712,24 +712,82 @@ static void reparent_leader(struct task_struct *father, struct task_struct *p,
+ 	kill_orphaned_pgrp(p, father);
+ }
+ 
++/*
++ * Take the ->alloc_lock (task_lock) of two task_structs in a fixed address
++ * order so concurrent reparents can't deadlock.  If @a == @b we take it
++ * once.  Used by forget_original_parent() as the writer mutex over
++ * father->children / reaper->children instead of tasklist_lock.
++ */
++static void lock_two_tasks(struct task_struct *a, struct task_struct *b)
++{
++	if (a == b) {
++		task_lock(a);
++		return;
++	}
++	if (a < b) {
++		spin_lock(&a->alloc_lock);
++		spin_lock_nested(&b->alloc_lock, SINGLE_DEPTH_NESTING);
++	} else {
++		spin_lock(&b->alloc_lock);
++		spin_lock_nested(&a->alloc_lock, SINGLE_DEPTH_NESTING);
++	}
++}
++
++static void unlock_two_tasks(struct task_struct *a, struct task_struct *b)
++{
++	task_unlock(a);
++	if (a != b)
++		task_unlock(b);
++}
++
+ /*
+  * Make init inherit all the child processes
+  */
+ static void forget_original_parent(struct task_struct *father,
+ 					struct list_head *dead)
+ {
+-	struct task_struct *p, *t, *reaper;
++	struct task_struct *p, *t, *n, *reaper, *child_reaper_orig;
+ 
+ 	if (unlikely(!list_empty(&father->ptraced)))
+ 		exit_ptrace(father, dead);
+ 
+ 	/* Can drop and reacquire tasklist_lock */
+-	reaper = find_child_reaper(father, dead);
++	child_reaper_orig = find_child_reaper(father, dead);
+ 	if (list_empty(&father->children))
+ 		return;
+ 
+-	reaper = find_new_reaper(father, reaper);
+-	list_for_each_entry(p, &father->children, sibling) {
++	reaper = find_new_reaper(father, child_reaper_orig);
++
++	/*
++	 * Walk father->children one-by-one instead of a final
++	 * list_splice_tail_init().  For each child we take the double
++	 * task_lock(father, reaper) as the fine-grained writer mutex over
++	 * the children lists and the per-task parent pointers.  RCU readers
++	 * (list_for_each_entry_rcu, rcu_dereference(t->real_parent)) see
++	 * either the old placement under father or the new placement under
++	 * reaper, never both.  The outer write_lock_irq(&tasklist_lock) in
++	 * exit_notify() is still held in this commit; it is the next commit
++	 * that drops it.
++	 */
++	list_for_each_entry_safe(p, n, &father->children, sibling) {
++retry_reaper:
++		lock_two_tasks(father, reaper);
++		/*
++		 * If the reaper we picked is itself exiting (raced with
++		 * another thread-group's exit_notify), drop the locks and
++		 * pick a new one.  find_alive_thread() + the subreaper walk
++		 * will skip PF_EXITING tasks, so this retry converges.
++		 */
++		if (unlikely(reaper != father && (reaper->flags & PF_EXITING))) {
++			unlock_two_tasks(father, reaper);
++			reaper = find_new_reaper(father, child_reaper_orig);
++			goto retry_reaper;
++		}
++
++		if (reaper != father) {
++			list_del_rcu(&p->sibling);
++			list_add_tail_rcu(&p->sibling, &reaper->children);
++		}
+ 		for_each_thread(p, t) {
+ 			RCU_INIT_POINTER(t->real_parent, reaper);
+ 			BUG_ON((!t->ptrace) != (rcu_access_pointer(t->parent) == father));
+@@ -740,6 +798,8 @@ static void forget_original_parent(struct task_struct *father,
+ 						    SEND_SIG_NOINFO, t,
+ 						    PIDTYPE_TGID);
+ 		}
++		unlock_two_tasks(father, reaper);
++
+ 		/*
+ 		 * If this is a threaded reparent there is no need to
+ 		 * notify anyone anything has happened.
+@@ -747,7 +807,7 @@ static void forget_original_parent(struct task_struct *father,
+ 		if (!same_thread_group(reaper, father))
+ 			reparent_leader(father, p, dead);
+ 	}
+-	list_splice_tail_init(&father->children, &reaper->children);
++	/* father->children is now empty; no splice needed. */
+ }
+ 
+ /*
+-- 
+2.43.0
+

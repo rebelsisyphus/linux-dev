@@ -1,0 +1,85 @@
+From 7db6c0ee2b1bbe0df0f7003437c538217578883a Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 15:55:26 +0800
+Subject: [PATCH 16/27] ptrace: layer task_lock(tracer) under ptraced list
+ writers
+
+Take task_lock(tracer) around the list_add_rcu / list_del_rcu and
+ptracer_cred / child->parent stores in __ptrace_link() and
+__ptrace_unlink().  Both sites still run under write_lock_irq(
+tasklist_lock), so this is a pure additive change: the new lock
+does not replace any existing serialization yet.
+
+The purpose is to give tracer->ptraced a dedicated writer mutex
+independent of tasklist_lock, so that a later commit can drop the
+tasklist_lock write-side dependency in these paths as part of the
+per-NUMA tasklist sharding effort.
+
+exit_ptrace() iterates tracer->ptraced under tasklist_lock write
+and calls __ptrace_detach() -> __ptrace_unlink(), which now takes
+task_lock(child->parent) == task_lock(tracer) per iteration.  No
+recursion because exit_ptrace() itself does not hold task_lock().
+
+Lock order: tasklist_lock(write) -> task_lock(tracer) -> sighand
+->siglock.  No existing path takes task_lock while holding any
+child sighand->siglock, so no inversion.
+
+Signed-off-by: NUMA tasklist sharding <dev@localhost>
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/ptrace.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 8825edda2999..d96c199e0bf1 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -70,9 +70,18 @@ void __ptrace_link(struct task_struct *child, struct task_struct *new_parent,
+ 		   const struct cred *ptracer_cred)
+ {
+ 	BUG_ON(!list_empty(&child->ptrace_entry));
++	/*
++	 * task_lock(new_parent) serializes concurrent writers of
++	 * new_parent->ptraced independently of tasklist_lock.  This is
++	 * currently layered under the existing tasklist_lock write-side;
++	 * a later commit will drop the tasklist_lock dependency and rely
++	 * on this lock alone as the writer mutex for the ptraced list.
++	 */
++	task_lock(new_parent);
+ 	list_add_rcu(&child->ptrace_entry, &new_parent->ptraced);
+ 	child->parent = new_parent;
+ 	child->ptracer_cred = get_cred(ptracer_cred);
++	task_unlock(new_parent);
+ }
+ 
+ /*
+@@ -116,6 +125,7 @@ static void ptrace_link(struct task_struct *child, struct task_struct *new_paren
+  */
+ void __ptrace_unlink(struct task_struct *child)
+ {
++	struct task_struct *tracer = child->parent;
+ 	const struct cred *old_cred;
+ 	BUG_ON(!child->ptrace);
+ 
+@@ -124,11 +134,18 @@ void __ptrace_unlink(struct task_struct *child)
+ 	clear_task_syscall_work(child, SYSCALL_EMU);
+ #endif
+ 
++	/*
++	 * task_lock(tracer) pairs with __ptrace_link() and serializes
++	 * concurrent writers of tracer->ptraced independently of
++	 * tasklist_lock.  Layered under tasklist_lock write for now.
++	 */
++	task_lock(tracer);
+ 	child->parent = child->real_parent;
+ 	list_del_rcu(&child->ptrace_entry);
+ 	INIT_LIST_HEAD(&child->ptrace_entry);
+ 	old_cred = child->ptracer_cred;
+ 	child->ptracer_cred = NULL;
++	task_unlock(tracer);
+ 	put_cred(old_cred);
+ 
+ 	spin_lock(&child->sighand->siglock);
+-- 
+2.43.0
+

@@ -1,0 +1,80 @@
+From e833851c141c13eed12ac2724d6790803a82f872 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 16:59:37 +0800
+Subject: [PATCH 07/27] sched: expose per-shard task counts via debugfs
+
+Add /sys/kernel/debug/task_domains, a read-only file that prints the
+per-NUMA-domain shard process-leader counts as maintained by
+copy_process()/release_task().
+
+This is the minimum observability surface needed when validating
+the Phase 1 work on a real many-NUMA-node box: it lets us check that
+fork/exit traffic is in fact distributed across shards rather than
+piling up on one node (which would happen, for example, if a
+workload pins all forks to a single CPU set, defeating the
+parallelism gain).
+
+The values are read with READ_ONCE() and are advisory; no lock is
+taken against the counters themselves.  Gated by CONFIG_DEBUG_FS so
+production builds without debugfs are unaffected.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 34 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8e2e3b2e73b1..9d62ced5dbce 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -13,6 +13,7 @@
+  */
+ 
+ #include <linux/anon_inodes.h>
++#include <linux/debugfs.h>
+ #include <linux/slab.h>
+ #include <linux/sched/autogroup.h>
+ #include <linux/sched/mm.h>
+@@ -223,6 +224,39 @@ struct task_struct *next_task(struct task_struct *p)
+ }
+ EXPORT_SYMBOL_GPL(next_task);
+ 
++#ifdef CONFIG_DEBUG_FS
++/*
++ * /sys/kernel/debug/task_domains
++ *
++ * Per-shard process leader counts.  Useful when measuring whether
++ * fork/exit storms are well-distributed across NUMA nodes (the
++ * Phase 1 design assumes a task is homed to cpu_to_node(task_cpu(p))
++ * at fork time and never re-homed; if a workload pins all forks to
++ * one node, every shard except that node's stays empty and we lose
++ * the parallelism win).  Read-only, no locking against the count
++ * itself -- the values are advisory.
++ */
++static int task_domains_debug_show(struct seq_file *m, void *v)
++{
++	int nid;
++
++	seq_puts(m, "nid     nr_tasks\n");
++	for (nid = 0; nid < nr_node_ids; nid++)
++		seq_printf(m, "%3d  %12lu\n",
++			   nid, READ_ONCE(task_domains[nid]->nr_tasks));
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(task_domains_debug);
++
++static int __init task_domains_debugfs_init(void)
++{
++	debugfs_create_file("task_domains", 0444, NULL, NULL,
++			    &task_domains_debug_fops);
++	return 0;
++}
++late_initcall(task_domains_debugfs_init);
++#endif /* CONFIG_DEBUG_FS */
++
+ static void __init init_task_domains(void)
+ {
+ 	int nid;
+-- 
+2.43.0
+

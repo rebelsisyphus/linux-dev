@@ -1,0 +1,199 @@
+From bfefaadaee1124c7c35fc4945c28e990dfa864d5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 16 Apr 2026 14:48:09 +0800
+Subject: [PATCH 25/27] lib/percpu_counter: add init_many_pcpu and detach_many
+ helpers
+
+Add two new percpu_counter helpers that allow percpu data to be
+recycled across mm_struct lifetimes:
+
+  - percpu_counter_init_many_pcpu()  -- like __percpu_counter_init_many()
+    but reuses a pre-allocated percpu area.  The percpu values are
+    zeroed and the counters are fully initialised (lock, lockdep class,
+    list, count, percpu pointer).
+
+  - percpu_counter_detach_many()  -- removes counters from the hotplug
+    list and NULLs the percpu pointers, but does *not* call free_percpu().
+    The percpu data can then be cached for reuse.
+
+These will be used by the mm percpu cache to avoid repeated
+alloc_percpu / free_percpu on the fork/exit hot path, eliminating
+contention on pcpu_alloc_mutex and pcpu_lock.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+
+---
+ include/linux/percpu_counter.h | 33 ++++++++++++
+ lib/percpu_counter.c           | 91 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 124 insertions(+)
+
+diff --git a/include/linux/percpu_counter.h b/include/linux/percpu_counter.h
+index 3a44dd1e33d2..fb6b7d8769b8 100644
+--- a/include/linux/percpu_counter.h
++++ b/include/linux/percpu_counter.h
+@@ -34,6 +34,12 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 			       gfp_t gfp, u32 nr_counters,
+ 			       struct lock_class_key *key);
+ 
++int percpu_counter_init_many_pcpu(struct percpu_counter *fbc, s64 amount,
++				   s32 __percpu *counters, u32 nr_counters,
++				   struct lock_class_key *key);
++
++void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters);
++
+ #define percpu_counter_init_many(fbc, value, gfp, nr_counters)		\
+ 	({								\
+ 		static struct lock_class_key __key;			\
+@@ -42,6 +48,14 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 					   &__key);			\
+ 	})
+ 
++#define percpu_counter_init_many_cached(fbc, value, counters, nr_counters) \
++	({								\
++		static struct lock_class_key __key;			\
++									\
++		percpu_counter_init_many_pcpu(fbc, value, counters,	\
++					      nr_counters, &__key);	\
++	})
++
+ 
+ #define percpu_counter_init(fbc, value, gfp)				\
+ 	percpu_counter_init_many(fbc, value, gfp, 1)
+@@ -148,6 +162,20 @@ static inline int percpu_counter_init_many(struct percpu_counter *fbc,
+ 	return 0;
+ }
+ 
++static inline int percpu_counter_init_many_pcpu(struct percpu_counter *fbc,
++						 s64 amount,
++						 s32 __percpu *counters,
++						 u32 nr_counters,
++						 struct lock_class_key *key)
++{
++	u32 i;
++
++	for (i = 0; i < nr_counters; i++)
++		fbc[i].count = amount;
++
++	return 0;
++}
++
+ static inline int percpu_counter_init(struct percpu_counter *fbc, s64 amount,
+ 				      gfp_t gfp)
+ {
+@@ -159,6 +187,11 @@ static inline void percpu_counter_destroy_many(struct percpu_counter *fbc,
+ {
+ }
+ 
++static inline void percpu_counter_detach_many(struct percpu_counter *fbc,
++					       u32 nr_counters)
++{
++}
++
+ static inline void percpu_counter_destroy(struct percpu_counter *fbc)
+ {
+ }
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index 2891f94a11c6..07628cb20c14 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -224,6 +224,97 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ }
+ EXPORT_SYMBOL(__percpu_counter_init_many);
+ 
++/**
++ * percpu_counter_init_many_pcpu - Initialize percpu counters with pre-allocated
++ *                                  percpu data
++ * @fbc:	pointer to the array of percpu_counter structures
++ * @amount:	initial value for each counter
++ * @counters:	pre-allocated percpu data area (previously obtained from a
++ *		percpu_counter allocation)
++ * @nr_counters: number of counters in the @fbc array
++ * @key:	lockdep class key for the counters' spinlocks
++ *
++ * Like __percpu_counter_init_many(), but reuses a pre-allocated percpu data
++ * area instead of calling alloc_percpu().  The percpu values are zeroed and
++ * the counters are fully initialised: spinlock, lockdep class, list (when
++ * CONFIG_HOTPLUG_CPU=y), count, and per-CPU pointer.
++ */
++int percpu_counter_init_many_pcpu(struct percpu_counter *fbc, s64 amount,
++				   s32 __percpu *counters, u32 nr_counters,
++				   struct lock_class_key *key)
++{
++	unsigned long flags __maybe_unused;
++	size_t counter_size;
++	u32 i;
++	int cpu;
++
++	counter_size = ALIGN(sizeof(s32), __alignof__(s32));
++
++	for_each_possible_cpu(cpu) {
++		s32 *p = per_cpu_ptr(counters, cpu);
++
++		memset(p, 0, nr_counters * counter_size);
++	}
++
++	for (i = 0; i < nr_counters; i++) {
++		raw_spin_lock_init(&fbc[i].lock);
++		lockdep_set_class(&fbc[i].lock, key);
++#ifdef CONFIG_HOTPLUG_CPU
++		INIT_LIST_HEAD(&fbc[i].list);
++#endif
++		fbc[i].count = amount;
++		fbc[i].counters = (void __percpu *)counters + i * counter_size;
++
++		debug_percpu_counter_activate(&fbc[i]);
++	}
++
++#ifdef CONFIG_HOTPLUG_CPU
++	spin_lock_irqsave(&percpu_counters_lock, flags);
++	for (i = 0; i < nr_counters; i++)
++		list_add(&fbc[i].list, &percpu_counters);
++	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++#endif
++	return 0;
++}
++EXPORT_SYMBOL(percpu_counter_init_many_pcpu);
++
++/**
++ * percpu_counter_detach_many - Detach percpu counters from their percpu data
++ * @fbc:	pointer to the array of percpu_counter structures
++ * @nr_counters: number of counters in the @fbc array
++ *
++ * Reverse the bookkeeping done by percpu_counter_init_many() /
++ * percpu_counter_init_many_pcpu(): deactivate debug objects, remove from the
++ * hotplug list, and NULL out the percpu pointers -- but do *not* free the
++ * percpu data area.  The caller is expected to cache and reuse it later with
++ * percpu_counter_init_many_pcpu().
++ */
++void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
++{
++	unsigned long flags __maybe_unused;
++	u32 i;
++
++	if (WARN_ON_ONCE(!fbc))
++		return;
++
++	if (!fbc[0].counters)
++		return;
++
++	for (i = 0; i < nr_counters; i++)
++		debug_percpu_counter_deactivate(&fbc[i]);
++
++#ifdef CONFIG_HOTPLUG_CPU
++	spin_lock_irqsave(&percpu_counters_lock, flags);
++	for (i = 0; i < nr_counters; i++)
++		list_del(&fbc[i].list);
++	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++#endif
++
++	for (i = 0; i < nr_counters; i++)
++		fbc[i].counters = NULL;
++}
++EXPORT_SYMBOL(percpu_counter_detach_many);
++
+ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ {
+ 	unsigned long flags __maybe_unused;
+-- 
+2.43.0
+

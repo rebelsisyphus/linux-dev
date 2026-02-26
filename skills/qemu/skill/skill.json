@@ -1,0 +1,31 @@
+{
+  "name": "qemu-test-env",
+  "version": "1.0.0",
+  "description": "Complete QEMU testing environment with SSH passwordless login and shared directory",
+  "author": "opencode",
+  "license": "MIT",
+  "tags": ["qemu", "virtualization", "testing", "ssh", "vm"],
+  "requirements": {
+    "os": "linux",
+    "commands": ["qemu-system-x86_64", "debootstrap", "ss"],
+    "root": true
+  },
+  "files": [
+    "qemu.sh",
+    "monitor.sh",
+    "test.sh",
+    "mkext.sh",
+    "setup-rootfs.sh",
+    "install.sh",
+    "README.md"
+  ],
+  "install_command": "sudo ./install.sh",
+  "start_command": "./qemu.sh",
+  "test_command": "./test.sh",
+  "entry_points": {
+    "qemu": "qemu.sh",
+    "monitor": "monitor.sh",
+    "test": "test.sh",
+    "install": "install.sh"
+  }
+}

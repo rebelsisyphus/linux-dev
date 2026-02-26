@@ -1,0 +1,70 @@
+From fae6d606f38e5467b9af9ae9666ce167a4959cc4 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 16 Apr 2026 14:48:28 +0800
+Subject: [PATCH 26/27] mm: add mm_stat_ext struct for caching percpu data
+
+Introduce struct mm_stat_ext, a small structure embedded in mm_struct
+that holds pointers to the percpu data areas used by rss_stat and
+mm_cid.  When an mm is freed, these percpu areas can be cached on the
+local CPU and reused by the next mm creation, bypassing alloc_percpu
+and its pcpu_alloc_mutex.
+
+The struct contains:
+  - rss_counters:  the percpu s32 array backing rss_stat[] (SMP only)
+  - mm_cid_pcpu:   the percpu mm_cid_pcpu array (SCHED_MM_CID only)
+
+Both fields are initialised to NULL; a NULL value means the percpu
+data was not cached and must be allocated from scratch.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+
+---
+ include/linux/mm_types.h       | 10 ++++++++++
+ include/linux/percpu_counter.h |  3 +++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 3cc8ae722886..547afc9f63b6 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1120,6 +1120,14 @@ typedef struct {
+ 
+ struct kioctx_table;
+ struct iommu_mm_data;
++
++struct mm_stat_ext {
++	s32 __percpu *rss_counters;
++#ifdef CONFIG_SCHED_MM_CID
++	struct mm_cid_pcpu __percpu *mm_cid_pcpu;
++#endif
++};
++
+ struct mm_struct {
+ 	struct {
+ 		/*
+@@ -1265,6 +1273,8 @@ struct mm_struct {
+ 
+ 		struct percpu_counter rss_stat[NR_MM_COUNTERS];
+ 
++		struct mm_stat_ext stat_ext;
++
+ 		struct linux_binfmt *binfmt;
+ 
+ 		/* Architecture-specific MM context */
+diff --git a/include/linux/percpu_counter.h b/include/linux/percpu_counter.h
+index fb6b7d8769b8..329e9b76d1eb 100644
+--- a/include/linux/percpu_counter.h
++++ b/include/linux/percpu_counter.h
+@@ -176,6 +176,9 @@ static inline int percpu_counter_init_many_pcpu(struct percpu_counter *fbc,
+ 	return 0;
+ }
+ 
++#define percpu_counter_init_many_cached(fbc, value, counters, nr_counters) \
++	percpu_counter_init_many_pcpu(fbc, value, counters, nr_counters, NULL)
++
+ static inline int percpu_counter_init(struct percpu_counter *fbc, s64 amount,
+ 				      gfp_t gfp)
+ {
+-- 
+2.43.0
+

@@ -1,0 +1,52 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=====================================
+Test started at: Wed Apr 15 10:25:07 UTC 2026
+=====================================
+
+1. System information:
+Linux sisyphus 7.0.0-rc7dcc-00255-g98fd129b9ad1-dirty #70 SMP PREEMPT_DYNAMIC Wed Apr 15 18:24:29 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+
+2. NUMA topology:
+0-1
+
+3. Basic fork/exec stress test:
+   100 background forks completed OK
+
+4. Rapid process creation/destruction:
+   150 rapid processes completed OK
+
+5. Process tree test (parent-child relationships):
+    PID TTY          TIME CMD
+   ps --ppid failed (may not support option)
+
+6. Concurrent fork/exit stress test (10 rounds):
+   1000 total process creations completed OK
+
+7. Check for kernel warnings in dmesg:
+[    0.109755] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.123471] ... MAX_LOCKDEP_SUBCLASSES:  8
+[    0.123560] ... MAX_LOCKDEP_KEYS:        8192
+[    0.123654] ... MAX_LOCKDEP_ENTRIES:     32768
+[    0.123699] ... MAX_LOCKDEP_CHAINS:      65536
+[    0.339263] Running RCU synchronous self tests
+[    0.339432] Running RCU synchronous self tests
+[    0.463908] rcu: Hierarchical SRCU implementation.
+[    0.463983] rcu: 	Max phase no-delay instances is 400.
+[    0.717811] Running RCU synchronous self tests
+[    0.718100] Running RCU synchronous self tests
+[    0.719618] Running RCU Tasks wait API self tests
+[    0.721582] Running RCU Tasks Trace wait API self tests
+[    0.732588] Callback from call_rcu_tasks_trace() invoked.
+[    0.828035] Callback from call_rcu_tasks() invoked.
+[    0.831180] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    3.920982] systemd-debug-g (101) used greatest stack depth: 11912 bytes left
+[    4.992922] systemd[1]: Mounting sys-kernel-debug.mount - Kernel Debug File System...
+[    5.275338] systemd[1]: systemd-journald.service: (This warning is only shown for the first unit using IP firewalling.)
+[    5.556582] systemd[1]: Mounted sys-kernel-debug.mount - Kernel Debug File System.
+
+8. Check lockdep specifically:
+   No lockdep warnings for children_lock
+
+=====================================
+Test completed successfully!
+=====================================

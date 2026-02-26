@@ -1,0 +1,63 @@
+From 1b96731a83e87d1c0db5e7d6cff03806953f42a6 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 15:17:33 +0800
+Subject: [PATCH 12/27] ptrace: publish ->ptraced list writes with RCU
+ primitives
+
+Prepare the ptraced list for a future RCU reader conversion in
+ptrace_do_wait() by switching the writer-side operations to the RCU
+variants.  Both writers -- __ptrace_link() on attach and
+__ptrace_unlink() on detach/exit -- still run under tasklist_lock
+write, so current non-RCU readers are unaffected and this commit is a
+semantic no-op for them.
+
+__ptrace_link() now uses list_add_rcu() so that a concurrent RCU reader
+(added in a follow-up) observes a fully published ptrace_entry before
+the new head pointer is swung.
+
+__ptrace_unlink() now uses list_del_rcu() followed by INIT_LIST_HEAD().
+Under tasklist_lock write no reader can observe the transient state;
+the explicit re-init preserves the list_empty() invariant that
+__ptrace_link()'s BUG_ON relies on so that a child can be safely
+re-attached after a PTRACE_DETACH.  Once an RCU reader is introduced,
+this re-init-on-unlink pattern will need to be replaced with a
+grace-period-delayed reuse scheme -- but that belongs to the reader
+conversion commit, not here.
+
+exit_ptrace() continues to use list_for_each_entry_safe() since each
+iteration's __ptrace_detach() -> __ptrace_unlink() now uses
+list_del_rcu(), and the subsequent list_add() onto the caller's
+private dead list is unchanged (that list is local and has no
+readers).
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/ptrace.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index 392ec2f75f01..8825edda2999 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -70,7 +70,7 @@ void __ptrace_link(struct task_struct *child, struct task_struct *new_parent,
+ 		   const struct cred *ptracer_cred)
+ {
+ 	BUG_ON(!list_empty(&child->ptrace_entry));
+-	list_add(&child->ptrace_entry, &new_parent->ptraced);
++	list_add_rcu(&child->ptrace_entry, &new_parent->ptraced);
+ 	child->parent = new_parent;
+ 	child->ptracer_cred = get_cred(ptracer_cred);
+ }
+@@ -125,7 +125,8 @@ void __ptrace_unlink(struct task_struct *child)
+ #endif
+ 
+ 	child->parent = child->real_parent;
+-	list_del_init(&child->ptrace_entry);
++	list_del_rcu(&child->ptrace_entry);
++	INIT_LIST_HEAD(&child->ptrace_entry);
+ 	old_cred = child->ptracer_cred;
+ 	child->ptracer_cred = NULL;
+ 	put_cred(old_cred);
+-- 
+2.43.0
+

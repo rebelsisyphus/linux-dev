@@ -1,0 +1,163 @@
+[  609.095682] ========================================================
+[  609.095807] WARNING: possible irq lock inversion dependency detected
+[  609.095903] 7.0.0-rc7dcc-00252-gc26025ba20fe #49 Tainted: G        W          
+[  609.095903] --------------------------------------------------------
+[  609.095903] swapper/3/0 just changed the state of lock:
+[  609.095903] ffff888004eb88d8 (&sighand->siglock){-...}-{3:3}, at: lock_task_sighand+0x67/0x1a0
+[  609.095903] but this lock took another, HARDIRQ-unsafe lock in the past:
+[  609.095903]  (&p->alloc_lock){+.+.}-{3:3}
+[  609.095903] 
+               
+               and interrupts could create inverse lock ordering between them.
+
+[  609.095903] 
+               other info that might help us debug this:
+[  609.095903]  Possible interrupt unsafe locking scenario:
+
+[  609.095903]        CPU0                    CPU1
+[  609.095903]        ----                    ----
+[  609.095903]   lock(&p->alloc_lock);
+[  609.095903]                                local_irq_disable();
+[  609.095903]                                lock(&sighand->siglock);
+[  609.095903]                                lock(&p->alloc_lock);
+[  609.095903]   <Interrupt>
+[  609.095903]     lock(&sighand->siglock);
+[  609.095903] 
+                *** DEADLOCK ***
+
+[  609.095903] 2 locks held by swapper/3/0:
+[  609.095903]  #0: ffffffff831752c0 (rcu_read_lock){....}-{1:3}, at: kill_pid_info_type+0x1a/0x190
+[  609.095903]  #1: ffffffff831752c0 (rcu_read_lock){....}-{1:3}, at: lock_task_sighand+0x24/0x1a0
+[  609.095903] 
+               the shortest dependencies between 2nd lock and 1st lock:
+[  609.095903]  -> (&p->alloc_lock){+.+.}-{3:3} {
+[  609.095903]     HARDIRQ-ON-W at:
+[  609.095903]                       lock_acquire+0xbd/0x2d0
+[  609.095903]                       _raw_spin_lock+0x2b/0x40
+[  609.095903]                       kernel_init_freeable+0x2f/0x450
+[  609.095903]                       kernel_init+0x15/0x1c0
+[  609.095903]                       ret_from_fork+0x2c9/0x3a0
+[  609.095903]                       ret_from_fork_asm+0x1a/0x30
+[  609.095903]     SOFTIRQ-ON-W at:
+[  609.095903]                       lock_acquire+0xbd/0x2d0
+[  609.095903]                       _raw_spin_lock+0x2b/0x40
+[  609.095903]                       kernel_init_freeable+0x2f/0x450
+[  609.095903]                       kernel_init+0x15/0x1c0
+[  609.095903]                       ret_from_fork+0x2c9/0x3a0
+[  609.095903]                       ret_from_fork_asm+0x1a/0x30
+[  609.095903]     INITIAL USE at:
+[  609.095903]                      lock_acquire+0xbd/0x2d0
+[  609.095903]                      _raw_spin_lock+0x2b/0x40
+[  609.095903]                      kernel_init_freeable+0x2f/0x450
+[  609.095903]                      kernel_init+0x15/0x1c0
+[  609.095903]                      ret_from_fork+0x2c9/0x3a0
+[  609.095903]                      ret_from_fork_asm+0x1a/0x30
+[  609.095903]   }
+[  609.095903]   ... key      at: [<ffffffff83d25bf0>] __key.251+0x0/0x10
+[  609.095903]   ... acquired at:
+[  609.095903]    lock_acquire+0xbd/0x2d0
+[  609.095903]    _raw_spin_lock+0x2b/0x40
+[  609.095903]    copy_process+0x1b3b/0x2100
+[  609.095903]    kernel_clone+0xa5/0x3c0
+[  609.095903]    kernel_thread+0x6c/0x90
+[  609.095903]    kthreadd+0x193/0x240
+[  609.095903]    ret_from_fork+0x2c9/0x3a0
+[  609.095903]    ret_from_fork_asm+0x1a/0x30
+
+[  609.095903] -> (&sighand->siglock){-...}-{3:3} {
+[  609.095903]    IN-HARDIRQ-W at:
+[  609.095903]                     lock_acquire+0xbd/0x2d0
+[  609.095903]                     _raw_spin_lock_irqsave+0x37/0x60
+[  609.095903]                     lock_task_sighand+0x67/0x1a0
+[  609.095903]                     group_send_sig_info+0xd5/0x1b0
+[  609.095903]                     kill_pid_info_type+0x74/0x190
+[  609.095903]                     it_real_fn+0x36/0xe0
+[  609.095903]                     __hrtimer_run_queues+0xaa/0x3b0
+[  609.095903]                     hrtimer_interrupt+0x113/0x270
+[  609.095903]                     __sysvec_apic_timer_interrupt+0x68/0x1e0
+[  609.095903]                     sysvec_apic_timer_interrupt+0x6e/0x80
+[  609.095903]                     asm_sysvec_apic_timer_interrupt+0x1a/0x20
+[  609.095903]                     pv_native_safe_halt+0xf/0x20
+[  609.095903]                     default_idle+0x9/0x10
+[  609.095903]                     default_idle_call+0x87/0x220
+[  609.095903]                     do_idle+0x268/0x2b0
+[  609.095903]                     cpu_startup_entry+0x24/0x30
+[  609.095903]                     start_secondary+0xf8/0x100
+[  609.095903]                     common_startup_64+0x13e/0x148
+[  609.095903]    INITIAL USE at:
+[  609.095903]                    lock_acquire+0xbd/0x2d0
+[  609.095903]                    _raw_spin_lock_irq+0x33/0x50
+[  609.095903]                    calculate_sigpending+0x19/0x30
+[  609.095903]                    ret_from_fork+0x16/0x3a0
+[  609.095903]                    ret_from_fork_asm+0x1a/0x30
+[  609.095903]  }
+[  609.095903]  ... key      at: [<ffffffff83d25b30>] __key.263+0x0/0x10
+[  609.095903]  ... acquired at:
+[  609.095903]    __lock_acquire+0x9c3/0x1a60
+[  609.095903]    lock_acquire+0xbd/0x2d0
+[  609.095903]    _raw_spin_lock_irqsave+0x37/0x60
+[  609.095903]    lock_task_sighand+0x67/0x1a0
+[  609.095903]    group_send_sig_info+0xd5/0x1b0
+[  609.095903]    kill_pid_info_type+0x74/0x190
+[  609.095903]    it_real_fn+0x36/0xe0
+[  609.095903]    __hrtimer_run_queues+0xaa/0x3b0
+[  609.095903]    hrtimer_interrupt+0x113/0x270
+[  609.095903]    __sysvec_apic_timer_interrupt+0x68/0x1e0
+[  609.095903]    sysvec_apic_timer_interrupt+0x6e/0x80
+[  609.095903]    asm_sysvec_apic_timer_interrupt+0x1a/0x20
+[  609.095903]    pv_native_safe_halt+0xf/0x20
+[  609.095903]    default_idle+0x9/0x10
+[  609.095903]    default_idle_call+0x87/0x220
+[  609.095903]    do_idle+0x268/0x2b0
+[  609.095903]    cpu_startup_entry+0x24/0x30
+[  609.095903]    start_secondary+0xf8/0x100
+[  609.095903]    common_startup_64+0x13e/0x148
+
+[  609.095903] 
+               stack backtrace:
+[  609.095903] CPU: 3 UID: 0 PID: 0 Comm: swapper/3 Tainted: G        W           7.0.0-rc7dcc-00252-gc26025ba20fe #49 PREEMPT(lazy) 
+[  609.095903] Tainted: [W]=WARN
+[  609.095903] Hardware name: QEMU Ubuntu 24.04 PC v2 (i440FX + PIIX, arch_caps fix, 1996), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+[  609.095903] Call Trace:
+[  609.095903]  <IRQ>
+[  609.095903]  dump_stack_lvl+0x66/0xa0
+[  609.095903]  print_irq_inversion_bug.part.0+0x22c/0x270
+[  609.095903]  mark_lock+0x40e/0xfa0
+[  609.095903]  __lock_acquire+0x9c3/0x1a60
+[  609.095903]  ? __lock_acquire+0x42f/0x1a60
+[  609.095903]  ? __lock_acquire+0x42f/0x1a60
+[  609.095903]  lock_acquire+0xbd/0x2d0
+[  609.095903]  ? lock_task_sighand+0x67/0x1a0
+[  609.095903]  ? group_send_sig_info+0x3e/0x1b0
+[  609.095903]  ? kill_pid_info_type+0x1a/0x190
+[  609.095903]  _raw_spin_lock_irqsave+0x37/0x60
+[  609.095903]  ? lock_task_sighand+0x67/0x1a0
+[  609.095903]  lock_task_sighand+0x67/0x1a0
+[  609.095903]  group_send_sig_info+0xd5/0x1b0
+[  609.095903]  ? __pfx_it_real_fn+0x10/0x10
+[  609.095903]  kill_pid_info_type+0x74/0x190
+[  609.095903]  ? __pfx_it_real_fn+0x10/0x10
+[  609.095903]  it_real_fn+0x36/0xe0
+[  609.095903]  __hrtimer_run_queues+0xaa/0x3b0
+[  609.095903]  hrtimer_interrupt+0x113/0x270
+[  609.095903]  __sysvec_apic_timer_interrupt+0x68/0x1e0
+[  609.095903]  sysvec_apic_timer_interrupt+0x6e/0x80
+[  609.095903]  </IRQ>
+[  609.095903]  <TASK>
+[  609.095903]  asm_sysvec_apic_timer_interrupt+0x1a/0x20
+[  609.095903] RIP: 0010:pv_native_safe_halt+0xf/0x20
+[  609.095903] Code: 85 84 00 c3 cc cc cc cc 0f 1f 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 f3 0f 1e fa eb 07 0f 00 2d 05 8e 12 00 fb f4 <c3> cc cc cc cc 66 2e 0f 1f 84 00 00 00 00 00 66 90 90 90 90 90 90
+[  609.095903] RSP: 0018:ffffc900001d3ec0 EFLAGS: 00000206
+[  609.095903] RAX: 000000000007d993 RBX: 0000000000000003 RCX: 0000000000000000
+[  609.095903] RDX: 0000000000000000 RSI: 0000000000000000 RDI: ffffffff813cbf48
+[  609.095903] RBP: ffff888004eb3280 R08: 0000000000000001 R09: 0000000000000000
+[  609.095903] R10: 0000000000000001 R11: 0000000000000000 R12: 0000000000000003
+[  609.095903] R13: 0000000000000000 R14: 0000000000000000 R15: 0000000000000000
+[  609.095903]  ? do_idle+0x268/0x2b0
+[  609.095903]  default_idle+0x9/0x10
+[  609.095903]  default_idle_call+0x87/0x220
+[  609.095903]  do_idle+0x268/0x2b0
+[  609.095903]  cpu_startup_entry+0x24/0x30
+[  609.095903]  start_secondary+0xf8/0x100
+[  609.095903]  common_startup_64+0x13e/0x148
+[  609.095903]  </TASK>

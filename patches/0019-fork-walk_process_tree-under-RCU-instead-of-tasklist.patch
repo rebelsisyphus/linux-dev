@@ -1,0 +1,72 @@
+From e68f2dd9e9f7f721c2c3862a62ff4513d07d4311 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Thu, 9 Apr 2026 16:13:45 +0800
+Subject: [PATCH 19/27] fork: walk_process_tree under RCU instead of
+ tasklist_lock
+
+Convert walk_process_tree() to use rcu_read_lock() and
+list_for_each_entry_rcu() on parent->children, replacing the
+previous read_lock(&tasklist_lock) critical section.
+
+The children list is maintained with list_add_tail_rcu /
+list_del_rcu / list_replace_rcu by fork(), __unhash_process() and
+de_thread().  task_struct is freed via call_rcu() from
+put_task_struct_rcu_user(), so every node encountered by the
+walker remains valid for the duration of the RCU read-side
+critical section.  for_each_thread() is already an RCU-safe
+traversal of signal->thread_head.
+
+The only in-tree visitor is propagate_has_child_subreaper(), which
+reads is_child_reaper() and writes a benign bit-field on
+p->signal->has_child_subreaper.  Concurrent fork writers of the
+same bit-field are harmless: the flag is strictly monotonic
+(0 -> 1) and a missed update is corrected by the next invocation.
+
+This removes the last tasklist_lock reader on the fork/exit hot
+path and unblocks dropping the tasklist_lock write-side from
+copy_process() and release_task().
+
+Signed-off-by: NUMA tasklist sharding <dev@localhost>
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8d6ec3011edb..071f3042bbda 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -3148,11 +3148,19 @@ void walk_process_tree(struct task_struct *top, proc_visitor visitor, void *data
+ 	struct task_struct *leader, *parent, *child;
+ 	int res;
+ 
+-	read_lock(&tasklist_lock);
++	/*
++	 * Walk the process subtree under RCU.  real_parent->children is
++	 * maintained with list_add_tail_rcu / list_del_rcu by fork and
++	 * exit, and for_each_thread() uses RCU-safe primitives, so the
++	 * whole traversal is safe without tasklist_lock.  The visitor
++	 * (propagate_has_child_subreaper) only touches a benign bit-field
++	 * on p->signal that tolerates concurrent fork writers.
++	 */
++	rcu_read_lock();
+ 	leader = top = top->group_leader;
+ down:
+ 	for_each_thread(leader, parent) {
+-		list_for_each_entry(child, &parent->children, sibling) {
++		list_for_each_entry_rcu(child, &parent->children, sibling) {
+ 			res = visitor(child, data);
+ 			if (res) {
+ 				if (res < 0)
+@@ -3172,7 +3180,7 @@ void walk_process_tree(struct task_struct *top, proc_visitor visitor, void *data
+ 		goto up;
+ 	}
+ out:
+-	read_unlock(&tasklist_lock);
++	rcu_read_unlock();
+ }
+ 
+ #ifndef ARCH_MIN_MMSTRUCT_ALIGN
+-- 
+2.43.0
+

@@ -1,0 +1,210 @@
+From 37343672b1e66f6d750276ef10365d67a7038409 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 8 Apr 2026 16:45:19 +0800
+Subject: [PATCH 05/27] sched: take per-shard write lock around fork/exit
+ critical section
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wrap the existing tasklist_lock critical section in copy_process()
+and release_task() with the per-NUMA-domain shard's write lock as
+the OUTER lock.  Lock order is shard -> tasklist_lock -> siglock,
+acquired in that order and released in reverse.
+
+This is the lock-side switch-over of Phase 1.  Per the §9 line-by-
+line audit (see NUMA_Domain_Task_List_Design_v2.md appendix A),
+nearly every statement in the fork/exit critical section is class
+(b): it mutates a structure another fork or a non-RCU cold-path
+reader can also touch (parent->children walked by do_wait_thread,
+attach_pid hlists with lockdep_assert_held_write(&tasklist_lock),
+ptrace links, etc.).  So the inner tasklist_lock window in this
+commit is essentially the whole pre-existing critical section --
+pessimistic case of the design.  The (a)-class statement that does
+benefit immediately is the link/unlink of p->tasks itself, which is
+now serialised by the per-shard lock and lives on node-local memory.
+
+Why this commit alone is not yet a spawn win: tasklist_lock still
+serialises every fork against every other fork (and against the
+~40 cold-path readers using read_lock(&tasklist_lock)).  The win
+materialises in two later steps:
+
+  1. Hot read-side callers (oom scan, /proc walk, signal broadcast)
+     migrate to read_lock_tasklist_all() in commit 6, so they take
+     the per-shard read locks and stop blocking shard writers on
+     other nodes.
+  2. Phase 2 RCU-ifies parent->children / ptraced and gives
+     attach_pid its own per-pid lock, allowing the inner
+     tasklist_lock window to shrink to a handful of statements
+     (or vanish entirely).
+
+Implementation details:
+
+  - copy_process(): added int nid local; computed nid =
+    cpu_to_node(task_cpu(p)) just before locking; wrap with
+    write_lock_irq_task_domain(nid) / write_unlock_irq_task_domain(nid);
+    inner tasklist_lock now uses the non-_irq variant since IRQs
+    were already disabled by the shard lock.  Both the success path
+    and the bad_fork_core_free error path unlock the shard.
+  - release_task(): nid is read from p->task_domain_nid (recorded at
+    fork time and never changed).  The repeat: label sits before any
+    locking, so the zap_leader recursion naturally re-acquires the
+    new leader's shard lock.
+  - New static inline helpers write_lock_irq_task_domain() /
+    write_unlock_irq_task_domain() in <linux/sched/task.h>.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/sched/task.h | 21 +++++++++++++++++++++
+ kernel/exit.c              | 16 ++++++++++++++--
+ kernel/fork.c              | 32 +++++++++++++++++++-------------
+ 3 files changed, 54 insertions(+), 15 deletions(-)
+
+diff --git a/include/linux/sched/task.h b/include/linux/sched/task.h
+index 232d67f8adb7..6e5178549d08 100644
+--- a/include/linux/sched/task.h
++++ b/include/linux/sched/task.h
+@@ -105,6 +105,27 @@ struct task_domain {
+ 
+ extern struct task_domain **task_domains;
+ 
++/*
++ * Per-shard lock helpers.  Used by the fork/exit fast path
++ * (copy_process / release_task) which is the only place that needs
++ * to take ONE shard's write lock without also walking every shard.
++ *
++ * The IRQ-saving variants are exported because the fast path
++ * historically uses write_lock_irq(&tasklist_lock) and we keep the
++ * same IRQ discipline: the shard lock is the OUTER lock, taken
++ * with IRQs disabled, and the inner tasklist_lock is taken with the
++ * non-_irq variant (IRQs already off).
++ */
++static inline void write_lock_irq_task_domain(int nid)
++{
++	write_lock_irq(&task_domains[nid]->lock);
++}
++
++static inline void write_unlock_irq_task_domain(int nid)
++{
++	write_unlock_irq(&task_domains[nid]->lock);
++}
++
+ extern union thread_union init_thread_union;
+ extern struct task_struct init_task;
+ 
+diff --git a/kernel/exit.c b/kernel/exit.c
+index e1971d2de9e3..8d52754eee2a 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -248,6 +248,7 @@ void release_task(struct task_struct *p)
+ 	struct task_struct *leader;
+ 	struct pid *thread_pid;
+ 	int zap_leader;
++	int nid;
+ repeat:
+ 	memset(&post, 0, sizeof(post));
+ 
+@@ -261,7 +262,17 @@ void release_task(struct task_struct *p)
+ 	/* Retrieve @thread_pid before __unhash_process() may set it to NULL. */
+ 	thread_pid = task_pid(p);
+ 
+-	write_lock_irq(&tasklist_lock);
++	/*
++	 * The home shard was decided at copy_process() time and never
++	 * changes; take its write lock as the OUTER lock so the per-shard
++	 * task list mutation in __unhash_process() is serialised against
++	 * concurrent fork()s on the same node.  Inner tasklist_lock still
++	 * protects ptrace_release_task() and the cross-process notify
++	 * paths.  See the lock-order note above shard locks.
++	 */
++	nid = p->task_domain_nid;
++	write_lock_irq_task_domain(nid);
++	write_lock(&tasklist_lock);
+ 	ptrace_release_task(p);
+ 	__exit_signal(&post, p);
+ 
+@@ -287,7 +298,8 @@ void release_task(struct task_struct *p)
+ 			leader->exit_state = EXIT_DEAD;
+ 	}
+ 
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock(&tasklist_lock);
++	write_unlock_irq_task_domain(nid);
+ 	/* @thread_pid can't go away until free_pids() below */
+ 	proc_flush_pid(thread_pid);
+ 	exit_cred_namespaces(p);
+diff --git a/kernel/fork.c b/kernel/fork.c
+index fbab14caa953..8e2e3b2e73b1 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2068,6 +2068,7 @@ __latent_entropy struct task_struct *copy_process(
+ 					struct kernel_clone_args *args)
+ {
+ 	int pidfd = -1, retval;
++	int nid = 0;	/* home NUMA-domain shard, set just before locking */
+ 	struct task_struct *p;
+ 	struct multiprocess_signals delayed;
+ 	struct file *pidfile = NULL;
+@@ -2465,8 +2466,19 @@ __latent_entropy struct task_struct *copy_process(
+ 	/*
+ 	 * Make it visible to the rest of the system, but dont wake it up yet.
+ 	 * Need tasklist lock for parent etc handling!
++	 *
++	 * Decide the home NUMA-domain shard for this process and take its
++	 * write lock as the OUTER lock; the inner tasklist_lock still
++	 * protects the cross-process relationship-graph mutations
++	 * (parent->children, attach_pid hlists, ptrace links, ...).
++	 * Lock order: shard -> tasklist_lock -> sighand->siglock.  IRQs
++	 * are disabled by the shard lock; the inner tasklist_lock uses
++	 * the plain write_lock variant.
+ 	 */
+-	write_lock_irq(&tasklist_lock);
++	nid = cpu_to_node(task_cpu(p));
++	p->task_domain_nid = nid;
++	write_lock_irq_task_domain(nid);
++	write_lock(&tasklist_lock);
+ 
+ 	/* CLONE_PARENT re-uses the old parent */
+ 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {
+@@ -2536,16 +2548,8 @@ __latent_entropy struct task_struct *copy_process(
+ 			p->signal->has_child_subreaper = p->real_parent->signal->has_child_subreaper ||
+ 							 p->real_parent->signal->is_child_subreaper;
+ 			list_add_tail(&p->sibling, &p->real_parent->children);
+-			/*
+-			 * Decide and record the home NUMA-domain shard for
+-			 * this process.  Phase 1 only stores the value here;
+-			 * a subsequent commit will use it to link p into the
+-			 * per-shard task list instead of init_task.tasks.
+-			 */
+-			p->task_domain_nid = cpu_to_node(task_cpu(p));
+-			list_add_tail_rcu(&p->tasks,
+-					  &task_domains[p->task_domain_nid]->tasks);
+-			task_domains[p->task_domain_nid]->nr_tasks++;
++			list_add_tail_rcu(&p->tasks, &task_domains[nid]->tasks);
++			task_domains[nid]->nr_tasks++;
+ 			attach_pid(p, PIDTYPE_TGID);
+ 			attach_pid(p, PIDTYPE_PGID);
+ 			attach_pid(p, PIDTYPE_SID);
+@@ -2566,7 +2570,8 @@ __latent_entropy struct task_struct *copy_process(
+ 	hlist_del_init(&delayed.node);
+ 	spin_unlock(&current->sighand->siglock);
+ 	syscall_tracepoint_update(p);
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock(&tasklist_lock);
++	write_unlock_irq_task_domain(nid);
+ 
+ 	if (pidfile)
+ 		fd_install(pidfd, pidfile);
+@@ -2587,7 +2592,8 @@ __latent_entropy struct task_struct *copy_process(
+ bad_fork_core_free:
+ 	sched_core_free(p);
+ 	spin_unlock(&current->sighand->siglock);
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock(&tasklist_lock);
++	write_unlock_irq_task_domain(nid);
+ bad_fork_cancel_cgroup:
+ 	cgroup_cancel_fork(p, args);
+ bad_fork_put_pidfd:
+-- 
+2.43.0
+

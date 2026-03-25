@@ -1,0 +1,2253 @@
+From 3a10869dfbbb659a80c84a8184f28ba48cf59541 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 24 Mar 2026 11:53:50 +0800
+Subject: [PATCH 1/2] bpf
+
+---
+ include/net/rfs_bpf.h      |  58 ++++++
+ kernel/bpf/Makefile        |   1 +
+ kernel/bpf/rfs.c           | 355 ++++++++++++++++++++++++++++++++++
+ kernel/bpf/syscall.c       |  21 +++
+ net/Kconfig                |  16 ++
+ net/core/dev.c             |  44 +++++
+ net/core/filter.c          | 142 ++++++++++++++
+ net/netfilter/xt_DSCP.c    | 149 +++++----------
+ net/netfilter/xt_HL.c      | 164 +++++-----------
+ net/netfilter/xt_RATEEST.c | 303 ++++++++++-------------------
+ net/netfilter/xt_tcpmss.c  | 378 ++++++++++++++++++++++++++++++-------
+ samples/bpf/bpf_rfs_kern.c |  96 ++++++++++
+ samples/bpf/bpf_rfs_user.c | 150 +++++++++++++++
+ 13 files changed, 1393 insertions(+), 484 deletions(-)
+ create mode 100644 include/net/rfs_bpf.h
+ create mode 100644 kernel/bpf/rfs.c
+ create mode 100644 samples/bpf/bpf_rfs_kern.c
+ create mode 100644 samples/bpf/bpf_rfs_user.c
+
+diff --git a/include/net/rfs_bpf.h b/include/net/rfs_bpf.h
+new file mode 100644
+index 000000000000..dcd428a40e34
+--- /dev/null
++++ b/include/net/rfs_bpf.h
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef _NET_RFS_BPF_H
++#define _NET_RFS_BPF_H
++
++#include <linux/bpf.h>
++#include <linux/bpf_mprog.h>
++#include <linux/static_key.h>
++#include <linux/skbuff.h>
++#include <net/net_namespace.h>
++
++/* Kernel internal RFS context - passed to BPF programs */
++struct bpf_rfs_ctx_kern {
++	struct sk_buff *skb;
++	u32 hash;
++	u32 current_cpu;
++	struct net_device *dev;
++	int selected_cpu;
++	bool cpu_selected;
++};
++
++/* BPF-RFS entry - similar to tcx_entry */
++struct bpf_rfs_entry {
++	struct bpf_mprog_bundle bundle;
++	struct rcu_head rcu;
++};
++
++/* BPF-RFS link structure */
++struct bpf_rfs_link {
++	struct bpf_link link;
++	struct net_device *dev;
++};
++
++#ifdef CONFIG_BPF_RFS
++extern struct static_key_false bpf_rfs_needed;
++
++static inline bool bpf_rfs_is_needed(void)
++{
++	return static_branch_unlikely(&bpf_rfs_needed);
++}
++
++/* Core functions */
++int bpf_rfs_prog_attach(const union bpf_attr *attr, struct bpf_prog *prog);
++int bpf_rfs_prog_detach(const union bpf_attr *attr, struct bpf_prog *prog);
++int bpf_rfs_prog_query(const union bpf_attr *attr, union bpf_attr __user *uattr);
++int bpf_rfs_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
++void bpf_rfs_link_release(struct bpf_link *link);
++int bpf_rfs_run(const struct bpf_mprog_entry *entry, struct sk_buff *skb);
++void dev_bpf_rfs_uninstall(struct net_device *dev);
++
++#else /* !CONFIG_BPF_RFS */
++
++static inline bool bpf_rfs_is_needed(void) { return false; }
++static inline int bpf_rfs_run(const struct bpf_mprog_entry *entry, struct sk_buff *skb) { return -1; }
++static inline void dev_bpf_rfs_uninstall(struct net_device *dev) {}
++
++#endif /* CONFIG_BPF_RFS */
++
++#endif /* _NET_RFS_BPF_H */
+diff --git a/kernel/bpf/Makefile b/kernel/bpf/Makefile
+index 79cf22860a99..0fcbd4c005e1 100644
+--- a/kernel/bpf/Makefile
++++ b/kernel/bpf/Makefile
+@@ -25,6 +25,7 @@ obj-$(CONFIG_BPF_SYSCALL) += cpumap.o
+ obj-$(CONFIG_BPF_SYSCALL) += offload.o
+ obj-$(CONFIG_BPF_SYSCALL) += net_namespace.o
+ obj-$(CONFIG_BPF_SYSCALL) += tcx.o
++obj-$(CONFIG_BPF_RFS) += rfs.o
+ endif
+ ifeq ($(CONFIG_PERF_EVENTS),y)
+ obj-$(CONFIG_BPF_SYSCALL) += stackmap.o
+diff --git a/kernel/bpf/rfs.c b/kernel/bpf/rfs.c
+new file mode 100644
+index 000000000000..6c20dafb0d29
+--- /dev/null
++++ b/kernel/bpf/rfs.c
+@@ -0,0 +1,355 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * BPF-based Receive Flow Steering (BPF-RFS)
++ *
++ * This module implements a BPF-driven alternative to traditional RFS,
++ * allowing custom CPU selection algorithms through BPF programs.
++ */
++
++#include <linux/bpf.h>
++#include <linux/bpf_mprog.h>
++#include <linux/filter.h>
++#include <linux/netdevice.h>
++#include <linux/slab.h>
++#include <linux/static_key.h>
++#include <net/rfs_bpf.h>
++
++DEFINE_STATIC_KEY_FALSE(bpf_rfs_needed);
++EXPORT_SYMBOL_GPL(bpf_rfs_needed);
++
++/* bpf_rfs_entry operations */
++static struct bpf_rfs_entry *bpf_rfs_entry_alloc(void)
++{
++	struct bpf_rfs_entry *entry;
++
++	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
++	if (!entry)
++		return NULL;
++
++	bpf_mprog_bundle_init(&entry->bundle);
++	return entry;
++}
++
++static void bpf_rfs_entry_free(struct rcu_head *rcu)
++{
++	struct bpf_rfs_entry *entry = container_of(rcu, struct bpf_rfs_entry, rcu);
++
++	bpf_mprog_bundle_destroy(&entry->bundle);
++	kfree(entry);
++}
++
++/* Get or create entry for device */
++static struct bpf_mprog_entry *bpf_rfs_entry_fetch_or_create(
++	struct net_device *dev, bool *created)
++{
++	struct bpf_rfs_entry *entry;
++
++	entry = rcu_dereference_rtnl(dev->bpf_rfs);
++	if (entry)
++		return &entry->bundle.a;
++
++	*created = true;
++	entry = bpf_rfs_entry_alloc();
++	if (!entry)
++		return ERR_PTR(-ENOMEM);
++
++	rcu_assign_pointer(dev->bpf_rfs, entry);
++	return &entry->bundle.a;
++}
++
++static inline void bpf_rfs_entry_update(struct net_device *dev,
++					struct bpf_mprog_entry *entry)
++{
++	struct bpf_rfs_entry *rfs_entry;
++
++	ASSERT_RTNL();
++	rfs_entry = container_of(entry->parent, struct bpf_rfs_entry, bundle);
++	rcu_assign_pointer(dev->bpf_rfs, rfs_entry);
++}
++
++/* Run BPF-RFS programs */
++int bpf_rfs_run(const struct bpf_mprog_entry *entry, struct sk_buff *skb)
++{
++	struct bpf_rfs_ctx_kern ctx_kern = {};
++	struct bpf_rfs_ctx ctx;
++	const struct bpf_mprog_fp *fp;
++	const struct bpf_prog *prog;
++	int ret = -1;
++
++	/* Initialize context */
++	ctx_kern.skb = skb;
++	ctx_kern.hash = skb_get_hash(skb);
++	ctx_kern.current_cpu = smp_processor_id();
++	ctx_kern.dev = skb->dev;
++	ctx_kern.selected_cpu = -1;
++	ctx_kern.cpu_selected = false;
++
++	/* Fill user-visible context */
++	ctx.hash = ctx_kern.hash;
++	ctx.current_cpu = ctx_kern.current_cpu;
++	ctx.queue_mapping = skb_get_queue_mapping(skb);
++	ctx.ifindex = skb->dev->ifindex;
++	ctx.napi_id = skb->napi_id;
++	ctx.reserved = 0;
++
++	/* Execute BPF programs */
++	bpf_mprog_foreach_prog(entry, fp, prog) {
++		bpf_compute_data_pointers(skb);
++		ret = bpf_prog_run(prog, &ctx);
++
++		if (ret >= 0 && ret < nr_cpu_ids) {
++			/* Valid CPU selected */
++			ctx_kern.selected_cpu = ret;
++			ctx_kern.cpu_selected = true;
++			break;
++		}
++		/* Continue to next program if not selected */
++	}
++
++	return ctx_kern.cpu_selected ? ctx_kern.selected_cpu : -1;
++}
++EXPORT_SYMBOL_GPL(bpf_rfs_run);
++
++/* Attach BPF program */
++int bpf_rfs_prog_attach(const union bpf_attr *attr, struct bpf_prog *prog)
++{
++	struct net *net = current->nsproxy->net_ns;
++	struct bpf_mprog_entry *entry, *entry_new;
++	struct net_device *dev;
++	bool created = false;
++	int ret;
++
++	rtnl_lock();
++	dev = __dev_get_by_index(net, attr->target_ifindex);
++	if (!dev) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++
++	entry = bpf_rfs_entry_fetch_or_create(dev, &created);
++	if (IS_ERR(entry)) {
++		ret = PTR_ERR(entry);
++		goto unlock;
++	}
++
++	ret = bpf_mprog_attach(entry, &entry_new, prog, NULL,
++			       attr->attach_flags, attr->relative_fd,
++			       attr->expected_revision);
++	if (!ret) {
++		if (entry != entry_new) {
++			bpf_rfs_entry_update(dev, entry_new);
++			static_branch_inc(&bpf_rfs_needed);
++		}
++		bpf_mprog_commit(entry);
++	}
++
++unlock:
++	rtnl_unlock();
++	return ret;
++}
++
++/* Detach BPF program */
++int bpf_rfs_prog_detach(const union bpf_attr *attr, struct bpf_prog *prog)
++{
++	struct net *net = current->nsproxy->net_ns;
++	struct bpf_mprog_entry *entry, *entry_new;
++	struct net_device *dev;
++	int ret;
++
++	rtnl_lock();
++	dev = __dev_get_by_index(net, attr->target_ifindex);
++	if (!dev) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++
++	entry = rcu_dereference_rtnl(dev->bpf_rfs);
++	if (!entry) {
++		ret = -ENOENT;
++		goto unlock;
++	}
++
++	ret = bpf_mprog_detach(entry, &entry_new, prog, NULL,
++			       attr->attach_flags, attr->relative_fd,
++			       attr->expected_revision);
++	if (!ret) {
++		if (entry != entry_new) {
++			bpf_rfs_entry_update(dev, entry_new);
++			static_branch_dec(&bpf_rfs_needed);
++		}
++		bpf_mprog_commit(entry);
++	}
++
++unlock:
++	rtnl_unlock();
++	return ret;
++}
++
++/* Query attached programs */
++int bpf_rfs_prog_query(const union bpf_attr *attr, union bpf_attr __user *uattr)
++{
++	struct net *net = current->nsproxy->net_ns;
++	struct bpf_mprog_entry *entry;
++	struct net_device *dev;
++	int ret;
++
++	rtnl_lock();
++	dev = __dev_get_by_index(net, attr->query.target_ifindex);
++	if (!dev) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++
++	entry = rcu_dereference_rtnl(dev->bpf_rfs);
++	if (!entry) {
++		ret = -ENOENT;
++		goto unlock;
++	}
++
++	ret = bpf_mprog_query(entry, attr, uattr);
++
++unlock:
++	rtnl_unlock();
++	return ret;
++}
++
++/* Link release callback */
++static void bpf_rfs_link_dealloc(struct bpf_link *link)
++{
++	struct bpf_rfs_link *rfs_link = container_of(link, struct bpf_rfs_link, link);
++
++	kfree(rfs_link);
++}
++
++/* Link detach callback */
++static int bpf_rfs_link_detach(struct bpf_link *link)
++{
++	struct bpf_rfs_link *rfs_link = container_of(link, struct bpf_rfs_link, link);
++	struct bpf_mprog_entry *entry, *entry_new;
++	int ret;
++
++	rtnl_lock();
++
++	entry = rcu_dereference_rtnl(rfs_link->dev->bpf_rfs);
++	if (!entry) {
++		ret = -ENOENT;
++		goto unlock;
++	}
++
++	ret = bpf_mprog_detach(entry, &entry_new, NULL, link, 0, 0, 0);
++	if (!ret) {
++		if (entry != entry_new) {
++			bpf_rfs_entry_update(rfs_link->dev, entry_new);
++			static_branch_dec(&bpf_rfs_needed);
++		}
++		bpf_mprog_commit(entry);
++	}
++
++unlock:
++	rtnl_unlock();
++	return ret;
++}
++
++static const struct bpf_link_ops bpf_rfs_link_lops = {
++	.release = bpf_rfs_link_release,
++	.dealloc = bpf_rfs_link_dealloc,
++	.detach = bpf_rfs_link_detach,
++};
++
++/* Link attach */
++int bpf_rfs_link_attach(const union bpf_attr *attr, struct bpf_prog *prog)
++{
++	struct net *net = current->nsproxy->net_ns;
++	struct bpf_mprog_entry *entry, *entry_new;
++	struct bpf_link_primer link_primer;
++	struct bpf_rfs_link *rfs_link;
++	struct net_device *dev;
++	bool created = false;
++	int ret;
++
++	rfs_link = kzalloc(sizeof(*rfs_link), GFP_USER);
++	if (!rfs_link)
++		return -ENOMEM;
++
++	bpf_link_init(&rfs_link->link, BPF_LINK_TYPE_UNSPEC, &bpf_rfs_link_lops, prog);
++
++	rtnl_lock();
++
++	dev = __dev_get_by_index(net, attr->link_create.target_ifindex);
++	if (!dev) {
++		ret = -ENODEV;
++		goto unlock_free;
++	}
++
++	ret = bpf_link_prime(&rfs_link->link, &link_primer);
++	if (ret)
++		goto unlock_free;
++
++	entry = bpf_rfs_entry_fetch_or_create(dev, &created);
++	if (IS_ERR(entry)) {
++		ret = PTR_ERR(entry);
++		goto unlock_cancel;
++	}
++
++	ret = bpf_mprog_attach(entry, &entry_new, prog, &rfs_link->link,
++			       attr->link_create.flags,
++			       attr->link_create.relative_fd,
++			       attr->link_create.expected_revision);
++	if (!ret) {
++		if (entry != entry_new) {
++			bpf_rfs_entry_update(dev, entry_new);
++			static_branch_inc(&bpf_rfs_needed);
++		}
++		bpf_mprog_commit(entry);
++		rfs_link->dev = dev;
++		dev_hold(dev);
++	}
++
++unlock_cancel:
++	if (ret)
++		bpf_link_cancel(&link_primer);
++	else
++		ret = bpf_link_settle(&link_primer);
++
++unlock_free:
++	rtnl_unlock();
++	if (ret)
++		kfree(rfs_link);
++	return ret;
++}
++
++/* Link release - called when link is being destroyed */
++void bpf_rfs_link_release(struct bpf_link *link)
++{
++	struct bpf_rfs_link *rfs_link = container_of(link, struct bpf_rfs_link, link);
++
++	rtnl_lock();
++	if (rfs_link->dev)
++		dev_put(rfs_link->dev);
++	rtnl_unlock();
++}
++
++/* Uninstall from device - called when device is being unregistered */
++void dev_bpf_rfs_uninstall(struct net_device *dev)
++{
++	struct bpf_rfs_entry *entry;
++
++	ASSERT_RTNL();
++
++	entry = rcu_dereference_protected(dev->bpf_rfs, 1);
++	if (!entry)
++		return;
++
++	RCU_INIT_POINTER(dev->bpf_rfs, NULL);
++	call_rcu(&entry->rcu, bpf_rfs_entry_free);
++	static_branch_dec(&bpf_rfs_needed);
++}
++
++static int __init bpf_rfs_init(void)
++{
++	/* Register mprog support for BPF_PROG_TYPE_RFS */
++	bpf_mprog_support(BPF_PROG_TYPE_RFS);
++	return 0;
++}
++
++late_initcall(bpf_rfs_init);
+diff --git a/kernel/bpf/syscall.c b/kernel/bpf/syscall.c
+index 274039e36465..03fa155ce81b 100644
+--- a/kernel/bpf/syscall.c
++++ b/kernel/bpf/syscall.c
+@@ -44,6 +44,7 @@
+ 
+ #include <net/netfilter/nf_bpf_link.h>
+ #include <net/netkit.h>
++#include <net/rfs_bpf.h>
+ #include <net/tcx.h>
+ 
+ #define IS_FD_ARRAY(map) ((map)->map_type == BPF_MAP_TYPE_PERF_EVENT_ARRAY || \
+@@ -2746,6 +2747,10 @@ bpf_prog_load_check_attach(enum bpf_prog_type prog_type,
+ 		if (expected_attach_type == BPF_NETFILTER)
+ 			return 0;
+ 		return -EINVAL;
++	case BPF_PROG_TYPE_RFS:
++		if (expected_attach_type == BPF_RFS_INGRESS)
++			return 0;
++		return -EINVAL;
+ 	case BPF_PROG_TYPE_SYSCALL:
+ 	case BPF_PROG_TYPE_EXT:
+ 		if (expected_attach_type)
+@@ -2777,6 +2782,7 @@ static bool is_net_admin_prog_type(enum bpf_prog_type prog_type)
+ 	case BPF_PROG_TYPE_SOCK_OPS:
+ 	case BPF_PROG_TYPE_EXT: /* extends any prog */
+ 	case BPF_PROG_TYPE_NETFILTER:
++	case BPF_PROG_TYPE_RFS:
+ 		return true;
+ 	case BPF_PROG_TYPE_CGROUP_SKB:
+ 		/* always unpriv */
+@@ -4420,6 +4426,10 @@ static int bpf_prog_attach_check_attach_type(const struct bpf_prog *prog,
+ 		if (attach_type != BPF_NETFILTER)
+ 			return -EINVAL;
+ 		return 0;
++	case BPF_PROG_TYPE_RFS:
++		if (attach_type != BPF_RFS_INGRESS)
++			return -EINVAL;
++		return 0;
+ 	case BPF_PROG_TYPE_PERF_EVENT:
+ 	case BPF_PROG_TYPE_TRACEPOINT:
+ 		if (attach_type != BPF_PERF_EVENT)
+@@ -4552,6 +4562,9 @@ static int bpf_prog_attach(const union bpf_attr *attr)
+ 		else
+ 			ret = netkit_prog_attach(attr, prog);
+ 		break;
++	case BPF_PROG_TYPE_RFS:
++		ret = bpf_rfs_prog_attach(attr, prog);
++		break;
+ 	default:
+ 		ret = -EINVAL;
+ 	}
+@@ -4622,6 +4635,9 @@ static int bpf_prog_detach(const union bpf_attr *attr)
+ 		else
+ 			ret = netkit_prog_detach(attr, prog);
+ 		break;
++	case BPF_PROG_TYPE_RFS:
++		ret = bpf_rfs_prog_detach(attr, prog);
++		break;
+ 	default:
+ 		ret = -EINVAL;
+ 	}
+@@ -4690,6 +4706,8 @@ static int bpf_prog_query(const union bpf_attr *attr,
+ 	case BPF_NETKIT_PRIMARY:
+ 	case BPF_NETKIT_PEER:
+ 		return netkit_prog_query(attr, uattr);
++	case BPF_RFS_INGRESS:
++		return bpf_rfs_prog_query(attr, uattr);
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -5757,6 +5775,9 @@ static int link_create(union bpf_attr *attr, bpfptr_t uattr)
+ 	case BPF_PROG_TYPE_NETFILTER:
+ 		ret = bpf_nf_link_attach(attr, prog);
+ 		break;
++	case BPF_PROG_TYPE_RFS:
++		ret = bpf_rfs_link_attach(attr, prog);
++		break;
+ #endif
+ 	case BPF_PROG_TYPE_PERF_EVENT:
+ 	case BPF_PROG_TYPE_TRACEPOINT:
+diff --git a/net/Kconfig b/net/Kconfig
+index 62266eaf0e95..1be83f78b6e2 100644
+--- a/net/Kconfig
++++ b/net/Kconfig
+@@ -320,6 +320,22 @@ config RFS_ACCEL
+ 	  Allowing drivers for multiqueue hardware with flow filter tables to
+ 	  accelerate RFS.
+ 
++config BPF_RFS
++	bool "BPF-based Receive Flow Steering"
++	depends on BPF_SYSCALL
++	depends on NET
++	select BPF_MPROG
++	help
++	  This option enables BPF-based Receive Flow Steering (BPF-RFS),
++	  which allows using BPF programs to steer receive packets to
++	  specific CPUs. This is an alternative to the traditional RPS/RFS
++	  implementation and can work independently without CONFIG_RPS.
++
++	  BPF-RFS uses BPF MAPs for flow tables and allows custom CPU
++	  selection algorithms through BPF programs.
++
++	  If unsure, say N.
++
+ config SOCK_RX_QUEUE_MAPPING
+ 	bool
+ 
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 37078b5b6628..93e271c7c755 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -162,6 +162,7 @@
+ #include <net/page_pool/helpers.h>
+ #include <net/page_pool/memory_provider.h>
+ #include <net/rps.h>
++#include <net/rfs_bpf.h>
+ #include <linux/phy_link_topology.h>
+ 
+ #include "dev.h"
+@@ -5670,6 +5671,29 @@ static int netif_rx_internal(struct sk_buff *skb)
+ 
+ 	trace_netif_rx(skb);
+ 
++#ifdef CONFIG_BPF_RFS
++	/* BPF-RFS takes priority over traditional RPS/RFS */
++	if (bpf_rfs_is_needed()) {
++		struct bpf_mprog_entry *rfs_entry;
++
++		rcu_read_lock();
++
++		rfs_entry = rcu_dereference(skb->dev->bpf_rfs);
++		if (rfs_entry) {
++			int cpu = bpf_rfs_run(rfs_entry, skb);
++			u32 qtail;
++
++			if (cpu < 0)
++				cpu = smp_processor_id();
++
++			ret = enqueue_to_backlog(skb, cpu, &qtail);
++			rcu_read_unlock();
++			return ret;
++		}
++		rcu_read_unlock();
++	}
++#endif
++
+ #ifdef CONFIG_RPS
+ 	if (static_branch_unlikely(&rps_needed)) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+@@ -6366,6 +6390,26 @@ static int netif_receive_skb_internal(struct sk_buff *skb)
+ 		return NET_RX_SUCCESS;
+ 
+ 	rcu_read_lock();
++
++#ifdef CONFIG_BPF_RFS
++	/* BPF-RFS takes priority over traditional RPS/RFS */
++	if (bpf_rfs_is_needed()) {
++		struct bpf_mprog_entry *rfs_entry;
++
++		rfs_entry = rcu_dereference(skb->dev->bpf_rfs);
++		if (rfs_entry) {
++			int cpu = bpf_rfs_run(rfs_entry, skb);
++			if (cpu >= 0) {
++				u32 qtail;
++				ret = enqueue_to_backlog(skb, cpu, &qtail);
++				rcu_read_unlock();
++				return ret;
++			}
++			/* BPF didn't select CPU, fall through to RPS/RFS */
++		}
++	}
++#endif
++
+ #ifdef CONFIG_RPS
+ 	if (static_branch_unlikely(&rps_needed)) {
+ 		struct rps_dev_flow voidflow, *rflow = &voidflow;
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 2f023999f046..b8408b0b2895 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -11209,6 +11209,148 @@ static u32 sk_msg_convert_ctx_access(enum bpf_access_type type,
+ 	return insn - insn_buf;
+ }
+ 
++#ifdef CONFIG_BPF_RFS
++#include <net/rfs_bpf.h>
++
++/* BPF helper: Record flow to CPU mapping in sock flow table */
++BPF_CALL_3(bpf_rfs_record_flow, struct bpf_map *, map, u32, hash, u32, cpu)
++{
++	struct bpf_rfs_sock_flow_key key = { .hash = hash };
++	struct bpf_rfs_sock_flow_val val = {
++		.cpu = cpu,
++		.timestamp = bpf_ktime_get_ns(),
++		.pid = current->pid
++	};
++
++	if (cpu >= nr_cpu_ids)
++		return -EINVAL;
++
++	return map->ops->map_update_elem(map, &key, &val, BPF_ANY);
++}
++
++static const struct bpf_func_proto bpf_rfs_record_flow_proto = {
++	.func		= bpf_rfs_record_flow,
++	.gpl_only	= false,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_CONST_MAP_PTR,
++	.arg2_type	= ARG_ANYTHING,
++	.arg3_type	= ARG_ANYTHING,
++};
++
++/* BPF helper: Lookup flow in sock flow table */
++BPF_CALL_3(bpf_rfs_lookup_flow, struct bpf_map *, map, u32, hash, u32 *, cpu)
++{
++	struct bpf_rfs_sock_flow_key key = { .hash = hash };
++	struct bpf_rfs_sock_flow_val *val;
++
++	val = map->ops->map_lookup_elem(map, &key);
++	if (!val)
++		return -ENOENT;
++
++	*cpu = val->cpu;
++	return 0;
++}
++
++static const struct bpf_func_proto bpf_rfs_lookup_flow_proto = {
++	.func		= bpf_rfs_lookup_flow,
++	.gpl_only	= false,
++	.ret_type	= RET_INTEGER,
++	.arg1_type	= ARG_CONST_MAP_PTR,
++	.arg2_type	= ARG_ANYTHING,
++	.arg3_type	= ARG_PTR_TO_INT,
++};
++
++static const struct bpf_func_proto *
++rfs_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
++{
++	switch (func_id) {
++	case BPF_FUNC_map_lookup_elem:
++		return &bpf_map_lookup_elem_proto;
++	case BPF_FUNC_map_update_elem:
++		return &bpf_map_update_elem_proto;
++	case BPF_FUNC_map_delete_elem:
++		return &bpf_map_delete_elem_proto;
++	case BPF_FUNC_map_push_elem:
++		return &bpf_map_push_elem_proto;
++	case BPF_FUNC_map_pop_elem:
++		return &bpf_map_pop_elem_proto;
++	case BPF_FUNC_map_peek_elem:
++		return &bpf_map_peek_elem_proto;
++	case BPF_FUNC_ktime_get_ns:
++		return &bpf_ktime_get_ns_proto;
++	case BPF_FUNC_ktime_get_boot_ns:
++		return &bpf_ktime_get_boot_ns_proto;
++	case BPF_FUNC_ktime_get_coarse_ns:
++		return &bpf_ktime_get_coarse_ns_proto;
++	case BPF_FUNC_rfs_record_flow:
++		return &bpf_rfs_record_flow_proto;
++	case BPF_FUNC_rfs_lookup_flow:
++		return &bpf_rfs_lookup_flow_proto;
++	default:
++		return bpf_base_func_proto(func_id, prog);
++	}
++}
++
++static bool rfs_is_valid_access(int off, int size, enum bpf_access_type type,
++				const struct bpf_prog *prog,
++				struct bpf_insn_access_aux *info)
++{
++	if (type == BPF_WRITE)
++		return false;
++
++	if (off < 0 || off >= sizeof(struct bpf_rfs_ctx))
++		return false;
++
++	if (off % size != 0)
++		return false;
++
++	return true;
++}
++
++static int rfs_convert_ctx_access(enum bpf_access_type type,
++				  const struct bpf_insn *si,
++				  struct bpf_insn *insn_buf,
++				  struct bpf_prog *prog,
++				  u32 *target_size)
++{
++	struct bpf_insn *insn = insn_buf;
++
++	switch (si->off) {
++	case offsetof(struct bpf_rfs_ctx, hash):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rfs_ctx, hash));
++		break;
++	case offsetof(struct bpf_rfs_ctx, current_cpu):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rfs_ctx, current_cpu));
++		break;
++	case offsetof(struct bpf_rfs_ctx, queue_mapping):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rfs_ctx, queue_mapping));
++		break;
++	case offsetof(struct bpf_rfs_ctx, ifindex):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rfs_ctx, ifindex));
++		break;
++	case offsetof(struct bpf_rfs_ctx, napi_id):
++		*insn++ = BPF_LDX_MEM(BPF_W, si->dst_reg, si->src_reg,
++				      offsetof(struct bpf_rfs_ctx, napi_id));
++		break;
++	}
++
++	return insn - insn_buf;
++}
++
++const struct bpf_verifier_ops rfs_verifier_ops = {
++	.get_func_proto		= rfs_func_proto,
++	.is_valid_access	= rfs_is_valid_access,
++	.convert_ctx_access	= rfs_convert_ctx_access,
++};
++
++const struct bpf_prog_ops rfs_prog_ops = {
++};
++#endif /* CONFIG_BPF_RFS */
++
+ const struct bpf_verifier_ops sk_filter_verifier_ops = {
+ 	.get_func_proto		= sk_filter_func_proto,
+ 	.is_valid_access	= sk_filter_is_valid_access,
+diff --git a/net/netfilter/xt_DSCP.c b/net/netfilter/xt_DSCP.c
+index cfa44515ab72..fb0169a8f9bb 100644
+--- a/net/netfilter/xt_DSCP.c
++++ b/net/netfilter/xt_DSCP.c
+@@ -1,11 +1,8 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+-/* x_tables module for setting the IPv4/IPv6 DSCP field, Version 1.8
++/* IP tables module for matching the value of the IPv4/IPv6 DSCP field
+  *
+  * (C) 2002 by Harald Welte <laforge@netfilter.org>
+- * based on ipt_FTOS.c (C) 2000 by Matthew G. Marsh <mgm@paktronix.com>
+- *
+- * See RFC2474 for a description of the DSCP field within the IP Header.
+-*/
++ */
+ #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+@@ -14,148 +11,100 @@
+ #include <net/dsfield.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_DSCP.h>
++#include <linux/netfilter/xt_dscp.h>
+ 
+ MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_DESCRIPTION("Xtables: DSCP/TOS field modification");
++MODULE_DESCRIPTION("Xtables: DSCP/TOS field match");
+ MODULE_LICENSE("GPL");
+-MODULE_ALIAS("ipt_DSCP");
+-MODULE_ALIAS("ip6t_DSCP");
+-MODULE_ALIAS("ipt_TOS");
+-MODULE_ALIAS("ip6t_TOS");
+-
+-#define XT_DSCP_ECN_MASK	3u
++MODULE_ALIAS("ipt_dscp");
++MODULE_ALIAS("ip6t_dscp");
++MODULE_ALIAS("ipt_tos");
++MODULE_ALIAS("ip6t_tos");
+ 
+-static unsigned int
+-dscp_tg(struct sk_buff *skb, const struct xt_action_param *par)
++static bool
++dscp_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_DSCP_info *dinfo = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 	u_int8_t dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+ 
+-	if (dscp != dinfo->dscp) {
+-		if (skb_ensure_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-
+-		ipv4_change_dsfield(ip_hdr(skb), XT_DSCP_ECN_MASK,
+-				    dinfo->dscp << XT_DSCP_SHIFT);
+-
+-	}
+-	return XT_CONTINUE;
++	return (dscp == info->dscp) ^ !!info->invert;
+ }
+ 
+-static unsigned int
+-dscp_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++static bool
++dscp_mt6(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_DSCP_info *dinfo = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 	u_int8_t dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
+ 
+-	if (dscp != dinfo->dscp) {
+-		if (skb_ensure_writable(skb, sizeof(struct ipv6hdr)))
+-			return NF_DROP;
+-
+-		ipv6_change_dsfield(ipv6_hdr(skb), XT_DSCP_ECN_MASK,
+-				    dinfo->dscp << XT_DSCP_SHIFT);
+-	}
+-	return XT_CONTINUE;
++	return (dscp == info->dscp) ^ !!info->invert;
+ }
+ 
+-static int dscp_tg_check(const struct xt_tgchk_param *par)
++static int dscp_mt_check(const struct xt_mtchk_param *par)
+ {
+-	const struct xt_DSCP_info *info = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 
+ 	if (info->dscp > XT_DSCP_MAX)
+ 		return -EDOM;
+-	return 0;
+-}
+ 
+-static unsigned int
+-tos_tg(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	const struct xt_tos_target_info *info = par->targinfo;
+-	struct iphdr *iph = ip_hdr(skb);
+-	u_int8_t orig, nv;
+-
+-	orig = ipv4_get_dsfield(iph);
+-	nv   = (orig & ~info->tos_mask) ^ info->tos_value;
+-
+-	if (orig != nv) {
+-		if (skb_ensure_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-		iph = ip_hdr(skb);
+-		ipv4_change_dsfield(iph, 0, nv);
+-	}
+-
+-	return XT_CONTINUE;
++	return 0;
+ }
+ 
+-static unsigned int
+-tos_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++static bool tos_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_tos_target_info *info = par->targinfo;
+-	struct ipv6hdr *iph = ipv6_hdr(skb);
+-	u_int8_t orig, nv;
+-
+-	orig = ipv6_get_dsfield(iph);
+-	nv   = (orig & ~info->tos_mask) ^ info->tos_value;
+-
+-	if (orig != nv) {
+-		if (skb_ensure_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-		iph = ipv6_hdr(skb);
+-		ipv6_change_dsfield(iph, 0, nv);
+-	}
+-
+-	return XT_CONTINUE;
++	const struct xt_tos_match_info *info = par->matchinfo;
++
++	if (xt_family(par) == NFPROTO_IPV4)
++		return ((ip_hdr(skb)->tos & info->tos_mask) ==
++		       info->tos_value) ^ !!info->invert;
++	else
++		return ((ipv6_get_dsfield(ipv6_hdr(skb)) & info->tos_mask) ==
++		       info->tos_value) ^ !!info->invert;
+ }
+ 
+-static struct xt_target dscp_tg_reg[] __read_mostly = {
++static struct xt_match dscp_mt_reg[] __read_mostly = {
+ 	{
+-		.name		= "DSCP",
++		.name		= "dscp",
+ 		.family		= NFPROTO_IPV4,
+-		.checkentry	= dscp_tg_check,
+-		.target		= dscp_tg,
+-		.targetsize	= sizeof(struct xt_DSCP_info),
+-		.table		= "mangle",
++		.checkentry	= dscp_mt_check,
++		.match		= dscp_mt,
++		.matchsize	= sizeof(struct xt_dscp_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "DSCP",
++		.name		= "dscp",
+ 		.family		= NFPROTO_IPV6,
+-		.checkentry	= dscp_tg_check,
+-		.target		= dscp_tg6,
+-		.targetsize	= sizeof(struct xt_DSCP_info),
+-		.table		= "mangle",
++		.checkentry	= dscp_mt_check,
++		.match		= dscp_mt6,
++		.matchsize	= sizeof(struct xt_dscp_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "TOS",
++		.name		= "tos",
+ 		.revision	= 1,
+ 		.family		= NFPROTO_IPV4,
+-		.table		= "mangle",
+-		.target		= tos_tg,
+-		.targetsize	= sizeof(struct xt_tos_target_info),
++		.match		= tos_mt,
++		.matchsize	= sizeof(struct xt_tos_match_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "TOS",
++		.name		= "tos",
+ 		.revision	= 1,
+ 		.family		= NFPROTO_IPV6,
+-		.table		= "mangle",
+-		.target		= tos_tg6,
+-		.targetsize	= sizeof(struct xt_tos_target_info),
++		.match		= tos_mt,
++		.matchsize	= sizeof(struct xt_tos_match_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ };
+ 
+-static int __init dscp_tg_init(void)
++static int __init dscp_mt_init(void)
+ {
+-	return xt_register_targets(dscp_tg_reg, ARRAY_SIZE(dscp_tg_reg));
++	return xt_register_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+ }
+ 
+-static void __exit dscp_tg_exit(void)
++static void __exit dscp_mt_exit(void)
+ {
+-	xt_unregister_targets(dscp_tg_reg, ARRAY_SIZE(dscp_tg_reg));
++	xt_unregister_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+ }
+ 
+-module_init(dscp_tg_init);
+-module_exit(dscp_tg_exit);
++module_init(dscp_mt_init);
++module_exit(dscp_mt_exit);
+diff --git a/net/netfilter/xt_HL.c b/net/netfilter/xt_HL.c
+index 7873b834c300..c1a70f8f0441 100644
+--- a/net/netfilter/xt_HL.c
++++ b/net/netfilter/xt_HL.c
+@@ -1,159 +1,93 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * TTL modification target for IP tables
+- * (C) 2000,2005 by Harald Welte <laforge@netfilter.org>
++ * IP tables module for matching the value of the TTL
++ * (C) 2000,2001 by Harald Welte <laforge@netfilter.org>
+  *
+- * Hop Limit modification target for ip6tables
+- * Maciej Soltysiak <solt@dns.toxicfilms.tv>
++ * Hop Limit matching module
++ * (C) 2001-2002 Maciej Soltysiak <solt@dns.toxicfilms.tv>
+  */
+-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
++
+ #include <linux/ip.h>
+ #include <linux/ipv6.h>
+-#include <net/checksum.h>
++#include <linux/module.h>
++#include <linux/skbuff.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter_ipv4/ipt_TTL.h>
+-#include <linux/netfilter_ipv6/ip6t_HL.h>
++#include <linux/netfilter_ipv4/ipt_ttl.h>
++#include <linux/netfilter_ipv6/ip6t_hl.h>
+ 
+-MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+ MODULE_AUTHOR("Maciej Soltysiak <solt@dns.toxicfilms.tv>");
+-MODULE_DESCRIPTION("Xtables: Hoplimit/TTL Limit field modification target");
++MODULE_DESCRIPTION("Xtables: Hoplimit/TTL field match");
+ MODULE_LICENSE("GPL");
++MODULE_ALIAS("ipt_ttl");
++MODULE_ALIAS("ip6t_hl");
+ 
+-static unsigned int
+-ttl_tg(struct sk_buff *skb, const struct xt_action_param *par)
++static bool ttl_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	struct iphdr *iph;
+-	const struct ipt_TTL_info *info = par->targinfo;
+-	int new_ttl;
+-
+-	if (skb_ensure_writable(skb, sizeof(*iph)))
+-		return NF_DROP;
+-
+-	iph = ip_hdr(skb);
++	const struct ipt_ttl_info *info = par->matchinfo;
++	const u8 ttl = ip_hdr(skb)->ttl;
+ 
+ 	switch (info->mode) {
+-	case IPT_TTL_SET:
+-		new_ttl = info->ttl;
+-		break;
+-	case IPT_TTL_INC:
+-		new_ttl = iph->ttl + info->ttl;
+-		if (new_ttl > 255)
+-			new_ttl = 255;
+-		break;
+-	case IPT_TTL_DEC:
+-		new_ttl = iph->ttl - info->ttl;
+-		if (new_ttl < 0)
+-			new_ttl = 0;
+-		break;
+-	default:
+-		new_ttl = iph->ttl;
+-		break;
++	case IPT_TTL_EQ:
++		return ttl == info->ttl;
++	case IPT_TTL_NE:
++		return ttl != info->ttl;
++	case IPT_TTL_LT:
++		return ttl < info->ttl;
++	case IPT_TTL_GT:
++		return ttl > info->ttl;
+ 	}
+ 
+-	if (new_ttl != iph->ttl) {
+-		csum_replace2(&iph->check, htons(iph->ttl << 8),
+-					   htons(new_ttl << 8));
+-		iph->ttl = new_ttl;
+-	}
+-
+-	return XT_CONTINUE;
++	return false;
+ }
+ 
+-static unsigned int
+-hl_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++static bool hl_mt6(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	struct ipv6hdr *ip6h;
+-	const struct ip6t_HL_info *info = par->targinfo;
+-	int new_hl;
+-
+-	if (skb_ensure_writable(skb, sizeof(*ip6h)))
+-		return NF_DROP;
+-
+-	ip6h = ipv6_hdr(skb);
++	const struct ip6t_hl_info *info = par->matchinfo;
++	const struct ipv6hdr *ip6h = ipv6_hdr(skb);
+ 
+ 	switch (info->mode) {
+-	case IP6T_HL_SET:
+-		new_hl = info->hop_limit;
+-		break;
+-	case IP6T_HL_INC:
+-		new_hl = ip6h->hop_limit + info->hop_limit;
+-		if (new_hl > 255)
+-			new_hl = 255;
+-		break;
+-	case IP6T_HL_DEC:
+-		new_hl = ip6h->hop_limit - info->hop_limit;
+-		if (new_hl < 0)
+-			new_hl = 0;
+-		break;
+-	default:
+-		new_hl = ip6h->hop_limit;
+-		break;
++	case IP6T_HL_EQ:
++		return ip6h->hop_limit == info->hop_limit;
++	case IP6T_HL_NE:
++		return ip6h->hop_limit != info->hop_limit;
++	case IP6T_HL_LT:
++		return ip6h->hop_limit < info->hop_limit;
++	case IP6T_HL_GT:
++		return ip6h->hop_limit > info->hop_limit;
+ 	}
+ 
+-	ip6h->hop_limit = new_hl;
+-
+-	return XT_CONTINUE;
+-}
+-
+-static int ttl_tg_check(const struct xt_tgchk_param *par)
+-{
+-	const struct ipt_TTL_info *info = par->targinfo;
+-
+-	if (info->mode > IPT_TTL_MAXMODE)
+-		return -EINVAL;
+-	if (info->mode != IPT_TTL_SET && info->ttl == 0)
+-		return -EINVAL;
+-	return 0;
+-}
+-
+-static int hl_tg6_check(const struct xt_tgchk_param *par)
+-{
+-	const struct ip6t_HL_info *info = par->targinfo;
+-
+-	if (info->mode > IP6T_HL_MAXMODE)
+-		return -EINVAL;
+-	if (info->mode != IP6T_HL_SET && info->hop_limit == 0)
+-		return -EINVAL;
+-	return 0;
++	return false;
+ }
+ 
+-static struct xt_target hl_tg_reg[] __read_mostly = {
++static struct xt_match hl_mt_reg[] __read_mostly = {
+ 	{
+-		.name       = "TTL",
++		.name       = "ttl",
+ 		.revision   = 0,
+ 		.family     = NFPROTO_IPV4,
+-		.target     = ttl_tg,
+-		.targetsize = sizeof(struct ipt_TTL_info),
+-		.table      = "mangle",
+-		.checkentry = ttl_tg_check,
++		.match      = ttl_mt,
++		.matchsize  = sizeof(struct ipt_ttl_info),
+ 		.me         = THIS_MODULE,
+ 	},
+ 	{
+-		.name       = "HL",
++		.name       = "hl",
+ 		.revision   = 0,
+ 		.family     = NFPROTO_IPV6,
+-		.target     = hl_tg6,
+-		.targetsize = sizeof(struct ip6t_HL_info),
+-		.table      = "mangle",
+-		.checkentry = hl_tg6_check,
++		.match      = hl_mt6,
++		.matchsize  = sizeof(struct ip6t_hl_info),
+ 		.me         = THIS_MODULE,
+ 	},
+ };
+ 
+-static int __init hl_tg_init(void)
++static int __init hl_mt_init(void)
+ {
+-	return xt_register_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
++	return xt_register_matches(hl_mt_reg, ARRAY_SIZE(hl_mt_reg));
+ }
+ 
+-static void __exit hl_tg_exit(void)
++static void __exit hl_mt_exit(void)
+ {
+-	xt_unregister_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
++	xt_unregister_matches(hl_mt_reg, ARRAY_SIZE(hl_mt_reg));
+ }
+ 
+-module_init(hl_tg_init);
+-module_exit(hl_tg_exit);
+-MODULE_ALIAS("ipt_TTL");
+-MODULE_ALIAS("ip6t_HL");
++module_init(hl_mt_init);
++module_exit(hl_mt_exit);
+diff --git a/net/netfilter/xt_RATEEST.c b/net/netfilter/xt_RATEEST.c
+index 91270d467ffd..72324bd976af 100644
+--- a/net/netfilter/xt_RATEEST.c
++++ b/net/netfilter/xt_RATEEST.c
+@@ -5,244 +5,149 @@
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+ #include <linux/gen_stats.h>
+-#include <linux/jhash.h>
+-#include <linux/rtnetlink.h>
+-#include <linux/random.h>
+-#include <linux/slab.h>
+-#include <net/gen_stats.h>
+-#include <net/netlink.h>
+-#include <net/netns/generic.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_RATEEST.h>
++#include <linux/netfilter/xt_rateest.h>
+ #include <net/netfilter/xt_rateest.h>
+ 
+-#define RATEEST_HSIZE	16
+ 
+-struct xt_rateest_net {
+-	struct mutex hash_lock;
+-	struct hlist_head hash[RATEEST_HSIZE];
+-};
+-
+-static unsigned int xt_rateest_id;
+-
+-static unsigned int jhash_rnd __read_mostly;
+-
+-static unsigned int xt_rateest_hash(const char *name)
+-{
+-	return jhash(name, sizeof_field(struct xt_rateest, name), jhash_rnd) &
+-	       (RATEEST_HSIZE - 1);
+-}
+-
+-static void xt_rateest_hash_insert(struct xt_rateest_net *xn,
+-				   struct xt_rateest *est)
++static bool
++xt_rateest_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	unsigned int h;
+-
+-	h = xt_rateest_hash(est->name);
+-	hlist_add_head(&est->list, &xn->hash[h]);
+-}
++	const struct xt_rateest_match_info *info = par->matchinfo;
++	struct gnet_stats_rate_est64 sample = {0};
++	u_int32_t bps1, bps2, pps1, pps2;
++	bool ret = true;
++
++	gen_estimator_read(&info->est1->rate_est, &sample);
++
++	if (info->flags & XT_RATEEST_MATCH_DELTA) {
++		bps1 = info->bps1 >= sample.bps ? info->bps1 - sample.bps : 0;
++		pps1 = info->pps1 >= sample.pps ? info->pps1 - sample.pps : 0;
++	} else {
++		bps1 = sample.bps;
++		pps1 = sample.pps;
++	}
+ 
+-static struct xt_rateest *__xt_rateest_lookup(struct xt_rateest_net *xn,
+-					      const char *name)
+-{
+-	struct xt_rateest *est;
+-	unsigned int h;
+-
+-	h = xt_rateest_hash(name);
+-	hlist_for_each_entry(est, &xn->hash[h], list) {
+-		if (strcmp(est->name, name) == 0) {
+-			est->refcnt++;
+-			return est;
++	if (info->flags & XT_RATEEST_MATCH_ABS) {
++		bps2 = info->bps2;
++		pps2 = info->pps2;
++	} else {
++		gen_estimator_read(&info->est2->rate_est, &sample);
++
++		if (info->flags & XT_RATEEST_MATCH_DELTA) {
++			bps2 = info->bps2 >= sample.bps ? info->bps2 - sample.bps : 0;
++			pps2 = info->pps2 >= sample.pps ? info->pps2 - sample.pps : 0;
++		} else {
++			bps2 = sample.bps;
++			pps2 = sample.pps;
+ 		}
+ 	}
+ 
+-	return NULL;
+-}
+-
+-struct xt_rateest *xt_rateest_lookup(struct net *net, const char *name)
+-{
+-	struct xt_rateest_net *xn = net_generic(net, xt_rateest_id);
+-	struct xt_rateest *est;
+-
+-	mutex_lock(&xn->hash_lock);
+-	est = __xt_rateest_lookup(xn, name);
+-	mutex_unlock(&xn->hash_lock);
+-	return est;
+-}
+-EXPORT_SYMBOL_GPL(xt_rateest_lookup);
+-
+-void xt_rateest_put(struct net *net, struct xt_rateest *est)
+-{
+-	struct xt_rateest_net *xn = net_generic(net, xt_rateest_id);
+-
+-	mutex_lock(&xn->hash_lock);
+-	if (--est->refcnt == 0) {
+-		hlist_del(&est->list);
+-		gen_kill_estimator(&est->rate_est);
+-		/*
+-		 * gen_estimator est_timer() might access est->lock or bstats,
+-		 * wait a RCU grace period before freeing 'est'
+-		 */
+-		kfree_rcu(est, rcu);
++	switch (info->mode) {
++	case XT_RATEEST_MATCH_LT:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 < bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 < pps2;
++		break;
++	case XT_RATEEST_MATCH_GT:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 > bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 > pps2;
++		break;
++	case XT_RATEEST_MATCH_EQ:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 == bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 == pps2;
++		break;
+ 	}
+-	mutex_unlock(&xn->hash_lock);
++
++	ret ^= info->flags & XT_RATEEST_MATCH_INVERT ? true : false;
++	return ret;
+ }
+-EXPORT_SYMBOL_GPL(xt_rateest_put);
+ 
+-static unsigned int
+-xt_rateest_tg(struct sk_buff *skb, const struct xt_action_param *par)
++static int xt_rateest_mt_checkentry(const struct xt_mtchk_param *par)
+ {
+-	const struct xt_rateest_target_info *info = par->targinfo;
+-	struct gnet_stats_basic_sync *stats = &info->est->bstats;
++	struct xt_rateest_match_info *info = par->matchinfo;
++	struct xt_rateest *est1, *est2;
++	int ret = -EINVAL;
+ 
+-	spin_lock_bh(&info->est->lock);
+-	u64_stats_add(&stats->bytes, skb->len);
+-	u64_stats_inc(&stats->packets);
+-	spin_unlock_bh(&info->est->lock);
++	if (hweight32(info->flags & (XT_RATEEST_MATCH_ABS |
++				     XT_RATEEST_MATCH_REL)) != 1)
++		goto err1;
+ 
+-	return XT_CONTINUE;
+-}
++	if (!(info->flags & (XT_RATEEST_MATCH_BPS | XT_RATEEST_MATCH_PPS)))
++		goto err1;
+ 
+-static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
+-{
+-	struct xt_rateest_net *xn = net_generic(par->net, xt_rateest_id);
+-	struct xt_rateest_target_info *info = par->targinfo;
+-	struct xt_rateest *est;
+-	struct {
+-		struct nlattr		opt;
+-		struct gnet_estimator	est;
+-	} cfg;
+-	int ret;
+-
+-	if (strnlen(info->name, sizeof(est->name)) >= sizeof(est->name))
+-		return -ENAMETOOLONG;
+-
+-	net_get_random_once(&jhash_rnd, sizeof(jhash_rnd));
+-
+-	mutex_lock(&xn->hash_lock);
+-	est = __xt_rateest_lookup(xn, info->name);
+-	if (est) {
+-		mutex_unlock(&xn->hash_lock);
+-		/*
+-		 * If estimator parameters are specified, they must match the
+-		 * existing estimator.
+-		 */
+-		if ((!info->interval && !info->ewma_log) ||
+-		    (info->interval != est->params.interval ||
+-		     info->ewma_log != est->params.ewma_log)) {
+-			xt_rateest_put(par->net, est);
+-			return -EINVAL;
+-		}
+-		info->est = est;
+-		return 0;
++	switch (info->mode) {
++	case XT_RATEEST_MATCH_EQ:
++	case XT_RATEEST_MATCH_LT:
++	case XT_RATEEST_MATCH_GT:
++		break;
++	default:
++		goto err1;
+ 	}
+ 
+-	ret = -ENOMEM;
+-	est = kzalloc_obj(*est);
+-	if (!est)
++	ret  = -ENOENT;
++	est1 = xt_rateest_lookup(par->net, info->name1);
++	if (!est1)
+ 		goto err1;
+ 
+-	gnet_stats_basic_sync_init(&est->bstats);
+-	strscpy(est->name, info->name, sizeof(est->name));
+-	spin_lock_init(&est->lock);
+-	est->refcnt		= 1;
+-	est->params.interval	= info->interval;
+-	est->params.ewma_log	= info->ewma_log;
+-
+-	cfg.opt.nla_len		= nla_attr_size(sizeof(cfg.est));
+-	cfg.opt.nla_type	= TCA_STATS_RATE_EST;
+-	cfg.est.interval	= info->interval;
+-	cfg.est.ewma_log	= info->ewma_log;
+-
+-	ret = gen_new_estimator(&est->bstats, NULL, &est->rate_est,
+-				&est->lock, NULL, &cfg.opt);
+-	if (ret < 0)
+-		goto err2;
+-
+-	info->est = est;
+-	xt_rateest_hash_insert(xn, est);
+-	mutex_unlock(&xn->hash_lock);
++	est2 = NULL;
++	if (info->flags & XT_RATEEST_MATCH_REL) {
++		est2 = xt_rateest_lookup(par->net, info->name2);
++		if (!est2)
++			goto err2;
++	}
++
++	info->est1 = est1;
++	info->est2 = est2;
+ 	return 0;
+ 
+ err2:
+-	kfree(est);
++	xt_rateest_put(par->net, est1);
+ err1:
+-	mutex_unlock(&xn->hash_lock);
+ 	return ret;
+ }
+ 
+-static void xt_rateest_tg_destroy(const struct xt_tgdtor_param *par)
++static void xt_rateest_mt_destroy(const struct xt_mtdtor_param *par)
+ {
+-	struct xt_rateest_target_info *info = par->targinfo;
++	struct xt_rateest_match_info *info = par->matchinfo;
+ 
+-	xt_rateest_put(par->net, info->est);
++	xt_rateest_put(par->net, info->est1);
++	if (info->est2)
++		xt_rateest_put(par->net, info->est2);
+ }
+ 
+-static struct xt_target xt_rateest_tg_reg[] __read_mostly = {
+-	{
+-		.name       = "RATEEST",
+-		.revision   = 0,
+-		.family     = NFPROTO_IPV4,
+-		.target     = xt_rateest_tg,
+-		.checkentry = xt_rateest_tg_checkentry,
+-		.destroy    = xt_rateest_tg_destroy,
+-		.targetsize = sizeof(struct xt_rateest_target_info),
+-		.usersize   = offsetof(struct xt_rateest_target_info, est),
+-		.me         = THIS_MODULE,
+-	},
+-#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+-	{
+-		.name       = "RATEEST",
+-		.revision   = 0,
+-		.family     = NFPROTO_IPV6,
+-		.target     = xt_rateest_tg,
+-		.checkentry = xt_rateest_tg_checkentry,
+-		.destroy    = xt_rateest_tg_destroy,
+-		.targetsize = sizeof(struct xt_rateest_target_info),
+-		.usersize   = offsetof(struct xt_rateest_target_info, est),
+-		.me         = THIS_MODULE,
+-	},
+-#endif
++static struct xt_match xt_rateest_mt_reg __read_mostly = {
++	.name       = "rateest",
++	.revision   = 0,
++	.family     = NFPROTO_UNSPEC,
++	.match      = xt_rateest_mt,
++	.checkentry = xt_rateest_mt_checkentry,
++	.destroy    = xt_rateest_mt_destroy,
++	.matchsize  = sizeof(struct xt_rateest_match_info),
++	.usersize   = offsetof(struct xt_rateest_match_info, est1),
++	.me         = THIS_MODULE,
+ };
+ 
+-static __net_init int xt_rateest_net_init(struct net *net)
++static int __init xt_rateest_mt_init(void)
+ {
+-	struct xt_rateest_net *xn = net_generic(net, xt_rateest_id);
+-	int i;
+-
+-	mutex_init(&xn->hash_lock);
+-	for (i = 0; i < ARRAY_SIZE(xn->hash); i++)
+-		INIT_HLIST_HEAD(&xn->hash[i]);
+-	return 0;
++	return xt_register_match(&xt_rateest_mt_reg);
+ }
+ 
+-static struct pernet_operations xt_rateest_net_ops = {
+-	.init = xt_rateest_net_init,
+-	.id   = &xt_rateest_id,
+-	.size = sizeof(struct xt_rateest_net),
+-};
+-
+-static int __init xt_rateest_tg_init(void)
++static void __exit xt_rateest_mt_fini(void)
+ {
+-	int err = register_pernet_subsys(&xt_rateest_net_ops);
+-
+-	if (err)
+-		return err;
+-	return xt_register_targets(xt_rateest_tg_reg, ARRAY_SIZE(xt_rateest_tg_reg));
++	xt_unregister_match(&xt_rateest_mt_reg);
+ }
+ 
+-static void __exit xt_rateest_tg_fini(void)
+-{
+-	xt_unregister_targets(xt_rateest_tg_reg, ARRAY_SIZE(xt_rateest_tg_reg));
+-	unregister_pernet_subsys(&xt_rateest_net_ops);
+-}
+-
+-
+ MODULE_AUTHOR("Patrick McHardy <kaber@trash.net>");
+ MODULE_LICENSE("GPL");
+-MODULE_DESCRIPTION("Xtables: packet rate estimator");
+-MODULE_ALIAS("ipt_RATEEST");
+-MODULE_ALIAS("ip6t_RATEEST");
+-module_init(xt_rateest_tg_init);
+-module_exit(xt_rateest_tg_fini);
++MODULE_DESCRIPTION("xtables rate estimator match");
++MODULE_ALIAS("ipt_rateest");
++MODULE_ALIAS("ip6t_rateest");
++module_init(xt_rateest_mt_init);
++module_exit(xt_rateest_mt_fini);
+diff --git a/net/netfilter/xt_tcpmss.c b/net/netfilter/xt_tcpmss.c
+index 0d32d4841cb3..116a885adb3c 100644
+--- a/net/netfilter/xt_tcpmss.c
++++ b/net/netfilter/xt_tcpmss.c
+@@ -1,107 +1,345 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+-/* Kernel module to match TCP MSS values. */
+-
+-/* Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
+- * Portions (C) 2005 by Harald Welte <laforge@netfilter.org>
++/*
++ * This is a module which is used for setting the MSS option in TCP packets.
++ *
++ * Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
++ * Copyright (C) 2007 Patrick McHardy <kaber@trash.net>
+  */
+-
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <linux/gfp.h>
++#include <linux/ipv6.h>
++#include <linux/tcp.h>
++#include <net/dst.h>
++#include <net/flow.h>
++#include <net/ipv6.h>
++#include <net/route.h>
+ #include <net/tcp.h>
+ 
+-#include <linux/netfilter/xt_tcpmss.h>
+-#include <linux/netfilter/x_tables.h>
+-
+ #include <linux/netfilter_ipv4/ip_tables.h>
+ #include <linux/netfilter_ipv6/ip6_tables.h>
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_tcpudp.h>
++#include <linux/netfilter/xt_TCPMSS.h>
+ 
+ MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
+-MODULE_DESCRIPTION("Xtables: TCP MSS match");
+-MODULE_ALIAS("ipt_tcpmss");
+-MODULE_ALIAS("ip6t_tcpmss");
++MODULE_DESCRIPTION("Xtables: TCP Maximum Segment Size (MSS) adjustment");
++MODULE_ALIAS("ipt_TCPMSS");
++MODULE_ALIAS("ip6t_TCPMSS");
+ 
+-static bool
+-tcpmss_mt(const struct sk_buff *skb, struct xt_action_param *par)
++static inline unsigned int
++optlen(const u_int8_t *opt, unsigned int offset)
+ {
+-	const struct xt_tcpmss_match_info *info = par->matchinfo;
+-	const struct tcphdr *th;
+-	struct tcphdr _tcph;
+-	/* tcp.doff is only 4 bits, ie. max 15 * 4 bytes */
+-	const u_int8_t *op;
+-	u8 _opt[15 * 4 - sizeof(_tcph)];
+-	unsigned int i, optlen;
+-
+-	/* If we don't have the whole header, drop packet. */
+-	th = skb_header_pointer(skb, par->thoff, sizeof(_tcph), &_tcph);
+-	if (th == NULL)
+-		goto dropit;
+-
+-	/* Malformed. */
+-	if (th->doff*4 < sizeof(*th))
+-		goto dropit;
+-
+-	optlen = th->doff*4 - sizeof(*th);
+-	if (!optlen)
+-		goto out;
+-
+-	/* Truncated options. */
+-	op = skb_header_pointer(skb, par->thoff + sizeof(*th), optlen, _opt);
+-	if (op == NULL)
+-		goto dropit;
+-
+-	for (i = 0; i < optlen; ) {
+-		if (op[i] == TCPOPT_MSS
+-		    && (optlen - i) >= TCPOLEN_MSS
+-		    && op[i+1] == TCPOLEN_MSS) {
+-			u_int16_t mssval;
+-
+-			mssval = (op[i+2] << 8) | op[i+3];
+-
+-			return (mssval >= info->mss_min &&
+-				mssval <= info->mss_max) ^ info->invert;
++	/* Beware zero-length options: make finite progress */
++	if (opt[offset] <= TCPOPT_NOP || opt[offset+1] == 0)
++		return 1;
++	else
++		return opt[offset+1];
++}
++
++static u_int32_t tcpmss_reverse_mtu(struct net *net,
++				    const struct sk_buff *skb,
++				    unsigned int family)
++{
++	struct flowi fl;
++	struct rtable *rt = NULL;
++	u_int32_t mtu     = ~0U;
++
++	if (family == PF_INET) {
++		struct flowi4 *fl4 = &fl.u.ip4;
++		memset(fl4, 0, sizeof(*fl4));
++		fl4->daddr = ip_hdr(skb)->saddr;
++	} else {
++		struct flowi6 *fl6 = &fl.u.ip6;
++
++		memset(fl6, 0, sizeof(*fl6));
++		fl6->daddr = ipv6_hdr(skb)->saddr;
++	}
++
++	nf_route(net, (struct dst_entry **)&rt, &fl, false, family);
++	if (rt != NULL) {
++		mtu = dst_mtu(&rt->dst);
++		dst_release(&rt->dst);
++	}
++	return mtu;
++}
++
++static int
++tcpmss_mangle_packet(struct sk_buff *skb,
++		     const struct xt_action_param *par,
++		     unsigned int family,
++		     unsigned int tcphoff,
++		     unsigned int minlen)
++{
++	const struct xt_tcpmss_info *info = par->targinfo;
++	struct tcphdr *tcph;
++	int len, tcp_hdrlen;
++	unsigned int i;
++	__be16 oldval;
++	u16 newmss;
++	u8 *opt;
++
++	/* This is a fragment, no TCP header is available */
++	if (par->fragoff != 0)
++		return 0;
++
++	if (skb_ensure_writable(skb, skb->len))
++		return -1;
++
++	len = skb->len - tcphoff;
++	if (len < (int)sizeof(struct tcphdr))
++		return -1;
++
++	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
++	tcp_hdrlen = tcph->doff * 4;
++
++	if (len < tcp_hdrlen || tcp_hdrlen < sizeof(struct tcphdr))
++		return -1;
++
++	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
++		struct net *net = xt_net(par);
++		unsigned int in_mtu = tcpmss_reverse_mtu(net, skb, family);
++		unsigned int min_mtu = min(dst_mtu(skb_dst(skb)), in_mtu);
++
++		if (min_mtu <= minlen) {
++			net_err_ratelimited("unknown or invalid path-MTU (%u)\n",
++					    min_mtu);
++			return -1;
++		}
++		newmss = min_mtu - minlen;
++	} else
++		newmss = info->mss;
++
++	opt = (u_int8_t *)tcph;
++	for (i = sizeof(struct tcphdr); i <= tcp_hdrlen - TCPOLEN_MSS; i += optlen(opt, i)) {
++		if (opt[i] == TCPOPT_MSS && opt[i+1] == TCPOLEN_MSS) {
++			u_int16_t oldmss;
++
++			oldmss = (opt[i+2] << 8) | opt[i+3];
++
++			/* Never increase MSS, even when setting it, as
++			 * doing so results in problems for hosts that rely
++			 * on MSS being set correctly.
++			 */
++			if (oldmss <= newmss)
++				return 0;
++
++			opt[i+2] = (newmss & 0xff00) >> 8;
++			opt[i+3] = newmss & 0x00ff;
++
++			inet_proto_csum_replace2(&tcph->check, skb,
++						 htons(oldmss), htons(newmss),
++						 false);
++			return 0;
+ 		}
+-		if (op[i] < 2 || i == optlen - 1)
+-			i++;
+-		else
+-			i += op[i+1] ? : 1;
+ 	}
+-out:
+-	return info->invert;
+ 
+-dropit:
+-	par->hotdrop = true;
++	/* There is data after the header so the option can't be added
++	 * without moving it, and doing so may make the SYN packet
++	 * itself too large. Accept the packet unmodified instead.
++	 */
++	if (len > tcp_hdrlen)
++		return 0;
++
++	/* tcph->doff has 4 bits, do not wrap it to 0 */
++	if (tcp_hdrlen >= 15 * 4)
++		return 0;
++
++	/*
++	 * MSS Option not found ?! add it..
++	 */
++	if (skb_tailroom(skb) < TCPOLEN_MSS) {
++		if (pskb_expand_head(skb, 0,
++				     TCPOLEN_MSS - skb_tailroom(skb),
++				     GFP_ATOMIC))
++			return -1;
++		tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
++	}
++
++	skb_put(skb, TCPOLEN_MSS);
++
++	/*
++	 * IPv4: RFC 1122 states "If an MSS option is not received at
++	 * connection setup, TCP MUST assume a default send MSS of 536".
++	 * IPv6: RFC 2460 states IPv6 has a minimum MTU of 1280 and a minimum
++	 * length IPv6 header of 60, ergo the default MSS value is 1220
++	 * Since no MSS was provided, we must use the default values
++	 */
++	if (xt_family(par) == NFPROTO_IPV4)
++		newmss = min(newmss, (u16)536);
++	else
++		newmss = min(newmss, (u16)1220);
++
++	opt = (u_int8_t *)tcph + sizeof(struct tcphdr);
++	memmove(opt + TCPOLEN_MSS, opt, len - sizeof(struct tcphdr));
++
++	inet_proto_csum_replace2(&tcph->check, skb,
++				 htons(len), htons(len + TCPOLEN_MSS), true);
++	opt[0] = TCPOPT_MSS;
++	opt[1] = TCPOLEN_MSS;
++	opt[2] = (newmss & 0xff00) >> 8;
++	opt[3] = newmss & 0x00ff;
++
++	inet_proto_csum_replace4(&tcph->check, skb, 0, *((__be32 *)opt), false);
++
++	oldval = ((__be16 *)tcph)[6];
++	tcph->doff += TCPOLEN_MSS/4;
++	inet_proto_csum_replace2(&tcph->check, skb,
++				 oldval, ((__be16 *)tcph)[6], false);
++	return TCPOLEN_MSS;
++}
++
++static unsigned int
++tcpmss_tg4(struct sk_buff *skb, const struct xt_action_param *par)
++{
++	struct iphdr *iph = ip_hdr(skb);
++	__be16 newlen;
++	int ret;
++
++	ret = tcpmss_mangle_packet(skb, par,
++				   PF_INET,
++				   iph->ihl * 4,
++				   sizeof(*iph) + sizeof(struct tcphdr));
++	if (ret < 0)
++		return NF_DROP;
++	if (ret > 0) {
++		iph = ip_hdr(skb);
++		newlen = htons(ntohs(iph->tot_len) + ret);
++		csum_replace2(&iph->check, iph->tot_len, newlen);
++		iph->tot_len = newlen;
++	}
++	return XT_CONTINUE;
++}
++
++#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
++static unsigned int
++tcpmss_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++{
++	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
++	u8 nexthdr;
++	__be16 frag_off, oldlen, newlen;
++	int tcphoff;
++	int ret;
++
++	nexthdr = ipv6h->nexthdr;
++	tcphoff = ipv6_skip_exthdr(skb, sizeof(*ipv6h), &nexthdr, &frag_off);
++	if (tcphoff < 0)
++		return NF_DROP;
++	ret = tcpmss_mangle_packet(skb, par,
++				   PF_INET6,
++				   tcphoff,
++				   sizeof(*ipv6h) + sizeof(struct tcphdr));
++	if (ret < 0)
++		return NF_DROP;
++	if (ret > 0) {
++		ipv6h = ipv6_hdr(skb);
++		oldlen = ipv6h->payload_len;
++		newlen = htons(ntohs(oldlen) + ret);
++		if (skb->ip_summed == CHECKSUM_COMPLETE)
++			skb->csum = csum_add(csum_sub(skb->csum, (__force __wsum)oldlen),
++					     (__force __wsum)newlen);
++		ipv6h->payload_len = newlen;
++	}
++	return XT_CONTINUE;
++}
++#endif
++
++/* Must specify -p tcp --syn */
++static inline bool find_syn_match(const struct xt_entry_match *m)
++{
++	const struct xt_tcp *tcpinfo = (const struct xt_tcp *)m->data;
++
++	if (strcmp(m->u.kernel.match->name, "tcp") == 0 &&
++	    tcpinfo->flg_cmp & TCPHDR_SYN &&
++	    !(tcpinfo->invflags & XT_TCP_INV_FLAGS))
++		return true;
++
+ 	return false;
+ }
+ 
+-static struct xt_match tcpmss_mt_reg[] __read_mostly = {
++static int tcpmss_tg4_check(const struct xt_tgchk_param *par)
++{
++	const struct xt_tcpmss_info *info = par->targinfo;
++	const struct ipt_entry *e = par->entryinfo;
++	const struct xt_entry_match *ematch;
++
++	if (info->mss == XT_TCPMSS_CLAMP_PMTU &&
++	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
++			   (1 << NF_INET_LOCAL_OUT) |
++			   (1 << NF_INET_POST_ROUTING))) != 0) {
++		pr_info_ratelimited("path-MTU clamping only supported in FORWARD, OUTPUT and POSTROUTING hooks\n");
++		return -EINVAL;
++	}
++	if (par->nft_compat)
++		return 0;
++
++	xt_ematch_foreach(ematch, e)
++		if (find_syn_match(ematch))
++			return 0;
++	pr_info_ratelimited("Only works on TCP SYN packets\n");
++	return -EINVAL;
++}
++
++#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
++static int tcpmss_tg6_check(const struct xt_tgchk_param *par)
++{
++	const struct xt_tcpmss_info *info = par->targinfo;
++	const struct ip6t_entry *e = par->entryinfo;
++	const struct xt_entry_match *ematch;
++
++	if (info->mss == XT_TCPMSS_CLAMP_PMTU &&
++	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
++			   (1 << NF_INET_LOCAL_OUT) |
++			   (1 << NF_INET_POST_ROUTING))) != 0) {
++		pr_info_ratelimited("path-MTU clamping only supported in FORWARD, OUTPUT and POSTROUTING hooks\n");
++		return -EINVAL;
++	}
++	if (par->nft_compat)
++		return 0;
++
++	xt_ematch_foreach(ematch, e)
++		if (find_syn_match(ematch))
++			return 0;
++	pr_info_ratelimited("Only works on TCP SYN packets\n");
++	return -EINVAL;
++}
++#endif
++
++static struct xt_target tcpmss_tg_reg[] __read_mostly = {
+ 	{
+-		.name		= "tcpmss",
+ 		.family		= NFPROTO_IPV4,
+-		.match		= tcpmss_mt,
+-		.matchsize	= sizeof(struct xt_tcpmss_match_info),
++		.name		= "TCPMSS",
++		.checkentry	= tcpmss_tg4_check,
++		.target		= tcpmss_tg4,
++		.targetsize	= sizeof(struct xt_tcpmss_info),
+ 		.proto		= IPPROTO_TCP,
+ 		.me		= THIS_MODULE,
+ 	},
++#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+ 	{
+-		.name		= "tcpmss",
+ 		.family		= NFPROTO_IPV6,
+-		.match		= tcpmss_mt,
+-		.matchsize	= sizeof(struct xt_tcpmss_match_info),
++		.name		= "TCPMSS",
++		.checkentry	= tcpmss_tg6_check,
++		.target		= tcpmss_tg6,
++		.targetsize	= sizeof(struct xt_tcpmss_info),
+ 		.proto		= IPPROTO_TCP,
+ 		.me		= THIS_MODULE,
+ 	},
++#endif
+ };
+ 
+-static int __init tcpmss_mt_init(void)
++static int __init tcpmss_tg_init(void)
+ {
+-	return xt_register_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
++	return xt_register_targets(tcpmss_tg_reg, ARRAY_SIZE(tcpmss_tg_reg));
+ }
+ 
+-static void __exit tcpmss_mt_exit(void)
++static void __exit tcpmss_tg_exit(void)
+ {
+-	xt_unregister_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
++	xt_unregister_targets(tcpmss_tg_reg, ARRAY_SIZE(tcpmss_tg_reg));
+ }
+ 
+-module_init(tcpmss_mt_init);
+-module_exit(tcpmss_mt_exit);
++module_init(tcpmss_tg_init);
++module_exit(tcpmss_tg_exit);
+diff --git a/samples/bpf/bpf_rfs_kern.c b/samples/bpf/bpf_rfs_kern.c
+new file mode 100644
+index 000000000000..1451ccbff2d9
+--- /dev/null
++++ b/samples/bpf/bpf_rfs_kern.c
+@@ -0,0 +1,96 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Sample BPF-RFS program
++ *
++ * This program demonstrates how to use BPF-RFS to steer network packets
++ * to specific CPUs based on flow information.
++ */
++
++#include <linux/bpf.h>
++#include <linux/rfs_bpf.h>
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_tracing.h>
++
++/* Sock flow table - records which CPU is processing each flow */
++struct {
++	__uint(type, BPF_MAP_TYPE_HASH);
++	__uint(max_entries, 32768);
++	__type(key, struct bpf_rfs_sock_flow_key);
++	__type(value, struct bpf_rfs_sock_flow_val);
++} sock_flow_table SEC(".maps");
++
++/* Dev flow table - per-queue flow state for migration tracking */
++struct {
++	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++	__uint(max_entries, 4096);
++	__type(key, struct bpf_rfs_dev_flow_key);
++	__type(value, struct bpf_rfs_dev_flow_val);
++} dev_flow_table SEC(".maps");
++
++/* CPU online mask - for checking CPU availability */
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(max_entries, 256);
++	__type(key, __u32);
++	__type(value, __u32);
++} cpu_online_map SEC(".maps");
++
++/*
++ * RFS program entry point
++ * Returns: target CPU id (0 to nr_cpu_ids-1) or -1 to let kernel decide
++ */
++SEC("rfs")
++int rfs_select_cpu(struct bpf_rfs_ctx *ctx)
++{
++	struct bpf_rfs_sock_flow_key sock_key = { .hash = ctx->hash };
++	struct bpf_rfs_sock_flow_val *sock_val;
++	struct bpf_rfs_dev_flow_key dev_key;
++	struct bpf_rfs_dev_flow_val *dev_val;
++	__u32 target_cpu;
++	__u32 slot;
++	__u32 *online;
++
++	/* 1. Lookup sock flow table for target CPU */
++	sock_val = bpf_map_lookup_elem(&sock_flow_table, &sock_key);
++	if (!sock_val)
++		return -1;  /* No flow recorded, let kernel decide */
++
++	target_cpu = sock_val->cpu;
++
++	/* 2. Check if target CPU is valid and online */
++	online = bpf_map_lookup_elem(&cpu_online_map, &target_cpu);
++	if (!online || !*online)
++		return -1;  /* Target CPU not available */
++
++	/* 3. Lookup/update dev flow table for migration check */
++	slot = ctx->hash & 0xFFF;  /* 4096 slots */
++	dev_key.queue_id = ctx->queue_mapping;
++	dev_key.slot = slot;
++
++	dev_val = bpf_map_lookup_elem(&dev_flow_table, &dev_key);
++	if (dev_val) {
++		/*
++		 * Check if migration is safe.
++		 * In a real implementation, we would check the queue tail
++		 * to ensure in-order delivery. For this sample, we allow
++		 * migration if the CPU is different.
++		 */
++		if (dev_val->cpu != target_cpu) {
++			/* Migration allowed - update dev flow table */
++			dev_val->cpu = target_cpu;
++		}
++		dev_val->last_used = bpf_ktime_get_ns();
++	} else {
++		/* First time seeing this flow on this queue */
++		struct bpf_rfs_dev_flow_val new_val = {
++			.cpu = target_cpu,
++			.last_qtail = 0,
++			.last_used = bpf_ktime_get_ns()
++		};
++		bpf_map_update_elem(&dev_flow_table, &dev_key, &new_val, BPF_ANY);
++	}
++
++	return target_cpu;
++}
++
++char _license[] SEC("license") = "GPL";
+diff --git a/samples/bpf/bpf_rfs_user.c b/samples/bpf/bpf_rfs_user.c
+new file mode 100644
+index 000000000000..16531ca12760
+--- /dev/null
++++ b/samples/bpf/bpf_rfs_user.c
+@@ -0,0 +1,150 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Sample user space program for BPF-RFS
++ *
++ * This program loads and attaches a BPF-RFS program to a network device.
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <errno.h>
++#include <linux/bpf.h>
++#include <linux/rfs_bpf.h>
++#include <bpf/libbpf.h>
++#include <bpf/bpf.h>
++#include <net/if.h>
++
++static void usage(const char *prog)
++{
++	fprintf(stderr, "Usage: %s <ifname> [prog_path]\n", prog);
++	fprintf(stderr, "  ifname:    Network interface name (e.g., eth0)\n");
++	fprintf(stderr, "  prog_path: Path to BPF object file (default: bpf_rfs_kern.o)\n");
++}
++
++int main(int argc, char **argv)
++{
++	struct bpf_object *obj = NULL;
++	struct bpf_program *prog = NULL;
++	struct bpf_link *link = NULL;
++	struct bpf_map *sock_flow_map;
++	struct bpf_map *cpu_online_map;
++	const char *ifname;
++	const char *prog_path = "bpf_rfs_kern.o";
++	int ifindex;
++	int ret = 0;
++	int i;
++
++	if (argc < 2) {
++		usage(argv[0]);
++		return 1;
++	}
++
++	ifname = argv[1];
++	if (argc >= 3)
++		prog_path = argv[2];
++
++	/* Get interface index */
++	ifindex = if_nametoindex(ifname);
++	if (!ifindex) {
++		fprintf(stderr, "Failed to get ifindex for %s: %s\n",
++			ifname, strerror(errno));
++		return 1;
++	}
++
++	printf("Loading BPF-RFS program from %s...\n", prog_path);
++
++	/* Load BPF object */
++	obj = bpf_object__open_file(prog_path, NULL);
++	if (libbpf_get_error(obj)) {
++		fprintf(stderr, "Failed to open BPF object: %ld\n",
++			libbpf_get_error(obj));
++		return 1;
++	}
++
++	/* Load the program */
++	ret = bpf_object__load(obj);
++	if (ret) {
++		fprintf(stderr, "Failed to load BPF object: %d\n", ret);
++		goto cleanup;
++	}
++
++	/* Find the RFS program */
++	prog = bpf_object__find_program_by_name(obj, "rfs_select_cpu");
++	if (!prog) {
++		fprintf(stderr, "Failed to find rfs_select_cpu program\n");
++		ret = -ENOENT;
++		goto cleanup;
++	}
++
++	/* Initialize CPU online map */
++	cpu_online_map = bpf_object__find_map_by_name(obj, "cpu_online_map");
++	if (cpu_online_map) {
++		int map_fd = bpf_map__fd(cpu_online_map);
++		int nr_cpus = libbpf_num_possible_cpus();
++
++		for (i = 0; i < nr_cpus && i < 256; i++) {
++			__u32 key = i;
++			__u32 value = 1;  /* Mark all possible CPUs as online */
++			bpf_map_update_elem(map_fd, &key, &value, BPF_ANY);
++		}
++		printf("Initialized %d CPUs as online\n", nr_cpus);
++	}
++
++	/* Initialize sock flow table with some sample entries */
++	sock_flow_map = bpf_object__find_map_by_name(obj, "sock_flow_table");
++	if (sock_flow_map) {
++		int map_fd = bpf_map__fd(sock_flow_map);
++		struct bpf_rfs_sock_flow_key key;
++		struct bpf_rfs_sock_flow_val val;
++
++		/* Add a sample flow entry - hash 0x12345678 -> CPU 1 */
++		key.hash = 0x12345678;
++		val.cpu = 1;
++		val.timestamp = 0;
++		val.pid = getpid();
++		val.reserved = 0;
++
++		ret = bpf_map_update_elem(map_fd, &key, &val, BPF_ANY);
++		if (ret) {
++			fprintf(stderr, "Failed to add sample flow entry: %d\n", ret);
++		}
++		printf("Added sample flow entry: hash 0x%08x -> CPU %u\n",
++		       key.hash, val.cpu);
++	}
++
++	/* Attach the program using bpf_link */
++	printf("Attaching BPF-RFS program to %s (ifindex %d)...\n", ifname, ifindex);
++
++	/* Use BPF link to attach */
++	DECLARE_LIBBPF_OPTS(bpf_link_create_opts, link_opts);
++	link_opts.prog_fd = bpf_program__fd(prog);
++	link_opts.target_ifindex = ifindex;
++	link_opts.attach_type = BPF_RFS_INGRESS;
++
++	link = bpf_program__attach(prog);
++	if (libbpf_get_error(link)) {
++		fprintf(stderr, "Failed to attach BPF program: %ld\n",
++			libbpf_get_error(link));
++		link = NULL;
++		ret = -1;
++		goto cleanup;
++	}
++
++	printf("BPF-RFS program attached successfully!\n");
++	printf("Press Ctrl+C to detach and exit...\n");
++
++	/* Keep running until interrupted */
++	while (1) {
++		sleep(1);
++	}
++
++cleanup:
++	if (link)
++		bpf_link__destroy(link);
++	if (obj)
++		bpf_object__close(obj);
++
++	return ret;
++}
+-- 
+2.50.1 (Apple Git-155)
+

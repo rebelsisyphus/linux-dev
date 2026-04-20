@@ -1,7 +1,7 @@
 From f633e8e99bbb9ed8fda2ad36f3e9b3bce4b1add4 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 20 Apr 2026 19:05:26 +0800
-Subject: [PATCH 2/2] fork: two-tier NUMA-aware mm percpu cache, move zeroing
+Subject: [PATCH 2/4] fork: two-tier NUMA-aware mm percpu cache, move zeroing
  to exit path
 
 On a 320-core / 4-NUMA machine the existing single-tier per-CPU cache

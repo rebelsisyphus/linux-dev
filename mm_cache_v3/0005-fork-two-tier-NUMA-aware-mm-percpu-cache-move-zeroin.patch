@@ -1,7 +1,7 @@
-From f633e8e99bbb9ed8fda2ad36f3e9b3bce4b1add4 Mon Sep 17 00:00:00 2001
+From f34f51ebe684255a92d7100e05410c91e7c762b6 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 20 Apr 2026 19:05:26 +0800
-Subject: [PATCH 2/4] fork: two-tier NUMA-aware mm percpu cache, move zeroing
+Subject: [PATCH 5/6] fork: two-tier NUMA-aware mm percpu cache, move zeroing
  to exit path
 
 On a 320-core / 4-NUMA machine the existing single-tier per-CPU cache
@@ -48,11 +48,12 @@ Increase MM_STAT_EXT_CACHE_MAX from 8 to 16.
 
 Signed-off-by: Dong Chenchen <superdcc97@163.com>
 ---
- kernel/fork.c | 130 ++++++++++++++++++++++++++++++++++++++++++--------
- 1 file changed, 111 insertions(+), 19 deletions(-)
+ kernel/fork.c        | 130 ++++++++++++++++++++++++++++++++++++-------
+ lib/percpu_counter.c |  30 ++++++++--
+ 2 files changed, 135 insertions(+), 25 deletions(-)
 
 diff --git a/kernel/fork.c b/kernel/fork.c
-index 8598884f12fb..243da6d77da9 100644
+index 8598884f12fb..c5de8aa5ed12 100644
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
 @@ -618,36 +618,53 @@ struct kmem_cache *fs_cachep;
@@ -92,8 +93,8 @@ index 8598884f12fb..243da6d77da9 100644
 + * negligible contention compared to a single pcpu_alloc_mutex.
   */
 -#define MM_STAT_EXT_CACHE_MAX	8
-+#define MM_STAT_EXT_CACHE_MAX	16
-+#define MM_STAT_EXT_NODE_CACHE_MAX	128
++#define MM_STAT_EXT_CACHE_MAX	4
++#define MM_STAT_EXT_NODE_CACHE_MAX	512
  
  struct mm_stat_ext_cache {
  	unsigned int count;
@@ -274,6 +275,81 @@ index 8598884f12fb..243da6d77da9 100644
  #endif
  		mm_init_cid(mm, p);
  	} else {
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index 50ba62842e90..ec20be17c66f 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -284,12 +284,11 @@ EXPORT_SYMBOL(percpu_counter_init_many_pcpu);
+  *
+  * Like percpu_counter_init_many_pcpu(), but for counters that were
+  * previously initialised and then detached via percpu_counter_detach_many().
+- * Because the counters were never removed from the hotplug list (detach
+- * only NULLs the percpu pointers and deactivates debug objects), this
+- * function reuses the existing list_head and simply re-attaches the
+- * percpu data area and re-activates debug objects.  This avoids taking
+- * percpu_counters_lock, eliminating a global contention point on large
+- * SMP systems.
++ * The detach step removes counters from the hotplug list (necessary
++ * because the containing mm_struct may be freed and reallocated by SLUB,
++ * which would corrupt the list through slab reuse).  This function
++ * reinitialises the spinlock, count, and percpu pointers, re-activates
++ * debug objects, and re-adds the counters to the hotplug list.
+  *
+  * The caller guarantees that the percpu values are already zeroed.
+  */
+@@ -297,6 +296,7 @@ int percpu_counter_reinit_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 				     s32 __percpu *counters, u32 nr_counters,
+ 				     struct lock_class_key *key)
+ {
++	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+ 	u32 i;
+ 
+@@ -305,12 +305,22 @@ int percpu_counter_reinit_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 	for (i = 0; i < nr_counters; i++) {
+ 		raw_spin_lock_init(&fbc[i].lock);
+ 		lockdep_set_class(&fbc[i].lock, key);
++#ifdef CONFIG_HOTPLUG_CPU
++		INIT_LIST_HEAD(&fbc[i].list);
++#endif
+ 		fbc[i].count = amount;
+ 		fbc[i].counters = (void __percpu *)counters + i * counter_size;
+ 
+ 		debug_percpu_counter_activate(&fbc[i]);
+ 	}
+ 
++#ifdef CONFIG_HOTPLUG_CPU
++	spin_lock_irqsave(&percpu_counters_lock, flags);
++	for (i = 0; i < nr_counters; i++)
++		list_add(&fbc[i].list, &percpu_counters);
++	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++#endif
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(percpu_counter_reinit_many_pcpu);
+@@ -330,6 +340,7 @@ EXPORT_SYMBOL(percpu_counter_reinit_many_pcpu);
+  */
+ void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
+ {
++	unsigned long flags __maybe_unused;
+ 	u32 i;
+ 
+ 	if (WARN_ON_ONCE(!fbc))
+@@ -341,6 +352,13 @@ void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
+ 	for (i = 0; i < nr_counters; i++)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+ 
++#ifdef CONFIG_HOTPLUG_CPU
++	spin_lock_irqsave(&percpu_counters_lock, flags);
++	for (i = 0; i < nr_counters; i++)
++		list_del(&fbc[i].list);
++	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++#endif
++
+ 	for (i = 0; i < nr_counters; i++)
+ 		fbc[i].counters = NULL;
+ }
 -- 
 2.43.0
 

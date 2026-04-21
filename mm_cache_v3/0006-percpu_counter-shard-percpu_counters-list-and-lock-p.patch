@@ -1,0 +1,238 @@
+From 32a3aff5f0ceed3e486b2d58d38b23ce457eb90f Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 21 Apr 2026 18:16:55 +0800
+Subject: [PATCH 6/6] percpu_counter: shard percpu_counters list and lock per
+ NUMA node
+
+On large NUMA systems (e.g., 320 cores, 4 NUMA nodes), the global
+percpu_counters_lock becomes a significant bottleneck during high
+concurrency fork/exit workloads. The percpu_counters list is global,
+meaning all fork/exit operations (list add/del) contend on a single
+spinlock, while CPU hotplug traversal holds the same lock.
+
+Apply sharded locks by making the percpu_counters list and its lock
+per-NUMA-node. Each NUMA node maintains its own list_head and spinlock
+in the percpu_counters_numa[] array.
+
+- Init paths (percpu_counter_init*) use numa_node_id() to determine
+  the current NUMA node and add counters to the per-node list
+- Destroy/detach paths use the stored numa_node field to find the
+  correct per-node lock
+- CPU hotplug (percpu_counter_cpu_dead) iterates all NUMA nodes,
+  acquiring each per-node lock sequentially
+
+This ensures fork/exit operations on different NUMA nodes do not
+contend with each other, and CPU hotplug only blocks fork/exit
+operations on one NUMA node at a time.
+
+The percpu_counters_numa[] array uses lazy initialization via
+percpu_counters_numa_init() to handle early boot callers (e.g.,
+poking_init -> mm_init) that run before initcalls.
+
+When CONFIG_NUMA is not set, MAX_NUMNODES=1 and the code degrades
+to the original single global list+lock behavior.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/percpu_counter.h |   1 +
+ lib/percpu_counter.c           | 122 ++++++++++++++++++++++++---------
+ 2 files changed, 90 insertions(+), 33 deletions(-)
+
+diff --git a/include/linux/percpu_counter.h b/include/linux/percpu_counter.h
+index 9362d88494a2..88e3ec4276a6 100644
+--- a/include/linux/percpu_counter.h
++++ b/include/linux/percpu_counter.h
+@@ -24,6 +24,7 @@ struct percpu_counter {
+ 	s64 count;
+ #ifdef CONFIG_HOTPLUG_CPU
+ 	struct list_head list;	/* All percpu_counters are on a list */
++	int numa_node;		/* NUMA node this counter belongs to */
+ #endif
+ 	s32 __percpu *counters;
+ };
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index ec20be17c66f..2ef37b5b524f 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -9,10 +9,31 @@
+ #include <linux/cpu.h>
+ #include <linux/module.h>
+ #include <linux/debugobjects.h>
++#include <linux/topology.h>
++#include <linux/nodemask.h>
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-static LIST_HEAD(percpu_counters);
+-static DEFINE_SPINLOCK(percpu_counters_lock);
++struct percpu_counter_numa {
++	struct list_head list;
++	spinlock_t lock;
++};
++
++static struct percpu_counter_numa percpu_counters_numa[MAX_NUMNODES];
++static bool percpu_counters_numa_initialized;
++
++static void percpu_counters_numa_init(void)
++{
++	int nid;
++
++	if (percpu_counters_numa_initialized)
++		return;
++
++	for (nid = 0; nid < MAX_NUMNODES; nid++) {
++		INIT_LIST_HEAD(&percpu_counters_numa[nid].list);
++		spin_lock_init(&percpu_counters_numa[nid].lock);
++	}
++	percpu_counters_numa_initialized = true;
++}
+ #endif
+ 
+ #ifdef CONFIG_DEBUG_OBJECTS_PERCPU_COUNTER
+@@ -215,10 +236,17 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+-	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++	percpu_counters_numa_init();
++	{
++		int nid = numa_node_id();
++
++		spin_lock_irqsave(&percpu_counters_numa[nid].lock, flags);
++		for (i = 0; i < nr_counters; i++) {
++			fbc[i].numa_node = nid;
++			list_add(&fbc[i].list, &percpu_counters_numa[nid].list);
++		}
++		spin_unlock_irqrestore(&percpu_counters_numa[nid].lock, flags);
++	}
+ #endif
+ 	return 0;
+ }
+@@ -264,10 +292,17 @@ int percpu_counter_init_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+-	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++	percpu_counters_numa_init();
++	{
++		int nid = numa_node_id();
++
++		spin_lock_irqsave(&percpu_counters_numa[nid].lock, flags);
++		for (i = 0; i < nr_counters; i++) {
++			fbc[i].numa_node = nid;
++			list_add(&fbc[i].list, &percpu_counters_numa[nid].list);
++		}
++		spin_unlock_irqrestore(&percpu_counters_numa[nid].lock, flags);
++	}
+ #endif
+ 	return 0;
+ }
+@@ -315,10 +350,17 @@ int percpu_counter_reinit_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+-	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++	percpu_counters_numa_init();
++	{
++		int nid = numa_node_id();
++
++		spin_lock_irqsave(&percpu_counters_numa[nid].lock, flags);
++		for (i = 0; i < nr_counters; i++) {
++			fbc[i].numa_node = nid;
++			list_add(&fbc[i].list, &percpu_counters_numa[nid].list);
++		}
++		spin_unlock_irqrestore(&percpu_counters_numa[nid].lock, flags);
++	}
+ #endif
+ 
+ 	return 0;
+@@ -353,10 +395,15 @@ void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+-	for (i = 0; i < nr_counters; i++)
+-		list_del(&fbc[i].list);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++	{
++		int nid = fbc[0].numa_node;
++
++		percpu_counters_numa_init();
++		spin_lock_irqsave(&percpu_counters_numa[nid].lock, flags);
++		for (i = 0; i < nr_counters; i++)
++			list_del(&fbc[i].list);
++		spin_unlock_irqrestore(&percpu_counters_numa[nid].lock, flags);
++	}
+ #endif
+ 
+ 	for (i = 0; i < nr_counters; i++)
+@@ -379,10 +426,15 @@ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+-	for (i = 0; i < nr_counters; i++)
+-		list_del(&fbc[i].list);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++	{
++		int nid = fbc[0].numa_node;
++
++		percpu_counters_numa_init();
++		spin_lock_irqsave(&percpu_counters_numa[nid].lock, flags);
++		for (i = 0; i < nr_counters; i++)
++			list_del(&fbc[i].list);
++		spin_unlock_irqrestore(&percpu_counters_numa[nid].lock, flags);
++	}
+ #endif
+ 
+ 	free_percpu(fbc[0].counters);
+@@ -407,23 +459,27 @@ static int percpu_counter_cpu_dead(unsigned int cpu)
+ {
+ #ifdef CONFIG_HOTPLUG_CPU
+ 	struct percpu_counter *fbc;
++	int nid;
+ 
+ 	compute_batch_value(cpu);
+ 
+-	spin_lock_irq(&percpu_counters_lock);
+-	list_for_each_entry(fbc, &percpu_counters, list) {
+-		s32 *pcount;
++	percpu_counters_numa_init();
++	for (nid = 0; nid < nr_node_ids; nid++) {
++		spin_lock_irq(&percpu_counters_numa[nid].lock);
++		list_for_each_entry(fbc, &percpu_counters_numa[nid].list, list) {
++			s32 *pcount;
+ 
+-		if (!fbc->counters)
+-			continue;
++			if (!fbc->counters)
++				continue;
+ 
+-		raw_spin_lock(&fbc->lock);
+-		pcount = per_cpu_ptr(fbc->counters, cpu);
+-		fbc->count += *pcount;
+-		*pcount = 0;
+-		raw_spin_unlock(&fbc->lock);
++			raw_spin_lock(&fbc->lock);
++			pcount = per_cpu_ptr(fbc->counters, cpu);
++			fbc->count += *pcount;
++			*pcount = 0;
++			raw_spin_unlock(&fbc->lock);
++		}
++		spin_unlock_irq(&percpu_counters_numa[nid].lock);
+ 	}
+-	spin_unlock_irq(&percpu_counters_lock);
+ #endif
+ 	return 0;
+ }
+-- 
+2.43.0
+

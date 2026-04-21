@@ -1,7 +1,7 @@
 From a52720d29f076de05bf1252464d8e9412a45a939 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 20 Apr 2026 19:04:55 +0800
-Subject: [PATCH 1/4] lib/percpu_counter: add reinit_many_pcpu and optimize
+Subject: [PATCH 4/6] lib/percpu_counter: add reinit_many_pcpu and optimize
  detach/hotplug for cached reuse
 
 When mm percpu data is cached and reused across fork/exit cycles, the

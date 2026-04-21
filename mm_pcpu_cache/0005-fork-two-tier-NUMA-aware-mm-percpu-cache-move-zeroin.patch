@@ -1,0 +1,279 @@
+From f633e8e99bbb9ed8fda2ad36f3e9b3bce4b1add4 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 20 Apr 2026 19:05:26 +0800
+Subject: [PATCH 5/7] fork: two-tier NUMA-aware mm percpu cache, move zeroing
+ to exit path
+
+On a 320-core / 4-NUMA machine the existing single-tier per-CPU cache
+suffers from severe CPU affinity imbalance: fork (cache get) and exit
+(cache put) almost always run on different CPUs.  The fork-side cache
+is empty, the exit-side cache overflows, and both paths fall back to
+alloc_percpu/free_percpu contending on pcpu_alloc_mutex -- making the
+optimisation a net negative vs. no cache at all.
+
+Fix this with a two-tier cache design:
+
+  Tier 1 - Per-CPU cache (depth 16, preempt_disable, no lock):
+           Hit when fork and exit run on the same CPU.
+
+  Tier 2 - Per-NUMA-node cache (depth 128, spinlock):
+           Absorbs cross-CPU imbalance within a NUMA node.
+           4 node-level spinlocks have negligible contention
+           compared to the single global pcpu_alloc_mutex.
+
+On cache get: try per-CPU first, then per-node, then alloc_percpu.
+On cache put: try per-CPU first, then per-node, then free_percpu.
+
+Also move the percpu data zeroing from the fork hot path to the exit
+(cooler) path:
+
+  - rss_stat counters: for_each_possible_cpu memset is now done in
+    mm_stat_ext_cache_put() before caching, not in
+    percpu_counter_init_many_pcpu() on reuse.  This removes a
+    320-CPU cross-node write loop from the fork hot path.
+
+  - mm_cid pcpu: for_each_possible_cpu cid zeroing is moved from
+    mm_init() to mm_stat_ext_cache_put().  The fork path just
+    assigns the pointer and calls mm_init_cid().
+
+These changes, combined with the percpu_counter_reinit_many_pcpu()
+from the previous patch, make the cached fork path completely
+lock-free with respect to percpu_counters_lock and free of
+for_each_possible_cpu loops.
+
+Update debugfs /sys/kernel/debug/mm_pcpu_cache with node-level
+cache statistics (node_get_hits/misses, node_put_stores/overflows).
+
+Increase MM_STAT_EXT_CACHE_MAX from 8 to 16.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 130 ++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 111 insertions(+), 19 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8598884f12fb..243da6d77da9 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -618,36 +618,53 @@ struct kmem_cache *fs_cachep;
+ static struct kmem_cache *mm_cachep;
+ 
+ /*
+- * Per-CPU cache for mm percpu data (rss_stat counters and mm_cid pcpu).
++ * Per-CPU + per-NUMA-node two-tier cache for mm percpu data (rss_stat
++ * counters and mm_cid pcpu).
+  *
+  * When an mm is freed in __mmdrop, the percpu data for rss_stat and mm_cid
+- * is cached on the local CPU instead of being freed via free_percpu (which
+- * acquires pcpu_alloc_mutex + pcpu_lock).  When a new mm is created in
+- * mm_init, the percpu data is taken from the local CPU's cache, bypassing
+- * alloc_percpu entirely.
++ * is cached instead of being freed via free_percpu (which acquires
++ * pcpu_alloc_mutex + pcpu_lock).  When a new mm is created in mm_init,
++ * the percpu data is taken from the cache, bypassing alloc_percpu entirely.
+  *
+- * CPU affinity: cache put always goes to the current CPU's cache (the CPU
+- * where __mmdrop runs).  This is lock-free via preempt_disable.  If the
+- * creating and destroying CPUs differ, the creating CPU may see cache
+- * misses and fall back to alloc_percpu.  This is acceptable because:
+- *  1. No locks are taken on either the get or put fast path.
+- *  2. Cache imbalance self-corrects over time.
+- *  3. The fallback path still works correctly, just slower.
++ * Two-tier design:
++ *   Tier 1 - Per-CPU cache: lock-free (preempt_disable), for the common
++ *            case where fork and exit run on the same CPU.
++ *   Tier 2 - Per-NUMA-node cache: spinlock protected, absorbs the
++ *            cross-CPU imbalance when fork runs on one CPU and exit on
++ *            another within the same NUMA node.  This is far cheaper than
++ *            falling back to alloc_percpu/free_percpu which contend on
++ *            the global pcpu_alloc_mutex.
++ *
++ * On a 320-core / 4-NUMA machine, the 4 node-level spinlocks have
++ * negligible contention compared to a single pcpu_alloc_mutex.
+  */
+-#define MM_STAT_EXT_CACHE_MAX	8
++#define MM_STAT_EXT_CACHE_MAX	16
++#define MM_STAT_EXT_NODE_CACHE_MAX	128
+ 
+ struct mm_stat_ext_cache {
+ 	unsigned int count;
+ 	struct mm_stat_ext entries[MM_STAT_EXT_CACHE_MAX];
+ };
+ 
++struct mm_stat_ext_node_cache {
++	spinlock_t lock;
++	unsigned int count;
++	struct mm_stat_ext entries[MM_STAT_EXT_NODE_CACHE_MAX];
++};
++
+ static DEFINE_PER_CPU(struct mm_stat_ext_cache, mm_stat_ext_free);
++static struct mm_stat_ext_node_cache
++			mm_stat_ext_node_free[MAX_NUMNODES];
+ 
+ #ifdef CONFIG_SMP
+ static atomic_long_t mm_stat_ext_cache_get_hits ____cacheline_aligned;
+ static atomic_long_t mm_stat_ext_cache_get_misses ____cacheline_aligned;
+ static atomic_long_t mm_stat_ext_cache_put_stores ____cacheline_aligned;
+ static atomic_long_t mm_stat_ext_cache_put_overflows ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_node_get_hits ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_node_get_misses ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_node_put_stores ____cacheline_aligned;
++static atomic_long_t mm_stat_ext_node_put_overflows ____cacheline_aligned;
+ 
+ static int mm_stat_ext_cache_stats_show(struct seq_file *m, void *v)
+ {
+@@ -659,6 +676,14 @@ static int mm_stat_ext_cache_stats_show(struct seq_file *m, void *v)
+ 		   atomic_long_read(&mm_stat_ext_cache_put_stores));
+ 	seq_printf(m, "put_overflows %lu\n",
+ 		   atomic_long_read(&mm_stat_ext_cache_put_overflows));
++	seq_printf(m, "node_get_hits      %lu\n",
++		   atomic_long_read(&mm_stat_ext_node_get_hits));
++	seq_printf(m, "node_get_misses    %lu\n",
++		   atomic_long_read(&mm_stat_ext_node_get_misses));
++	seq_printf(m, "node_put_stores    %lu\n",
++		   atomic_long_read(&mm_stat_ext_node_put_stores));
++	seq_printf(m, "node_put_overflows %lu\n",
++		   atomic_long_read(&mm_stat_ext_node_put_overflows));
+ 	return 0;
+ }
+ DEFINE_SHOW_ATTRIBUTE(mm_stat_ext_cache_stats);
+@@ -690,11 +715,35 @@ static inline void mm_stat_ext_cache_overflow(void)
+ {
+ 	atomic_long_inc(&mm_stat_ext_cache_put_overflows);
+ }
++
++static inline void mm_stat_ext_node_cache_hit(void)
++{
++	atomic_long_inc(&mm_stat_ext_node_get_hits);
++}
++
++static inline void mm_stat_ext_node_cache_miss(void)
++{
++	atomic_long_inc(&mm_stat_ext_node_get_misses);
++}
++
++static inline void mm_stat_ext_node_cache_store(void)
++{
++	atomic_long_inc(&mm_stat_ext_node_put_stores);
++}
++
++static inline void mm_stat_ext_node_cache_overflow(void)
++{
++	atomic_long_inc(&mm_stat_ext_node_put_overflows);
++}
+ #else
+ static inline void mm_stat_ext_cache_hit(void) { }
+ static inline void mm_stat_ext_cache_miss(void) { }
+ static inline void mm_stat_ext_cache_store(void) { }
+ static inline void mm_stat_ext_cache_overflow(void) { }
++static inline void mm_stat_ext_node_cache_hit(void) { }
++static inline void mm_stat_ext_node_cache_miss(void) { }
++static inline void mm_stat_ext_node_cache_store(void) { }
++static inline void mm_stat_ext_node_cache_overflow(void) { }
+ #endif
+ 
+ /*
+@@ -705,6 +754,7 @@ static inline void mm_stat_ext_cache_overflow(void) { }
+ static bool mm_stat_ext_cache_get(struct mm_stat_ext *ext)
+ {
+ 	struct mm_stat_ext_cache *cache;
++	struct mm_stat_ext_node_cache *ncache;
+ 
+ 	preempt_disable();
+ 	cache = this_cpu_ptr(&mm_stat_ext_free);
+@@ -715,6 +765,17 @@ static bool mm_stat_ext_cache_get(struct mm_stat_ext *ext)
+ 		return true;
+ 	}
+ 	preempt_enable();
++
++	ncache = &mm_stat_ext_node_free[numa_node_id()];
++	spin_lock(&ncache->lock);
++	if (ncache->count > 0) {
++		*ext = ncache->entries[--ncache->count];
++		spin_unlock(&ncache->lock);
++		mm_stat_ext_node_cache_hit();
++		return true;
++	}
++	spin_unlock(&ncache->lock);
++
+ 	mm_stat_ext_cache_miss();
+ 	return false;
+ }
+@@ -726,6 +787,25 @@ static bool mm_stat_ext_cache_get(struct mm_stat_ext *ext)
+ static void mm_stat_ext_cache_put(struct mm_stat_ext *ext)
+ {
+ 	struct mm_stat_ext_cache *cache;
++	struct mm_stat_ext_node_cache *ncache;
++
++#ifdef CONFIG_SMP
++	{
++		int cpu;
++		size_t sz = NR_MM_COUNTERS * sizeof(s32);
++
++		for_each_possible_cpu(cpu)
++			memset(per_cpu_ptr(ext->rss_counters, cpu), 0, sz);
++	}
++#endif
++#ifdef CONFIG_SCHED_MM_CID
++	{
++		int cpu;
++
++		for_each_possible_cpu(cpu)
++			per_cpu_ptr(ext->mm_cid_pcpu, cpu)->cid = 0;
++	}
++#endif
+ 
+ 	preempt_disable();
+ 	cache = this_cpu_ptr(&mm_stat_ext_free);
+@@ -736,7 +816,19 @@ static void mm_stat_ext_cache_put(struct mm_stat_ext *ext)
+ 		return;
+ 	}
+ 	preempt_enable();
++
++	ncache = &mm_stat_ext_node_free[numa_node_id()];
++	spin_lock(&ncache->lock);
++	if (ncache->count < MM_STAT_EXT_NODE_CACHE_MAX) {
++		ncache->entries[ncache->count++] = *ext;
++		spin_unlock(&ncache->lock);
++		mm_stat_ext_node_cache_store();
++		return;
++	}
++	spin_unlock(&ncache->lock);
++
+ 	mm_stat_ext_cache_overflow();
++	mm_stat_ext_node_cache_overflow();
+ 
+ #ifdef CONFIG_SCHED_MM_CID
+ 	free_percpu(ext->mm_cid_pcpu);
+@@ -749,9 +841,15 @@ static void mm_stat_ext_cache_put(struct mm_stat_ext *ext)
+ static void __init mm_stat_ext_cache_init(void)
+ {
+ 	int cpu;
++	int nid;
+ 
+ 	for_each_possible_cpu(cpu)
+ 		per_cpu(mm_stat_ext_free, cpu).count = 0;
++
++	for_each_online_node(nid) {
++		spin_lock_init(&mm_stat_ext_node_free[nid].lock);
++		mm_stat_ext_node_free[nid].count = 0;
++	}
+ }
+ 
+ static bool mm_stat_ext_cached(const struct mm_struct *mm)
+@@ -1434,12 +1532,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 						NR_MM_COUNTERS);
+ #ifdef CONFIG_SCHED_MM_CID
+ 		mm->mm_cid.pcpu = mm->stat_ext.mm_cid_pcpu;
+-		{
+-			int cpu;
+-
+-			for_each_possible_cpu(cpu)
+-				per_cpu_ptr(mm->mm_cid.pcpu, cpu)->cid = 0;
+-		}
+ #endif
+ 		mm_init_cid(mm, p);
+ 	} else {
+-- 
+2.43.0
+

@@ -1,7 +1,7 @@
 From 0b39b400075404161d0dd1a1dd0d49356a4d582e Mon Sep 17 00:00:00 2001
-From: Dong Chenchen <superdcc97@163.com>
+From: lurea-git <noreply@anthropic.com>
 Date: Thu, 16 Apr 2026 14:49:07 +0800
-Subject: [PATCH 3/3] fork: implement per-cpu cache for mm percpu data
+Subject: [PATCH 3/7] fork: implement per-cpu cache for mm percpu data
 
 On systems with many CPUs (e.g. 320-core 4-NUMA), concurrent
 fork/exit workloads suffer from pcpu_alloc_mutex + pcpu_lock
@@ -44,7 +44,8 @@ creating CPU's cache may miss.  This is acceptable because: no locks
 are taken on either path, cache imbalance self-corrects over time,
 and the fallback alloc_percpu path still works correctly.
 
-Signed-off-by: Dong Chenchen <superdcc97@163.com>
+Signed-off-by: lurea-git <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ---
  kernel/fork.c | 201 ++++++++++++++++++++++++++++++++++++++++++++++++--
  1 file changed, 194 insertions(+), 7 deletions(-)

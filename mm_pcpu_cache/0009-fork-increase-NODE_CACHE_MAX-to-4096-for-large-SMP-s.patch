@@ -1,0 +1,36 @@
+From e8b1075114c69b7f210b9d44d6456477b3c29163 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 21 Apr 2026 15:02:20 +0800
+Subject: [PATCH 9/9] fork: increase NODE_CACHE_MAX to 4096 for large SMP
+ systems
+
+On 320-core / 4-NUMA systems, the per-node mm percpu cache with
+depth 512 saw 4620 overflows under spawn stress testing. Each overflow
+falls back to free_percpu() which acquires the pcpu_alloc_mutex,
+creating a significant bottleneck.
+
+Increase MM_STAT_EXT_NODE_CACHE_MAX from 512 to 4096. At 16 bytes
+per entry across 4 NUMA nodes this costs ~256KB, which is negligible
+for machines with 320+ cores.
+
+QEMU testing (8-core / 2-NUMA) confirms 0 overflows with this value.
+---
+ kernel/fork.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index c5de8aa5ed12..6ebb10bac877 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -639,7 +639,7 @@ static struct kmem_cache *mm_cachep;
+  * negligible contention compared to a single pcpu_alloc_mutex.
+  */
+ #define MM_STAT_EXT_CACHE_MAX	4
+-#define MM_STAT_EXT_NODE_CACHE_MAX	512
++#define MM_STAT_EXT_NODE_CACHE_MAX	4096
+ 
+ struct mm_stat_ext_cache {
+ 	unsigned int count;
+-- 
+2.43.0
+

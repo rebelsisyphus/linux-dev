@@ -1,7 +1,7 @@
 From 0b39b400075404161d0dd1a1dd0d49356a4d582e Mon Sep 17 00:00:00 2001
 From: lurea-git <noreply@anthropic.com>
 Date: Thu, 16 Apr 2026 14:49:07 +0800
-Subject: [PATCH 3/7] fork: implement per-cpu cache for mm percpu data
+Subject: [PATCH 3/9] fork: implement per-cpu cache for mm percpu data
 
 On systems with many CPUs (e.g. 320-core 4-NUMA), concurrent
 fork/exit workloads suffer from pcpu_alloc_mutex + pcpu_lock

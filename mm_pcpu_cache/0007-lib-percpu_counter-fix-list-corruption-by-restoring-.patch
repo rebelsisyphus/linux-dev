@@ -1,7 +1,7 @@
 From 479f62de64515897d9e7fa481439f82a71ff534e Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 20 Apr 2026 20:59:07 +0800
-Subject: [PATCH 7/7] lib/percpu_counter: fix list corruption by restoring
+Subject: [PATCH 7/9] lib/percpu_counter: fix list corruption by restoring
  list_del/list_add in detach/reinit
 
 The v3 optimisation that removed list_del() from percpu_counter_detach_many()

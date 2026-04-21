@@ -1,7 +1,7 @@
 From 4dca6afee70e13847ee7391a397e2153aa408199 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 20 Apr 2026 20:43:32 +0800
-Subject: [PATCH 6/7] fork: tune mm percpu cache depths for large SMP systems
+Subject: [PATCH 6/9] fork: tune mm percpu cache depths for large SMP systems
 
 On a 320-core / 4-NUMA machine the previous cache depths are
 suboptimal:

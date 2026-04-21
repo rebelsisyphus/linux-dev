@@ -1,0 +1,258 @@
+From c9525224a914c3e9b19037c01663a745cb3bfc35 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 21 Apr 2026 15:02:13 +0800
+Subject: [PATCH 8/9] lib/percpu_counter: replace global hotplug list with
+ per-node RCU lists
+
+Replace the single global percpu_counters list and percpu_counters_lock
+with per-NUMA-node lists using RCU-safe operations (list_add_rcu /
+list_del_rcu). This eliminates all spinlock_irqsave contention from the
+fork/exit hot path when using mm percpu caching.
+
+Key changes:
+- percpu_counters global list + spinlock -> percpu_counters_list[]
+  array of per-node list_heads with RCU list operations
+- list_add() -> list_add_rcu() in init/reinit (no lock needed)
+- list_del() -> list_del_rcu() in detach/destroy (no lock needed)
+- CPU hotplug dead callback uses rcu_read_lock() +
+  list_for_each_entry_rcu() instead of spin_lock_irq()
+- Lazy initialization via percpu_counters_list_ensure_init() to
+  handle early boot before percpu_counter_startup()
+- __percpu_counter_init_many uses NUMA-node-local list for hotplug
+  registration instead of global list
+
+For 320-core / 4-NUMA systems, this reduces fork/exit hot-path lock
+contention by eliminating the global spin_lock_irqsave entirely.
+The per-node RCU approach provides lock-free hotplug list management
+while maintaining correctness for CPU hotplug events.
+---
+ lib/percpu_counter.c | 100 ++++++++++++++++++++++++-------------------
+ 1 file changed, 56 insertions(+), 44 deletions(-)
+
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index ec20be17c66f..b8a982b9b5b1 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -9,10 +9,18 @@
+ #include <linux/cpu.h>
+ #include <linux/module.h>
+ #include <linux/debugobjects.h>
++#include <linux/rculist.h>
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-static LIST_HEAD(percpu_counters);
+-static DEFINE_SPINLOCK(percpu_counters_lock);
++static struct list_head percpu_counters_list[MAX_NUMNODES];
++static bool percpu_counters_list_inited __read_mostly;
++
++static void percpu_counters_list_ensure_init(int nid)
++{
++	if (likely(percpu_counters_list_inited))
++		return;
++	INIT_LIST_HEAD(&percpu_counters_list[nid]);
++}
+ #endif
+ 
+ #ifdef CONFIG_DEBUG_OBJECTS_PERCPU_COUNTER
+@@ -189,7 +197,6 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 			       gfp_t gfp, u32 nr_counters,
+ 			       struct lock_class_key *key)
+ {
+-	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+ 	s32 __percpu *counters;
+ 	u32 i;
+@@ -215,10 +222,10 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
++	percpu_counters_list_ensure_init(numa_node_id());
+ 	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++		list_add_rcu(&fbc[i].list,
++			      &percpu_counters_list[numa_node_id()]);
+ #endif
+ 	return 0;
+ }
+@@ -239,13 +246,13 @@ EXPORT_SYMBOL(__percpu_counter_init_many);
+  * percpu values are already zeroed (e.g., the data was zeroed before it was
+  * returned to a per-CPU cache).  The counters are fully initialised:
+  * spinlock, lockdep class, list (when CONFIG_HOTPLUG_CPU=y), count, and
+- * per-CPU pointer.
++ * per-CPU pointer.  The counters are added to the current NUMA node's
++ * hotplug list using RCU-safe list_add_rcu (no lock required).
+  */
+ int percpu_counter_init_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 				   s32 __percpu *counters, u32 nr_counters,
+ 				   struct lock_class_key *key)
+ {
+-	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+ 	u32 i;
+ 
+@@ -264,10 +271,10 @@ int percpu_counter_init_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
++	percpu_counters_list_ensure_init(numa_node_id());
+ 	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++		list_add_rcu(&fbc[i].list,
++			      &percpu_counters_list[numa_node_id()]);
+ #endif
+ 	return 0;
+ }
+@@ -284,11 +291,12 @@ EXPORT_SYMBOL(percpu_counter_init_many_pcpu);
+  *
+  * Like percpu_counter_init_many_pcpu(), but for counters that were
+  * previously initialised and then detached via percpu_counter_detach_many().
+- * The detach step removes counters from the hotplug list (necessary
+- * because the containing mm_struct may be freed and reallocated by SLUB,
+- * which would corrupt the list through slab reuse).  This function
++ * The detach step removes counters from the per-node hotplug list
++ * (necessary because the containing mm_struct may be freed and reallocated
++ * by SLUB, which would corrupt the list through slab reuse).  This function
+  * reinitialises the spinlock, count, and percpu pointers, re-activates
+- * debug objects, and re-adds the counters to the hotplug list.
++ * debug objects, and re-adds the counters to the current node's hotplug
++ * list using RCU-safe list_add_rcu (no lock required).
+  *
+  * The caller guarantees that the percpu values are already zeroed.
+  */
+@@ -296,7 +304,6 @@ int percpu_counter_reinit_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 				     s32 __percpu *counters, u32 nr_counters,
+ 				     struct lock_class_key *key)
+ {
+-	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+ 	u32 i;
+ 
+@@ -315,10 +322,10 @@ int percpu_counter_reinit_many_pcpu(struct percpu_counter *fbc, s64 amount,
+ 	}
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
++	percpu_counters_list_ensure_init(numa_node_id());
+ 	for (i = 0; i < nr_counters; i++)
+-		list_add(&fbc[i].list, &percpu_counters);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++		list_add_rcu(&fbc[i].list,
++			      &percpu_counters_list[numa_node_id()]);
+ #endif
+ 
+ 	return 0;
+@@ -331,16 +338,15 @@ EXPORT_SYMBOL(percpu_counter_reinit_many_pcpu);
+  * @nr_counters: number of counters in the @fbc array
+  *
+  * Reverse the bookkeeping done by percpu_counter_init_many() /
+- * percpu_counter_init_many_pcpu(): deactivate debug objects and NULL out
+- * the percpu pointers -- but do *not* free the percpu data area, and do
+- * *not* remove from the hotplug list.  The list_head entries remain valid
+- * so that percpu_counter_reinit_many_pcpu() can reuse them without taking
+- * percpu_counters_lock.  The caller is expected to cache and reuse the
+- * percpu data later with percpu_counter_reinit_many_pcpu().
++ * percpu_counter_init_many_pcpu(): deactivate debug objects, remove
++ * from the per-node hotplug list using RCU-safe list_del_rcu, and
++ * NULL out the percpu pointers -- but do *not* free the percpu data
++ * area.  The caller is expected to cache and reuse the percpu data
++ * later with percpu_counter_reinit_many_pcpu(), which will re-add the
++ * counters to the hotplug list.
+  */
+ void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
+ {
+-	unsigned long flags __maybe_unused;
+ 	u32 i;
+ 
+ 	if (WARN_ON_ONCE(!fbc))
+@@ -353,10 +359,8 @@ void percpu_counter_detach_many(struct percpu_counter *fbc, u32 nr_counters)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+ 	for (i = 0; i < nr_counters; i++)
+-		list_del(&fbc[i].list);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++		list_del_rcu(&fbc[i].list);
+ #endif
+ 
+ 	for (i = 0; i < nr_counters; i++)
+@@ -366,7 +370,6 @@ EXPORT_SYMBOL(percpu_counter_detach_many);
+ 
+ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ {
+-	unsigned long flags __maybe_unused;
+ 	u32 i;
+ 
+ 	if (WARN_ON_ONCE(!fbc))
+@@ -379,10 +382,8 @@ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-	spin_lock_irqsave(&percpu_counters_lock, flags);
+ 	for (i = 0; i < nr_counters; i++)
+-		list_del(&fbc[i].list);
+-	spin_unlock_irqrestore(&percpu_counters_lock, flags);
++		list_del_rcu(&fbc[i].list);
+ #endif
+ 
+ 	free_percpu(fbc[0].counters);
+@@ -407,23 +408,27 @@ static int percpu_counter_cpu_dead(unsigned int cpu)
+ {
+ #ifdef CONFIG_HOTPLUG_CPU
+ 	struct percpu_counter *fbc;
++	int nid;
+ 
+ 	compute_batch_value(cpu);
+ 
+-	spin_lock_irq(&percpu_counters_lock);
+-	list_for_each_entry(fbc, &percpu_counters, list) {
+-		s32 *pcount;
++	for_each_online_node(nid) {
++		percpu_counters_list_ensure_init(nid);
++		rcu_read_lock();
++		list_for_each_entry_rcu(fbc, &percpu_counters_list[nid], list) {
++			s32 *pcount;
+ 
+-		if (!fbc->counters)
+-			continue;
++			if (!fbc->counters)
++				continue;
+ 
+-		raw_spin_lock(&fbc->lock);
+-		pcount = per_cpu_ptr(fbc->counters, cpu);
+-		fbc->count += *pcount;
+-		*pcount = 0;
+-		raw_spin_unlock(&fbc->lock);
++			raw_spin_lock(&fbc->lock);
++			pcount = per_cpu_ptr(fbc->counters, cpu);
++			fbc->count += *pcount;
++			*pcount = 0;
++			raw_spin_unlock(&fbc->lock);
++		}
++		rcu_read_unlock();
+ 	}
+-	spin_unlock_irq(&percpu_counters_lock);
+ #endif
+ 	return 0;
+ }
+@@ -537,6 +542,13 @@ bool __percpu_counter_limited_add(struct percpu_counter *fbc,
+ static int __init percpu_counter_startup(void)
+ {
+ 	int ret;
++	int nid;
++
++#ifdef CONFIG_HOTPLUG_CPU
++	for_each_online_node(nid)
++		INIT_LIST_HEAD(&percpu_counters_list[nid]);
++	percpu_counters_list_inited = true;
++#endif
+ 
+ 	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "lib/percpu_cnt:online",
+ 				compute_batch_value, NULL);
+-- 
+2.43.0
+

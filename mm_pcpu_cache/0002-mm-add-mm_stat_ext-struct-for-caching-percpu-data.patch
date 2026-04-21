@@ -1,7 +1,7 @@
 From fae6d606f38e5467b9af9ae9666ce167a4959cc4 Mon Sep 17 00:00:00 2001
 From: lurea-git <noreply@anthropic.com>
 Date: Thu, 16 Apr 2026 14:48:28 +0800
-Subject: [PATCH 2/7] mm: add mm_stat_ext struct for caching percpu data
+Subject: [PATCH 2/9] mm: add mm_stat_ext struct for caching percpu data
 
 Introduce struct mm_stat_ext, a small structure embedded in mm_struct
 that holds pointers to the percpu data areas used by rss_stat and

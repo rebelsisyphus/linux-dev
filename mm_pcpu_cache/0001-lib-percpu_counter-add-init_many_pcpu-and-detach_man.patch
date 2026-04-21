@@ -1,7 +1,7 @@
 From bfefaadaee1124c7c35fc4945c28e990dfa864d5 Mon Sep 17 00:00:00 2001
 From: lurea-git <noreply@anthropic.com>
 Date: Thu, 16 Apr 2026 14:48:09 +0800
-Subject: [PATCH 1/7] lib/percpu_counter: add init_many_pcpu and detach_many
+Subject: [PATCH 1/9] lib/percpu_counter: add init_many_pcpu and detach_many
  helpers
 
 Add two new percpu_counter helpers that allow percpu data to be

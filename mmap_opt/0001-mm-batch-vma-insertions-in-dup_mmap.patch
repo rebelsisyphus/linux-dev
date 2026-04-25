@@ -1,0 +1,116 @@
+From 5575f5a5a1d3ac96db6b04bac80aa0e0d75fa7b5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 25 Apr 2026 14:36:10 +0800
+Subject: [PATCH 1/3] mm: batch vma insertions in dup_mmap
+
+dup_mmap acquires and releases i_mmap_lock_write for each file-backed
+VMA individually during fork, even when consecutive VMAs share the same
+file mapping. On high-core machines running execve-intensive workloads,
+this causes severe lock contention on hot files like libc.so and ld.so.
+
+Introduce dup_mmap_file_batch to collect VMA insertion pairs (tmp, mpnt)
+grouped by file->f_mapping. When the mapping changes or the batch is
+full, flush all pending insertions under a single i_mmap_lock_write
+hold. This follows the same batch processing pattern already used for
+unlink_file_vma in the exit path (commit 3577dbb19241).
+
+Flush on loop_out to handle error cleanup paths correctly.
+
+This reduces i_mmap lock acquires in the fork path from N (one per VMA)
+to approximately one per file mapping.
+---
+ mm/mmap.c | 59 ++++++++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 50 insertions(+), 9 deletions(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 843160946aa5..13e1920a63d0 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1729,8 +1729,46 @@ bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+ 	return true;
+ }
+ 
++#define DUP_MMAP_FILE_BATCH_SIZE 8
++
++struct dup_mmap_file_batch {
++	int count;
++	struct address_space *mapping;
++	struct {
++		struct vm_area_struct *tmp;
++		struct vm_area_struct *mpnt;
++	} vmas[DUP_MMAP_FILE_BATCH_SIZE];
++};
++
++static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *db)
++{
++	struct address_space *mapping;
++	int i;
++
++	if (!db->count)
++		return;
++
++	mapping = db->mapping;
++	i_mmap_lock_write(mapping);
++	flush_dcache_mmap_lock(mapping);
++	for (i = 0; i < db->count; i++) {
++		struct vm_area_struct *tmp = db->vmas[i].tmp;
++
++		if (vma_is_shared_maywrite(tmp))
++			mapping_allow_writable(mapping);
++		vma_interval_tree_insert_after(tmp, db->vmas[i].mpnt,
++					       &mapping->i_mmap);
++	}
++	flush_dcache_mmap_unlock(mapping);
++	i_mmap_unlock_write(mapping);
++
++	db->count = 0;
++	db->mapping = NULL;
++}
++
+ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ {
++	struct dup_mmap_file_batch db = { .count = 0, .mapping = NULL };
+ 	struct vm_area_struct *mpnt, *tmp;
+ 	int retval;
+ 	unsigned long charge = 0;
+@@ -1826,15 +1864,15 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 			struct address_space *mapping = file->f_mapping;
+ 
+ 			get_file(file);
+-			i_mmap_lock_write(mapping);
+-			if (vma_is_shared_maywrite(tmp))
+-				mapping_allow_writable(mapping);
+-			flush_dcache_mmap_lock(mapping);
+-			/* insert tmp into the share list, just after mpnt */
+-			vma_interval_tree_insert_after(tmp, mpnt,
+-					&mapping->i_mmap);
+-			flush_dcache_mmap_unlock(mapping);
+-			i_mmap_unlock_write(mapping);
++			if (db.count > 0 && db.mapping != mapping)
++				dup_mmap_file_batch_flush(&db);
++			else if (db.count == ARRAY_SIZE(db.vmas))
++				dup_mmap_file_batch_flush(&db);
++
++			db.mapping = mapping;
++			db.vmas[db.count].tmp = tmp;
++			db.vmas[db.count].mpnt = mpnt;
++			db.count++;
+ 		}
+ 
+ 		if (!(tmp->vm_flags & VM_WIPEONFORK))
+@@ -1845,9 +1883,12 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 			goto loop_out;
+ 		}
+ 	}
++	/* Flush any remaining batched insertions */
++	dup_mmap_file_batch_flush(&db);
+ 	/* a new mm has just been created */
+ 	retval = arch_dup_mmap(oldmm, mm);
+ loop_out:
++	dup_mmap_file_batch_flush(&db);
+ 	vma_iter_free(&vmi);
+ 	if (!retval) {
+ 		mt_set_in_rcu(vmi.mas.tree);
+-- 
+2.43.0
+

@@ -1,0 +1,218 @@
+From 65c2bf3cc505d3f8a7f09b7dec8e3fd6f5f416e5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 25 Apr 2026 14:36:26 +0800
+Subject: [PATCH 2/3] mm: defer i_mmap insertion to batch across consecutive
+ mmap calls
+
+During execve, the ELF loader maps multiple PT_LOAD segments of the
+binary and interpreter (ld.so) through consecutive vm_mmap() calls,
+each going through mmap_region() -> vma_link_file() which acquires and
+releases i_mmap_lock_write independently. For hot files like libc.so
+and ld.so, this results in ~5 lock acquires per file during exec,
+contributing ~25% of total CPU time on high-core machines.
+
+Add an i_mmap lock caching mechanism to batch consecutive vma_link_file
+calls for the same file mapping:
+
+- Add i_mmap_cached_mapping and i_mmap_batching to mm_struct, initialized
+  to NULL and 0 in mm_init().
+- vma_link_file(): when i_mmap_batching is set, cache the held lock and
+  reuse it for subsequent calls with the same mapping. When the mapping
+  changes, release the old lock and cache the new one. The hold_rmap_lock
+  path (used by mmap_prepare/mmap_complete) is excluded from batching.
+- vma_link_file_flush(): release the cached lock.
+- mmap_region(): auto-flush at end unless batching is enabled.
+- load_elf_binary(): enable i_mmap_batching before mapping PT_LOAD
+  segments, flush and disable after all segments and interpreter are
+  loaded. Error path at out_free_dentry also flushes.
+
+This reduces i_mmap lock acquires during exec from ~15 (5 segments x 3
+files) to ~3 (one per file), significantly reducing contention on the
+i_mmap_rwsem.
+---
+ fs/binfmt_elf.c          | 12 ++++++++
+ include/linux/mm.h       |  1 +
+ include/linux/mm_types.h |  7 +++++
+ kernel/fork.c            |  2 ++
+ mm/vma.c                 | 59 ++++++++++++++++++++++++++++++++++++++--
+ mm/vma.h                 |  2 ++
+ 6 files changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/fs/binfmt_elf.c b/fs/binfmt_elf.c
+index fb857faaf0d6..2529665da430 100644
+--- a/fs/binfmt_elf.c
++++ b/fs/binfmt_elf.c
+@@ -1040,6 +1040,13 @@ static int load_elf_binary(struct linux_binprm *bprm)
+ 
+ 	/* Now we do a little grungy work by mmapping the ELF image into
+ 	   the correct location in memory. */
++	/*
++	 * Enable i_mmap lock batching - consecutive mmap calls for the same
++	 * file will reuse the already-held i_mmap lock instead of acquiring
++	 * and releasing it for each segment. This significantly reduces
++	 * contention on hot files like libc.so and ld.so during exec.
++	 */
++	current->mm->i_mmap_batching = 1;
+ 	for(i = 0, elf_ppnt = elf_phdata;
+ 	    i < elf_ex->e_phnum; i++, elf_ppnt++) {
+ 		int elf_prot, elf_flags;
+@@ -1284,6 +1291,9 @@ static int load_elf_binary(struct linux_binprm *bprm)
+ 		}
+ 	}
+ 
++	vma_link_file_flush(current->mm);
++	current->mm->i_mmap_batching = 0;
++
+ 	kfree(elf_phdata);
+ 
+ 	set_binfmt(&elf_format);
+@@ -1384,6 +1394,8 @@ static int load_elf_binary(struct linux_binprm *bprm)
+ 
+ 	/* error cleanup */
+ out_free_dentry:
++	vma_link_file_flush(current->mm);
++	current->mm->i_mmap_batching = 0;
+ 	kfree(interp_elf_ex);
+ 	kfree(interp_elf_phdata);
+ out_free_file:
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index abb4963c1f06..fe15d6d042fa 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -3788,6 +3788,7 @@ void vma_interval_tree_insert(struct vm_area_struct *node,
+ void vma_interval_tree_insert_after(struct vm_area_struct *node,
+ 				    struct vm_area_struct *prev,
+ 				    struct rb_root_cached *root);
++void vma_link_file_flush(struct mm_struct *mm);
+ void vma_interval_tree_remove(struct vm_area_struct *node,
+ 			      struct rb_root_cached *root);
+ struct vm_area_struct *vma_interval_tree_subtree_search(struct vm_area_struct *node,
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 547afc9f63b6..58df516393ca 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1280,6 +1280,13 @@ struct mm_struct {
+ 		/* Architecture-specific MM context */
+ 		mm_context_t context;
+ 
++		/*
++		 * @i_mmap_cached_mapping: If non-NULL, i_mmap_rwsem for this
++		 * mapping is currently held. Used to batch i_mmap insertions
++		 * across consecutive vma_link_file() calls for the same file.
++		 */
++		struct address_space *i_mmap_cached_mapping;
++		unsigned int i_mmap_batching :1;
+ 		mm_flags_t flags; /* Must use mm_flags_* hlpers to access */
+ 
+ #ifdef CONFIG_AIO
+diff --git a/kernel/fork.c b/kernel/fork.c
+index c5de8aa5ed12..716e5ca62053 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1481,6 +1481,8 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	INIT_LIST_HEAD(&mm->mmlist);
+ 	mm_pgtables_bytes_init(mm);
+ 	mm->map_count = 0;
++	mm->i_mmap_cached_mapping = NULL;
++	mm->i_mmap_batching = 0;
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
+diff --git a/mm/vma.c b/mm/vma.c
+index c8df5f561ad7..391031172bfa 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -1811,13 +1811,64 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ {
+ 	struct file *file = vma->vm_file;
+ 	struct address_space *mapping;
++	struct mm_struct *mm = vma->vm_mm;
+ 
+ 	if (file) {
+ 		mapping = file->f_mapping;
++
++		/*
++		 * If caller manages the lock lifecycle (mmap_prepare/mmap_complete
++		 * pattern), do not participate in batching.
++		 */
++		if (hold_rmap_lock) {
++			if (mm->i_mmap_cached_mapping)
++				vma_link_file_flush(mm);
++			i_mmap_lock_write(mapping);
++			__vma_link_file(vma, mapping);
++			return;
++		}
++
++		/*
++		 * When i_mmap batching is enabled (during exec), cache the
++		 * held lock to batch consecutive vma_link_file calls for the
++		 * same mapping across multiple mmap_region invocations.
++		 */
++		if (mm->i_mmap_batching) {
++			/* If we already hold the lock for this mapping, reuse it. */
++			if (mm->i_mmap_cached_mapping == mapping) {
++				__vma_link_file(vma, mapping);
++				return;
++			}
++
++			/* Release any previously cached lock for a different mapping. */
++			if (mm->i_mmap_cached_mapping)
++				vma_link_file_flush(mm);
++
++			i_mmap_lock_write(mapping);
++			__vma_link_file(vma, mapping);
++			mm->i_mmap_cached_mapping = mapping;
++			return;
++		}
++
+ 		i_mmap_lock_write(mapping);
+ 		__vma_link_file(vma, mapping);
+-		if (!hold_rmap_lock)
+-			i_mmap_unlock_write(mapping);
++		i_mmap_unlock_write(mapping);
++	}
++}
++
++/*
++ * vma_link_file_flush() - Release the cached i_mmap lock if held.
++ * @mm: The mm whose cached lock to release.
++ *
++ * Must be called at the end of a batch of mmap operations to release
++ * the i_mmap lock held across consecutive vma_link_file() calls for
++ * the same file mapping.
++ */
++void vma_link_file_flush(struct mm_struct *mm)
++{
++	if (mm->i_mmap_cached_mapping) {
++		i_mmap_unlock_write(mm->i_mmap_cached_mapping);
++		mm->i_mmap_cached_mapping = NULL;
+ 	}
+ }
+ 
+@@ -2843,6 +2894,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
+ 
+ 	ret = __mmap_region(file, addr, len, vm_flags, pgoff, uf);
+ 
++	/* Release any cached i_mmap lock unless batching. */
++	if (!current->mm->i_mmap_batching)
++		vma_link_file_flush(current->mm);
++
+ 	/* Clear our write mapping regardless of error. */
+ 	if (writable_file_mapping)
+ 		mapping_unmap_writable(file->f_mapping);
+diff --git a/mm/vma.h b/mm/vma.h
+index eba388c61ef4..efd7126f76b3 100644
+--- a/mm/vma.h
++++ b/mm/vma.h
+@@ -444,6 +444,8 @@ void unlink_file_vma_batch_final(struct unlink_vma_file_batch *vb);
+ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+ 			       struct vm_area_struct *vma);
+ 
++void vma_link_file_flush(struct mm_struct *mm);
++
+ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
+ 	unsigned long addr, unsigned long len, pgoff_t pgoff,
+ 	bool *need_rmap_locks);
+-- 
+2.43.0
+

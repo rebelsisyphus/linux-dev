@@ -1,0 +1,2881 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw1.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 52F077DA66
+	for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 06:37:38 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776062275; cv=none; b=cz91ajQkgo1UT6f5NuvA+Tc4XuMrWwtm2SyWTLF3YX9FJlmVqOplKmXAEfREHdt3p3jUuMmx825psJoP4ndf2nxZC1Ba2DYCTl9IVIjZ1H0Y5xR+Uuv1bmM7uafk7Yqux+EpNEuy8u1qCCaavVqMtnS1Fb7rrwBm+7xS7gv+x30=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776062275; c=relaxed/simple;
+	bh=0WxP6V4lltu4CPt+d+BZQBR7Zepd6vN9kz+S6rOOdd0=;
+	h=From:To:CC:Subject:Date:Message-ID:In-Reply-To:References:
+	 MIME-Version:Content-Type; b=MmEYW+6H6lbiywb9tKKWBTFp5qTXrTyZdA4bGx46yrn9Bx+kq/pPGUgYcF4veCuh0ka+f9gkm0VT10ETUz+4qhBr2FoqJYDsPRUpi4RVDOnqqUgL+fhqv0Uo23CI5YlbLVREti7lr4GeNDvQ99NxL4mHmEkXDIPaYJqbTVZtXMU=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fvHNZ430Fzb7P3;
+	Mon, 13 Apr 2026 14:21:18 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fvHNY0B89zb7P3;
+	Mon, 13 Apr 2026 14:21:17 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id 8F3C57892;
+	Mon, 13 Apr 2026 14:21:14 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 13 Apr
+ 2026 14:21:16 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>
+CC: <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>, Huang
+ Shijie <huangsj@hygon.cn>
+Subject: [PATCH 1/3] mm: use mapping_mapped to simplify the code
+Date: Mon, 13 Apr 2026 14:20:40 +0800
+Message-ID: <20260413062042.804-2-huangsj@hygon.cn>
+X-Mailer: git-send-email 2.43.0
+In-Reply-To: <20260413062042.804-1-huangsj@hygon.cn>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+Use mapping_mapped() to simplify the code, make
+the code tidy and clean.
+
+Signed-off-by: Huang Shijie <huangsj@hygon.cn>
+---
+ fs/hugetlbfs/inode.c | 4 ++--
+ mm/memory.c          | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/hugetlbfs/inode.c b/fs/hugetlbfs/inode.c
+index 3f70c47981de..ab5ac092d8a6 100644
+--- a/fs/hugetlbfs/inode.c
++++ b/fs/hugetlbfs/inode.c
+@@ -646,7 +646,7 @@ static void hugetlb_vmtruncate(struct inode *inode, loff_t offset)
+ 
+ 	i_size_write(inode, offset);
+ 	i_mmap_lock_write(mapping);
+-	if (!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root))
++	if (mapping_mapped(mapping))
+ 		hugetlb_vmdelete_list(&mapping->i_mmap, pgoff, 0,
+ 				      ZAP_FLAG_DROP_MARKER);
+ 	i_mmap_unlock_write(mapping);
+@@ -707,7 +707,7 @@ static long hugetlbfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 
+ 	/* Unmap users of full pages in the hole. */
+ 	if (hole_end > hole_start) {
+-		if (!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root))
++		if (mapping_mapped(mapping))
+ 			hugetlb_vmdelete_list(&mapping->i_mmap,
+ 					      hole_start >> PAGE_SHIFT,
+ 					      hole_end >> PAGE_SHIFT, 0);
+diff --git a/mm/memory.c b/mm/memory.c
+index 2f815a34d924..366054435773 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4297,7 +4297,7 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+ 	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
++	if (unlikely(mapping_mapped(mapping)))
+ 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+@@ -4327,7 +4327,7 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 		last_index = ULONG_MAX;
+ 
+ 	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
++	if (unlikely(mapping_mapped(mapping)))
+ 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+-- 
+2.43.0
+
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw1.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 532792F3632
+	for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 06:37:38 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776062275; cv=none; b=KdUhGoUICMOn2PcJpjBwNgQ2td3Pv0cbAvYovoeFOMqENJJNpdVxi/nXfkwz2vV1+dOq0Sn4ojbA3M04FaPr+tR7f7hrubQl2bxkzlBXzwg2sQ8/xiCnIk9vOKb2jI8/mtAu5FQYMgIgTJEGkCPVFFLju4k8MI4t91is1wL4NbE=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776062275; c=relaxed/simple;
+	bh=Z9XLeNZgfJZzIm722H6ZRjTeIvlgm7LF4f2hJ4qqQW4=;
+	h=From:To:CC:Subject:Date:Message-ID:In-Reply-To:References:
+	 MIME-Version:Content-Type; b=l/dVxgEmy2lnYqNIFteu99rjEfkBmJZOUrqQ5dR9xe9imVk6MJE7zuaa3CsMFTf+oxODMbkGXm0n95ZFHd2AV+4CYYtoydhmI49hMqimBQaPW2wvVJiAZu69O4z9LTRuZja01ZhYJFwf8UgCgq2QELPRYBVV6sL2os9JQmKDf6M=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fvHNd43CYzg1cT;
+	Mon, 13 Apr 2026 14:21:21 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fvHNb0jGXzg1cT;
+	Mon, 13 Apr 2026 14:21:19 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id 0CFF730004D3;
+	Mon, 13 Apr 2026 14:19:26 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 13 Apr
+ 2026 14:21:17 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>
+CC: <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>, Huang
+ Shijie <huangsj@hygon.cn>
+Subject: [PATCH 2/3] mm: use get_i_mmap_root to access the file's i_mmap
+Date: Mon, 13 Apr 2026 14:20:41 +0800
+Message-ID: <20260413062042.804-3-huangsj@hygon.cn>
+X-Mailer: git-send-email 2.43.0
+In-Reply-To: <20260413062042.804-1-huangsj@hygon.cn>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+Do not access the file's i_mmap directly, use get_i_mmap_root()
+to access it. This patch makes preparations for later patches.
+
+Signed-off-by: Huang Shijie <huangsj@hygon.cn>
+---
+ arch/arm/mm/fault-armv.c   |  3 ++-
+ arch/arm/mm/flush.c        |  3 ++-
+ arch/nios2/mm/cacheflush.c |  3 ++-
+ arch/parisc/kernel/cache.c |  4 +++-
+ fs/dax.c                   |  3 ++-
+ fs/hugetlbfs/inode.c       |  6 +++---
+ include/linux/fs.h         |  5 +++++
+ include/linux/mm.h         |  1 +
+ kernel/events/uprobes.c    |  3 ++-
+ mm/hugetlb.c               |  7 +++++--
+ mm/khugepaged.c            |  6 ++++--
+ mm/memory-failure.c        |  8 +++++---
+ mm/memory.c                |  4 ++--
+ mm/mmap.c                  |  2 +-
+ mm/nommu.c                 |  9 +++++----
+ mm/pagewalk.c              |  2 +-
+ mm/rmap.c                  |  2 +-
+ mm/vma.c                   | 14 ++++++++------
+ 18 files changed, 54 insertions(+), 31 deletions(-)
+
+diff --git a/arch/arm/mm/fault-armv.c b/arch/arm/mm/fault-armv.c
+index 91e488767783..1b5fe151e805 100644
+--- a/arch/arm/mm/fault-armv.c
++++ b/arch/arm/mm/fault-armv.c
+@@ -126,6 +126,7 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
+ {
+ 	const unsigned long pmd_start_addr = ALIGN_DOWN(addr, PMD_SIZE);
+ 	const unsigned long pmd_end_addr = pmd_start_addr + PMD_SIZE;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct mm_struct *mm = vma->vm_mm;
+ 	struct vm_area_struct *mpnt;
+ 	unsigned long offset;
+@@ -140,7 +141,7 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
+ 	 * cache coherency.
+ 	 */
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(mpnt, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(mpnt, root, pgoff, pgoff) {
+ 		/*
+ 		 * If we are using split PTE locks, then we need to take the pte
+ 		 * lock. Otherwise we are using shared mm->page_table_lock which
+diff --git a/arch/arm/mm/flush.c b/arch/arm/mm/flush.c
+index 19470d938b23..b9641901f206 100644
+--- a/arch/arm/mm/flush.c
++++ b/arch/arm/mm/flush.c
+@@ -238,6 +238,7 @@ void __flush_dcache_folio(struct address_space *mapping, struct folio *folio)
+ static void __flush_dcache_aliases(struct address_space *mapping, struct folio *folio)
+ {
+ 	struct mm_struct *mm = current->active_mm;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct vm_area_struct *vma;
+ 	pgoff_t pgoff, pgoff_end;
+ 
+@@ -251,7 +252,7 @@ static void __flush_dcache_aliases(struct address_space *mapping, struct folio *
+ 	pgoff_end = pgoff + folio_nr_pages(folio) - 1;
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff_end) {
++	vma_interval_tree_foreach(vma, root, pgoff, pgoff_end) {
+ 		unsigned long start, offset, pfn;
+ 		unsigned int nr;
+ 
+diff --git a/arch/nios2/mm/cacheflush.c b/arch/nios2/mm/cacheflush.c
+index 8321182eb927..ab6e064fabe2 100644
+--- a/arch/nios2/mm/cacheflush.c
++++ b/arch/nios2/mm/cacheflush.c
+@@ -78,11 +78,12 @@ static void flush_aliases(struct address_space *mapping, struct folio *folio)
+ 	unsigned long flags;
+ 	pgoff_t pgoff;
+ 	unsigned long nr = folio_nr_pages(folio);
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 
+ 	pgoff = folio->index;
+ 
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
++	vma_interval_tree_foreach(vma, root, pgoff, pgoff + nr - 1) {
+ 		unsigned long start;
+ 
+ 		if (vma->vm_mm != mm)
+diff --git a/arch/parisc/kernel/cache.c b/arch/parisc/kernel/cache.c
+index 4c5240d3a3c7..920adacaaac2 100644
+--- a/arch/parisc/kernel/cache.c
++++ b/arch/parisc/kernel/cache.c
+@@ -473,6 +473,7 @@ static inline unsigned long get_upa(struct mm_struct *mm, unsigned long addr)
+ void flush_dcache_folio(struct folio *folio)
+ {
+ 	struct address_space *mapping = folio_flush_mapping(folio);
++	struct rb_root_cached *root;
+ 	struct vm_area_struct *vma;
+ 	unsigned long addr, old_addr = 0;
+ 	void *kaddr;
+@@ -494,6 +495,7 @@ void flush_dcache_folio(struct folio *folio)
+ 		return;
+ 
+ 	pgoff = folio->index;
++	root = get_i_mmap_root(mapping);
+ 
+ 	/*
+ 	 * We have carefully arranged in arch_get_unmapped_area() that
+@@ -503,7 +505,7 @@ void flush_dcache_folio(struct folio *folio)
+ 	 * on machines that support equivalent aliasing
+ 	 */
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
++	vma_interval_tree_foreach(vma, root, pgoff, pgoff + nr - 1) {
+ 		unsigned long offset = pgoff - vma->vm_pgoff;
+ 		unsigned long pfn = folio_pfn(folio);
+ 
+diff --git a/fs/dax.c b/fs/dax.c
+index 289e6254aa30..00fe5481accc 100644
+--- a/fs/dax.c
++++ b/fs/dax.c
+@@ -1101,6 +1101,7 @@ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 		struct address_space *mapping, void *entry)
+ {
+ 	unsigned long pfn, index, count, end;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	long ret = 0;
+ 	struct vm_area_struct *vma;
+ 
+@@ -1164,7 +1165,7 @@ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 
+ 	/* Walk all mappings of a given index of a file and writeprotect them */
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, index, end) {
++	vma_interval_tree_foreach(vma, root, index, end) {
+ 		pfn_mkclean_range(pfn, count, index, vma);
+ 		cond_resched();
+ 	}
+diff --git a/fs/hugetlbfs/inode.c b/fs/hugetlbfs/inode.c
+index ab5ac092d8a6..9cf82fba6eb6 100644
+--- a/fs/hugetlbfs/inode.c
++++ b/fs/hugetlbfs/inode.c
+@@ -400,7 +400,7 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
+ 					struct address_space *mapping,
+ 					struct folio *folio, pgoff_t index)
+ {
+-	struct rb_root_cached *root = &mapping->i_mmap;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct hugetlb_vma_lock *vma_lock;
+ 	unsigned long pfn = folio_pfn(folio);
+ 	struct vm_area_struct *vma;
+@@ -647,7 +647,7 @@ static void hugetlb_vmtruncate(struct inode *inode, loff_t offset)
+ 	i_size_write(inode, offset);
+ 	i_mmap_lock_write(mapping);
+ 	if (mapping_mapped(mapping))
+-		hugetlb_vmdelete_list(&mapping->i_mmap, pgoff, 0,
++		hugetlb_vmdelete_list(get_i_mmap_root(mapping), pgoff, 0,
+ 				      ZAP_FLAG_DROP_MARKER);
+ 	i_mmap_unlock_write(mapping);
+ 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+@@ -708,7 +708,7 @@ static long hugetlbfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 	/* Unmap users of full pages in the hole. */
+ 	if (hole_end > hole_start) {
+ 		if (mapping_mapped(mapping))
+-			hugetlb_vmdelete_list(&mapping->i_mmap,
++			hugetlb_vmdelete_list(get_i_mmap_root(mapping),
+ 					      hole_start >> PAGE_SHIFT,
+ 					      hole_end >> PAGE_SHIFT, 0);
+ 	}
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 8b3dd145b25e..a6a99e044265 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -555,6 +555,11 @@ static inline int mapping_mapped(const struct address_space *mapping)
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+ }
+ 
++static inline struct rb_root_cached *get_i_mmap_root(struct address_space *mapping)
++{
++	return &mapping->i_mmap;
++}
++
+ /*
+  * Might pages of this file have been modified in userspace?
+  * Note that i_mmap_writable counts all VM_SHARED, VM_MAYWRITE vmas: do_mmap
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index abb4963c1f06..15cb1da43eb2 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -3797,6 +3797,7 @@ struct vm_area_struct *vma_interval_tree_iter_first(struct rb_root_cached *root,
+ struct vm_area_struct *vma_interval_tree_iter_next(struct vm_area_struct *node,
+ 				unsigned long start, unsigned long last);
+ 
++/* Please use get_i_mmap_root() to get the @root */
+ #define vma_interval_tree_foreach(vma, root, start, last)		\
+ 	for (vma = vma_interval_tree_iter_first(root, start, last);	\
+ 	     vma; vma = vma_interval_tree_iter_next(vma, start, last))
+diff --git a/kernel/events/uprobes.c b/kernel/events/uprobes.c
+index 923b24b321cc..420035b0cc7b 100644
+--- a/kernel/events/uprobes.c
++++ b/kernel/events/uprobes.c
+@@ -1201,6 +1201,7 @@ static inline struct map_info *free_map_info(struct map_info *info)
+ static struct map_info *
+ build_map_info(struct address_space *mapping, loff_t offset, bool is_register)
+ {
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	unsigned long pgoff = offset >> PAGE_SHIFT;
+ 	struct vm_area_struct *vma;
+ 	struct map_info *curr = NULL;
+@@ -1210,7 +1211,7 @@ build_map_info(struct address_space *mapping, loff_t offset, bool is_register)
+ 
+  again:
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(vma, root, pgoff, pgoff) {
+ 		if (!valid_vma(vma, is_register))
+ 			continue;
+ 
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index 327eaa4074d3..8d27f1b8abb5 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -5396,6 +5396,7 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	struct hstate *h = hstate_vma(vma);
+ 	struct vm_area_struct *iter_vma;
+ 	struct address_space *mapping;
++	struct rb_root_cached *root;
+ 	pgoff_t pgoff;
+ 
+ 	/*
+@@ -5406,6 +5407,7 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	pgoff = ((address - vma->vm_start) >> PAGE_SHIFT) +
+ 			vma->vm_pgoff;
+ 	mapping = vma->vm_file->f_mapping;
++	root = get_i_mmap_root(mapping);
+ 
+ 	/*
+ 	 * Take the mapping lock for the duration of the table walk. As
+@@ -5413,7 +5415,7 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	 * __unmap_hugepage_range() is called as the lock is already held
+ 	 */
+ 	i_mmap_lock_write(mapping);
+-	vma_interval_tree_foreach(iter_vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(iter_vma, root, pgoff, pgoff) {
+ 		/* Do not unmap the current VMA */
+ 		if (iter_vma == vma)
+ 			continue;
+@@ -6879,6 +6881,7 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
+ 		      unsigned long addr, pud_t *pud)
+ {
+ 	struct address_space *mapping = vma->vm_file->f_mapping;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	pgoff_t idx = ((addr - vma->vm_start) >> PAGE_SHIFT) +
+ 			vma->vm_pgoff;
+ 	struct vm_area_struct *svma;
+@@ -6887,7 +6890,7 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	pte_t *pte;
+ 
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(svma, &mapping->i_mmap, idx, idx) {
++	vma_interval_tree_foreach(svma, root, idx, idx) {
+ 		if (svma == vma)
+ 			continue;
+ 
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 1dd3cfca610d..3a4e81474fe3 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1740,10 +1740,11 @@ static bool file_backed_vma_is_retractable(struct vm_area_struct *vma)
+ 
+ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ {
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct vm_area_struct *vma;
+ 
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(vma, root, pgoff, pgoff) {
+ 		struct mmu_notifier_range range;
+ 		struct mm_struct *mm;
+ 		unsigned long addr;
+@@ -2163,7 +2164,8 @@ static enum scan_result collapse_file(struct mm_struct *mm, unsigned long addr,
+ 		 * not be able to observe any missing pages due to the
+ 		 * previously inserted retry entries.
+ 		 */
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, start, end) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping),
++					start, end) {
+ 			if (userfaultfd_missing(vma)) {
+ 				result = SCAN_EXCEED_NONE_PTE;
+ 				goto immap_locked;
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index ee42d4361309..85196d9bb26c 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -598,7 +598,7 @@ static void collect_procs_file(const struct folio *folio,
+ 
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff,
+ 				      pgoff) {
+ 			/*
+ 			 * Send early kill signal to tasks where a vma covers
+@@ -650,7 +650,8 @@ static void collect_procs_fsdax(const struct page *page,
+ 			t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff,
++					pgoff) {
+ 			if (vma->vm_mm == t->mm)
+ 				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
+ 		}
+@@ -2251,7 +2252,8 @@ static void collect_procs_pfn(struct pfn_address_space *pfn_space,
+ 		t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, 0, ULONG_MAX) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping),
++					0, ULONG_MAX) {
+ 			pgoff_t pgoff;
+ 
+ 			if (vma->vm_mm == t->mm &&
+diff --git a/mm/memory.c b/mm/memory.c
+index 366054435773..1ddd6b55fe7e 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4298,7 +4298,7 @@ void unmap_mapping_folio(struct folio *folio)
+ 
+ 	i_mmap_lock_read(mapping);
+ 	if (unlikely(mapping_mapped(mapping)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+ }
+@@ -4328,7 +4328,7 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 
+ 	i_mmap_lock_read(mapping);
+ 	if (unlikely(mapping_mapped(mapping)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+ }
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 843160946aa5..5b0671dff019 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1832,7 +1832,7 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 			flush_dcache_mmap_lock(mapping);
+ 			/* insert tmp into the share list, just after mpnt */
+ 			vma_interval_tree_insert_after(tmp, mpnt,
+-					&mapping->i_mmap);
++					get_i_mmap_root(mapping));
+ 			flush_dcache_mmap_unlock(mapping);
+ 			i_mmap_unlock_write(mapping);
+ 		}
+diff --git a/mm/nommu.c b/mm/nommu.c
+index c3a23b082adb..2e64b6c4c539 100644
+--- a/mm/nommu.c
++++ b/mm/nommu.c
+@@ -569,7 +569,7 @@ static void setup_vma_to_mm(struct vm_area_struct *vma, struct mm_struct *mm)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_insert(vma, &mapping->i_mmap);
++		vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
+ 		flush_dcache_mmap_unlock(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+@@ -585,7 +585,7 @@ static void cleanup_vma_from_mm(struct vm_area_struct *vma)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_remove(vma, &mapping->i_mmap);
++		vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
+ 		flush_dcache_mmap_unlock(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+@@ -1804,6 +1804,7 @@ EXPORT_SYMBOL_GPL(copy_remote_vm_str);
+ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 				size_t newsize)
+ {
++	struct rb_root_cached *root = get_i_mmap_root(&inode->mapping);
+ 	struct vm_area_struct *vma;
+ 	struct vm_region *region;
+ 	pgoff_t low, high;
+@@ -1816,7 +1817,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 	i_mmap_lock_read(inode->i_mapping);
+ 
+ 	/* search for VMAs that fall within the dead zone */
+-	vma_interval_tree_foreach(vma, &inode->i_mapping->i_mmap, low, high) {
++	vma_interval_tree_foreach(vma, root, low, high) {
+ 		/* found one - only interested if it's shared out of the page
+ 		 * cache */
+ 		if (vma->vm_flags & VM_SHARED) {
+@@ -1832,7 +1833,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 	 * we don't check for any regions that start beyond the EOF as there
+ 	 * shouldn't be any
+ 	 */
+-	vma_interval_tree_foreach(vma, &inode->i_mapping->i_mmap, 0, ULONG_MAX) {
++	vma_interval_tree_foreach(vma, root, 0, ULONG_MAX) {
+ 		if (!(vma->vm_flags & VM_SHARED))
+ 			continue;
+ 
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index a94c401ab2cf..c6c1c45df575 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -792,7 +792,7 @@ int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+ 		return -EINVAL;
+ 
+ 	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), first_index,
+ 				  first_index + nr - 1) {
+ 		/* Clip to the vma */
+ 		vba = vma->vm_pgoff;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 391337282e3f..52288d39d8a2 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -3036,7 +3036,7 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
+ 		i_mmap_lock_read(mapping);
+ 	}
+ lookup:
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap,
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping),
+ 			pgoff_start, pgoff_end) {
+ 		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
+ 
+diff --git a/mm/vma.c b/mm/vma.c
+index be64f781a3aa..1768e4355a13 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -231,7 +231,7 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -245,7 +245,7 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 		mapping_unmap_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_remove(vma, &mapping->i_mmap);
++	vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -316,10 +316,11 @@ static void vma_prepare(struct vma_prepare *vp)
+ 
+ 	if (vp->file) {
+ 		flush_dcache_mmap_lock(vp->mapping);
+-		vma_interval_tree_remove(vp->vma, &vp->mapping->i_mmap);
++		vma_interval_tree_remove(vp->vma,
++					get_i_mmap_root(vp->mapping));
+ 		if (vp->adj_next)
+ 			vma_interval_tree_remove(vp->adj_next,
+-						 &vp->mapping->i_mmap);
++					get_i_mmap_root(vp->mapping));
+ 	}
+ 
+ }
+@@ -338,8 +339,9 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 	if (vp->file) {
+ 		if (vp->adj_next)
+ 			vma_interval_tree_insert(vp->adj_next,
+-						 &vp->mapping->i_mmap);
+-		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
++					get_i_mmap_root(vp->mapping));
++		vma_interval_tree_insert(vp->vma,
++					get_i_mmap_root(vp->mapping));
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+-- 
+2.43.0
+
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 219D23128D7
+	for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 06:37:42 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776062279; cv=none; b=dZ3Ymi0Vu6a221nVJ/Ka0XuOfQvW0zfr+6Q50JjFy6e+eQvR8tl0tP+jphalR3GOjjtI59ojUVIDYYXdG1+I4EM5Gv7N8HgYWwADAF0S+HbgZjkcmlOYey4AchT5YEaXMNUrfgxYSDwx4WqwEco7uolEdJXKsYcHR5EYfOw42u0=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776062279; c=relaxed/simple;
+	bh=MJpWc2ZM9ZNlGme0TLVTzMyJF7M4BfZyxTPqJGEgH10=;
+	h=From:To:CC:Subject:Date:Message-ID:In-Reply-To:References:
+	 MIME-Version:Content-Type; b=jtYZvHT0Q9s63ZgulKwnLtGfjRNyIlDwV8hkdPZWhqfIWfhzSz7WPFHm/NuiVH82fgBJGxuPAodjgHkv6b5dento/6ShJzKHDIhNweapqCy4dNlTa6kUcCii4FesmNIhM397/T77qpKG5twIP2iu/dSAiAzkkHe+cHj7gdRWzsg=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvHNf68dvz1YQpmG;
+	Mon, 13 Apr 2026 14:21:22 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvHNd3nCLz1YQpmG;
+	Mon, 13 Apr 2026 14:21:21 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id 1A3AD7892;
+	Mon, 13 Apr 2026 14:21:19 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 13 Apr
+ 2026 14:21:20 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>
+CC: <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>, Huang
+ Shijie <huangsj@hygon.cn>
+Subject: [PATCH 3/3] mm: split the file's i_mmap tree for NUMA
+Date: Mon, 13 Apr 2026 14:20:42 +0800
+Message-ID: <20260413062042.804-4-huangsj@hygon.cn>
+X-Mailer: git-send-email 2.43.0
+In-Reply-To: <20260413062042.804-1-huangsj@hygon.cn>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+  In NUMA, there are maybe many NUMA nodes and many CPUs.
+For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+In the UnixBench tests, there is a test "execl" which tests
+the execve system call.
+
+  When we test our server with "./Run -c 384 execl",
+the test result is not good enough. The i_mmap locks contended heavily on
+"libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+over 6000 VMAs, all the VMAs can be in different NUMA mode.
+The insert/remove operations do not run quickly enough.
+
+ In order to reduce the competition of the i_mmap lock, this patch does
+following:
+   1.) Split the single i_mmap tree into several sibling trees:
+       Each NUMA node has a tree.
+   2.) Introduce a new field "tree_idx" for vm_area_struct to save the
+       sibling tree index for this VMA.
+   3.) Introduce a new field "vma_count" for address_space.
+       The new mapping_mapped() will use it.
+   4.) Rewrite the vma_interval_tree_foreach() for NUMA.
+
+ After this patch, the VMA insert/remove operations will work faster,
+and we can get 77% (10 times average) performance improvement
+with the above test.
+
+Signed-off-by: Huang Shijie <huangsj@hygon.cn>
+---
+ fs/inode.c               | 55 +++++++++++++++++++++++++++++++++++++++-
+ include/linux/fs.h       | 35 +++++++++++++++++++++++++
+ include/linux/mm.h       | 32 +++++++++++++++++++++++
+ include/linux/mm_types.h |  1 +
+ mm/mmap.c                |  3 ++-
+ mm/nommu.c               |  6 +++--
+ mm/vma.c                 | 34 +++++++++++++++++++------
+ mm/vma_init.c            |  1 +
+ 8 files changed, 155 insertions(+), 12 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index cc12b68e021b..3067cb2558da 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -215,6 +215,56 @@ static int no_open(struct inode *inode, struct file *file)
+ 	return -ENXIO;
+ }
+ 
++#ifdef CONFIG_NUMA
++static void free_mapping_i_mmap(struct address_space *mapping)
++{
++	int i;
++
++	if (!mapping->i_mmap)
++		return;
++
++	for (i = 0; i < nr_node_ids; i++)
++		kfree(mapping->i_mmap[i]);
++
++	kfree(mapping->i_mmap);
++	mapping->i_mmap = NULL;
++}
++
++static int init_mapping_i_mmap(struct address_space *mapping)
++{
++	struct rb_root_cached *root;
++	int i;
++
++	/* The extra one is used as terminator in vma_interval_tree_foreach() */
++	mapping->i_mmap = kzalloc(sizeof(root) * (nr_node_ids + 1), GFP_KERNEL);
++	if (!mapping->i_mmap)
++		return -ENOMEM;
++
++	for (i = 0; i < nr_node_ids; i++) {
++		root = kzalloc_node(sizeof(*root), GFP_KERNEL, i);
++		if (!root)
++			goto no_mem;
++
++		*root = RB_ROOT_CACHED;
++		mapping->i_mmap[i] = root;
++	}
++	return 0;
++
++no_mem:
++	free_mapping_i_mmap(mapping);
++	return -ENOMEM;
++}
++#else
++static int init_mapping_i_mmap(struct address_space *mapping)
++{
++	mapping->i_mmap = RB_ROOT_CACHED;
++	return 0;
++}
++static void free_mapping_i_mmap(struct address_space *mapping)
++{
++}
++#endif
++
+ /**
+  * inode_init_always_gfp - perform inode structure initialisation
+  * @sb: superblock inode belongs to
+@@ -307,6 +357,9 @@ int inode_init_always_gfp(struct super_block *sb, struct inode *inode, gfp_t gfp
+ 	if (unlikely(security_inode_alloc(inode, gfp)))
+ 		return -ENOMEM;
+ 
++	if (init_mapping_i_mmap(mapping))
++		return -ENOMEM;
++
+ 	this_cpu_inc(nr_inodes);
+ 
+ 	return 0;
+@@ -383,6 +436,7 @@ void __destroy_inode(struct inode *inode)
+ 	if (inode->i_default_acl && !is_uncached_acl(inode->i_default_acl))
+ 		posix_acl_release(inode->i_default_acl);
+ #endif
++	free_mapping_i_mmap(&inode->i_data);
+ 	this_cpu_dec(nr_inodes);
+ }
+ EXPORT_SYMBOL(__destroy_inode);
+@@ -486,7 +540,6 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	init_rwsem(&mapping->i_mmap_rwsem);
+ 	INIT_LIST_HEAD(&mapping->i_private_list);
+ 	spin_lock_init(&mapping->i_private_lock);
+-	mapping->i_mmap = RB_ROOT_CACHED;
+ }
+ 
+ void address_space_init_once(struct address_space *mapping)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index a6a99e044265..34064c1cbd10 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -477,7 +477,12 @@ struct address_space {
+ 	/* number of thp, only for non-shmem files */
+ 	atomic_t		nr_thps;
+ #endif
++#ifdef CONFIG_NUMA
++	struct rb_root_cached	**i_mmap;
++	unsigned long		vma_count;
++#else
+ 	struct rb_root_cached	i_mmap;
++#endif
+ 	unsigned long		nrpages;
+ 	pgoff_t			writeback_index;
+ 	const struct address_space_operations *a_ops;
+@@ -547,6 +552,27 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+ 	lockdep_assert_held_write(&mapping->i_mmap_rwsem);
+ }
+ 
++#ifdef CONFIG_NUMA
++static inline int mapping_mapped(const struct address_space *mapping)
++{
++	return	READ_ONCE(mapping->vma_count);
++}
++
++static inline void inc_mapping_vma(struct address_space *mapping)
++{
++	mapping->vma_count++;
++}
++
++static inline void dec_mapping_vma(struct address_space *mapping)
++{
++	mapping->vma_count--;
++}
++
++static inline struct rb_root_cached *get_i_mmap_root(struct address_space *mapping)
++{
++	return (struct rb_root_cached *)mapping->i_mmap;
++}
++#else
+ /*
+  * Might pages of this file be mapped into userspace?
+  */
+@@ -555,10 +581,19 @@ static inline int mapping_mapped(const struct address_space *mapping)
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+ }
+ 
++static inline void inc_mapping_vma(struct address_space *mapping)
++{
++}
++
++static inline void dec_mapping_vma(struct address_space *mapping)
++{
++}
++
+ static inline struct rb_root_cached *get_i_mmap_root(struct address_space *mapping)
+ {
+ 	return &mapping->i_mmap;
+ }
++#endif
+ 
+ /*
+  * Might pages of this file have been modified in userspace?
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 15cb1da43eb2..c7f26eb34322 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -913,6 +913,9 @@ static inline void vma_init(struct vm_area_struct *vma, struct mm_struct *mm)
+ 	vma->vm_ops = &vma_dummy_vm_ops;
+ 	INIT_LIST_HEAD(&vma->anon_vma_chain);
+ 	vma_lock_init(vma, false);
++#ifdef CONFIG_NUMA
++	vma->tree_idx = numa_node_id();
++#endif
+ }
+ 
+ /* Use when VMA is not part of the VMA tree and needs no locking */
+@@ -3783,6 +3786,8 @@ extern atomic_long_t mmap_pages_allocated;
+ extern int nommu_shrink_inode_mappings(struct inode *, size_t, size_t);
+ 
+ /* interval_tree.c */
++struct rb_root_cached *get_rb_root(struct vm_area_struct *vma,
++					struct address_space *mapping);
+ void vma_interval_tree_insert(struct vm_area_struct *node,
+ 			      struct rb_root_cached *root);
+ void vma_interval_tree_insert_after(struct vm_area_struct *node,
+@@ -3798,9 +3803,36 @@ struct vm_area_struct *vma_interval_tree_iter_next(struct vm_area_struct *node,
+ 				unsigned long start, unsigned long last);
+ 
+ /* Please use get_i_mmap_root() to get the @root */
++#ifdef CONFIG_NUMA
++/* Find the first valid VMA in the sibling trees */
++static inline struct vm_area_struct *first_vma(struct rb_root_cached ***__r,
++				unsigned long start, unsigned long last)
++{
++	struct vm_area_struct *vma = NULL;
++	struct rb_root_cached **tree = *__r;
++
++	while (*tree) {
++		vma = vma_interval_tree_iter_first(*tree++, start, last);
++		if (vma)
++			break;
++	}
++
++	/* Save for the next loop */
++	*__r = tree;
++	return vma;
++}
++
++/* @_tmp is referenced to avoid unused variable warning. */
++#define vma_interval_tree_foreach(vma, root, start, last)		\
++	for (struct rb_root_cached **_r = (void *)(root),		\
++		**_tmp = (vma = first_vma(&_r, start, last)) ? _r : NULL;\
++	     ((_tmp && vma) || (vma = first_vma(&_r, start, last)));	\
++		vma = vma_interval_tree_iter_next(vma, start, last))
++#else
+ #define vma_interval_tree_foreach(vma, root, start, last)		\
+ 	for (vma = vma_interval_tree_iter_first(root, start, last);	\
+ 	     vma; vma = vma_interval_tree_iter_next(vma, start, last))
++#endif
+ 
+ void anon_vma_interval_tree_insert(struct anon_vma_chain *node,
+ 				   struct rb_root_cached *root);
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 3cc8ae722886..4982e20ce27c 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -984,6 +984,7 @@ struct vm_area_struct {
+ #endif
+ #ifdef CONFIG_NUMA
+ 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
++	int tree_idx;			/* The sibling tree index for the VMA */
+ #endif
+ #ifdef CONFIG_NUMA_BALANCING
+ 	struct vma_numab_state *numab_state;	/* NUMA Balancing state */
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 5b0671dff019..81a2f4932ca8 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1832,8 +1832,9 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 			flush_dcache_mmap_lock(mapping);
+ 			/* insert tmp into the share list, just after mpnt */
+ 			vma_interval_tree_insert_after(tmp, mpnt,
+-					get_i_mmap_root(mapping));
++					get_rb_root(mpnt, mapping));
+ 			flush_dcache_mmap_unlock(mapping);
++			inc_mapping_vma(mapping);
+ 			i_mmap_unlock_write(mapping);
+ 		}
+ 
+diff --git a/mm/nommu.c b/mm/nommu.c
+index 2e64b6c4c539..6553cfcb6683 100644
+--- a/mm/nommu.c
++++ b/mm/nommu.c
+@@ -569,8 +569,9 @@ static void setup_vma_to_mm(struct vm_area_struct *vma, struct mm_struct *mm)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
++		vma_interval_tree_insert(vma, get_rb_root(vma, mapping));
+ 		flush_dcache_mmap_unlock(mapping);
++		inc_mapping_vma(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+ }
+@@ -585,8 +586,9 @@ static void cleanup_vma_from_mm(struct vm_area_struct *vma)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
++		vma_interval_tree_remove(vma, get_rb_root(vma, mapping));
+ 		flush_dcache_mmap_unlock(mapping);
++		dec_mapping_vma(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+ }
+diff --git a/mm/vma.c b/mm/vma.c
+index 1768e4355a13..5aa3915d183b 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -224,6 +224,16 @@ static bool can_vma_merge_after(struct vma_merge_struct *vmg)
+ 	return false;
+ }
+ 
++struct rb_root_cached *get_rb_root(struct vm_area_struct *vma,
++					struct address_space *mapping)
++{
++#ifdef CONFIG_NUMA
++	return mapping->i_mmap[vma->tree_idx];
++#else
++	return &mapping->i_mmap;
++#endif
++}
++
+ static void __vma_link_file(struct vm_area_struct *vma,
+ 			    struct address_space *mapping)
+ {
+@@ -231,8 +241,9 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
++	vma_interval_tree_insert(vma, get_rb_root(vma, mapping));
+ 	flush_dcache_mmap_unlock(mapping);
++	inc_mapping_vma(mapping);
+ }
+ 
+ /*
+@@ -245,8 +256,9 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 		mapping_unmap_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
++	vma_interval_tree_remove(vma, get_rb_root(vma, mapping));
+ 	flush_dcache_mmap_unlock(mapping);
++	dec_mapping_vma(mapping);
+ }
+ 
+ /*
+@@ -317,10 +329,13 @@ static void vma_prepare(struct vma_prepare *vp)
+ 	if (vp->file) {
+ 		flush_dcache_mmap_lock(vp->mapping);
+ 		vma_interval_tree_remove(vp->vma,
+-					get_i_mmap_root(vp->mapping));
+-		if (vp->adj_next)
++					get_rb_root(vp->vma, vp->mapping));
++		dec_mapping_vma(vp->mapping);
++		if (vp->adj_next) {
+ 			vma_interval_tree_remove(vp->adj_next,
+-					get_i_mmap_root(vp->mapping));
++					get_rb_root(vp->adj_next, vp->mapping));
++			dec_mapping_vma(vp->mapping);
++		}
+ 	}
+ 
+ }
+@@ -337,11 +352,14 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 			 struct mm_struct *mm)
+ {
+ 	if (vp->file) {
+-		if (vp->adj_next)
++		if (vp->adj_next) {
+ 			vma_interval_tree_insert(vp->adj_next,
+-					get_i_mmap_root(vp->mapping));
++					get_rb_root(vp->adj_next, vp->mapping));
++			inc_mapping_vma(vp->mapping);
++		}
+ 		vma_interval_tree_insert(vp->vma,
+-					get_i_mmap_root(vp->mapping));
++					get_rb_root(vp->vma, vp->mapping));
++		inc_mapping_vma(vp->mapping);
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+diff --git a/mm/vma_init.c b/mm/vma_init.c
+index 3c0b65950510..5735868b1ad4 100644
+--- a/mm/vma_init.c
++++ b/mm/vma_init.c
+@@ -71,6 +71,7 @@ static void vm_area_init_from(const struct vm_area_struct *src,
+ #endif
+ #ifdef CONFIG_NUMA
+ 	dest->vm_policy = src->vm_policy;
++	dest->tree_idx = src->tree_idx;
+ #endif
+ #ifdef __HAVE_PFNMAP_TRACKING
+ 	dest->pfnmap_track_ctx = NULL;
+-- 
+2.43.0
+
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 21A52313E38
+	for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 06:37:42 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776062279; cv=none; b=MqKbhlXeN9JAqHNT+RBoOId2jyGBvj1aX3w1mvGsmopWALDCQw+sM9i2/wzfodfgX1a+YMU+0PF3CGeSbXzYZdcmrr8phZm/pkCi30vU7Jtchyh4hShwLCtw+b0lEstdWB0cRYttxz8XkLb1HkL4TwFMppV6d5zd228yMe2VDeA=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776062279; c=relaxed/simple;
+	bh=oB93Jo0Hird487YH6LLEBixEFdTrDVpgeLLVzfgz3m4=;
+	h=From:To:CC:Subject:Date:Message-ID:MIME-Version:Content-Type; b=S5QFBy/pGZNF2apE8BWPA9EUq0XanLEaRpYlK+j80g2n/v2FNae6e+za7EMDiGTyvh9Ye6pnXmHMyYB4fhi0obAmDgFtfW4csZhmSN7JbTzWsdYsEOvdBNHhYZnJWI9yatJMtdqj4OzKIsyEbOx12KI9mx24klCX1xYkC5ThPio=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvHNX68Ypz1YQpmD;
+	Mon, 13 Apr 2026 14:21:16 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvHNW0JZ7z1YQpmD;
+	Mon, 13 Apr 2026 14:21:15 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id F402830004D3;
+	Mon, 13 Apr 2026 14:19:21 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 13 Apr
+ 2026 14:21:13 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>
+CC: <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>, Huang
+ Shijie <huangsj@hygon.cn>
+Subject: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Date: Mon, 13 Apr 2026 14:20:39 +0800
+Message-ID: <20260413062042.804-1-huangsj@hygon.cn>
+X-Mailer: git-send-email 2.43.0
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+  In NUMA, there are maybe many NUMA nodes and many CPUs.
+For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+In the UnixBench tests, there is a test "execl" which tests
+the execve system call.
+
+  When we test our server with "./Run -c 384 execl",
+the test result is not good enough. The i_mmap locks contended heavily on
+"libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+over 6000 VMAs, all the VMAs can be in different NUMA mode.
+The insert/remove operations do not run quickly enough.
+
+patch 1 & patch 2 are try to hide the direct access of i_mmap.
+patch 3 splits the i_mmap into sibling trees, and we can get better 
+performance with this patch set:
+    we can get 77% performance improvement(10 times average)
+
+
+Huang Shijie (3):
+  mm: use mapping_mapped to simplify the code
+  mm: use get_i_mmap_root to access the file's i_mmap
+  mm: split the file's i_mmap tree for NUMA
+
+ arch/arm/mm/fault-armv.c   |  3 ++-
+ arch/arm/mm/flush.c        |  3 ++-
+ arch/nios2/mm/cacheflush.c |  3 ++-
+ arch/parisc/kernel/cache.c |  4 ++-
+ fs/dax.c                   |  3 ++-
+ fs/hugetlbfs/inode.c       | 10 +++----
+ fs/inode.c                 | 55 +++++++++++++++++++++++++++++++++++++-
+ include/linux/fs.h         | 40 +++++++++++++++++++++++++++
+ include/linux/mm.h         | 33 +++++++++++++++++++++++
+ include/linux/mm_types.h   |  1 +
+ kernel/events/uprobes.c    |  3 ++-
+ mm/hugetlb.c               |  7 +++--
+ mm/khugepaged.c            |  6 +++--
+ mm/memory-failure.c        |  8 +++---
+ mm/memory.c                |  8 +++---
+ mm/mmap.c                  |  3 ++-
+ mm/nommu.c                 | 11 +++++---
+ mm/pagewalk.c              |  2 +-
+ mm/rmap.c                  |  2 +-
+ mm/vma.c                   | 36 +++++++++++++++++++------
+ mm/vma_init.c              |  1 +
+ 21 files changed, 204 insertions(+), 38 deletions(-)
+
+-- 
+2.43.0
+
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mail-wm1-f47.google.com (mail-wm1-f47.google.com [209.85.128.47])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 4ABD83CBE69
+	for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 15:33:35 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=209.85.128.47
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776094416; cv=none; b=d6BASd8ZwtsRVLZobRevMiA3YoAQECtjTR8jS+bOmVkxv/gg/DI3rpyWay3G+DJ/p6cjZdnL/SV48RSdmi8jWxkqKcEvQ4Qxf5kNDwWE7qzG1e2fjgTjF/8CL7dN5tcFiT8KtenF3R9YUjh7le6uGgFcKtxgo4408Gat09lKs1g=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776094416; c=relaxed/simple;
+	bh=iX4hzBFj2m2KZiJVUrG8vp2JMXC1uhBlllLkPM8W0L4=;
+	h=Date:From:To:Cc:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=jqckXQuCiMOJVQTbylQ1eKoO3n+yyOpwf23vqLi1Sy8Imup3uh6SWVbzqaoToZd6HNVFTUXYlZhRGo7+/PxR+2ewoZqjwXd/Vz+PKZApxKPDJiG4itYMOtMpOGKk2P8hlfp0BnSCzxNaqVmgOALMaeT4CYx/CyIHA4jNE59I/Cg=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com; spf=pass smtp.mailfrom=gmail.com; dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b=jSBrHPB5; arc=none smtp.client-ip=209.85.128.47
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=gmail.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b="jSBrHPB5"
+Received: by mail-wm1-f47.google.com with SMTP id 5b1f17b1804b1-4887fd35e60so32363425e9.2
+        for <nvdimm@lists.linux.dev>; Mon, 13 Apr 2026 08:33:35 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1776094414; x=1776699214; darn=lists.linux.dev;
+        h=in-reply-to:content-disposition:mime-version:references:message-id
+         :subject:cc:to:from:date:from:to:cc:subject:date:message-id:reply-to;
+        bh=9ShgF/BpsS7cAVnwA77xlwKbX+t0sp7V8xBcXlbEXIY=;
+        b=jSBrHPB5aB+KtBHxqGW6Fz81tXyRDW5tzFEm4zg3lpe85WPoDagRA6pyE0BzqLEMYa
+         nj/mNhYmyF/tYSIv6A6epkEZ1bVMANx2XSBtlxXWXQhyoB+bAuY9pBx7Awmr21cdKNPv
+         3RuE9P3K0PDwQ3fTgwyh89ZlINjOAOL7wJ54/2EKABVpTFfnwDH3SNNSKJ9gAQ08ePwa
+         p2pDGH4OuhdgqCzcg2NhIm3fkwbkvE6JcIILLVdes6BnWVv991AKrxTPvqziPvGYm9+J
+         1ZmZug1I0lE4Ol6NtcTs0okv7w4aEAo/mkKXT5s0+7g2mBRT8Hnp4X562MbwZERMne6a
+         nIUw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1776094414; x=1776699214;
+        h=in-reply-to:content-disposition:mime-version:references:message-id
+         :subject:cc:to:from:date:x-gm-gg:x-gm-message-state:from:to:cc
+         :subject:date:message-id:reply-to;
+        bh=9ShgF/BpsS7cAVnwA77xlwKbX+t0sp7V8xBcXlbEXIY=;
+        b=kTLlxZoM4ucLRdGtzsieieKVQ8be7C77bckYJ1QThcndoBbc8U1sKAg6T+lbosDDYX
+         r4PEtrUYqiq+lprQD6xGmeBys5s4J5Tq8mDJYmydL9xm7d/TNfmoaFOhpTXTHYRSd0h9
+         22ea1FMLlrjrQ42/hEM0pA3m67JhQgePqjd3sMz61W5BJ4ecJuf04Im8Ugu5fpDAKMqE
+         T2/lY7gZgXe2nutNoth3OkV5TGGOG+f1y74Nki/y1WTjHRwsAxMtRl4hj0P7XsS4d3cO
+         Z+TuL/tcHM5W3y0prAKJNZKTat7cPF4E7PVHXKBO1R2JOhzy3QE/52tKR5hwCArw/+D0
+         f18A==
+X-Forwarded-Encrypted: i=1; AFNElJ+cfnjZIybZ+xbyDa9yp9P4EzVEEQd0VxU95LHJzp6nyOTPeloASyFEFgsSw1Z+JLquZv3kvoU=@lists.linux.dev
+X-Gm-Message-State: AOJu0YwTPFlPa1FPt1D9EcjV/WsErgrqyL2PlQVHuX3LUn4467bZ8EeU
+	MG51aa//Xw5w6gjgUe1mzdv4jIx3g/X1PZx/JVFa2GW85BSMss/lq9Rj
+X-Gm-Gg: AeBDietJ2rPZPf9bNtKUCtvKNZKDVNJVqKzRaxlOPLKLhMgEoNCEGpkoS4P0f7Qt46I
+	T1Cb3f9V4w+2MUxMH4vS12FRWGrK2YOMP0LSDqLQW8SVtNfwtkZhY5JG8JI4bcCkbohZAV+caWd
+	VBQ3FV/7EJ37CxxRrMgrS25p+qacNV8M8GLJ2pBT21hyj9MGvNtaGxaBps7I3vE8nZCMx7TUNA/
+	PTUilHSU7WxsfkOblyHwFTkOz2biA/SOJpKNJU00puHhLI2HIUjEkJ1WRq8UK8QBikkQVkSi6wn
+	0S6qiwR4ric86dAlMo1NWHEnSlAhMJe0nbgC/oqMOSHeFHFUkyDfGWhMnbaw7YTHvbxJSi8d+Je
+	CA6L2kKWxzbhedg3fSc5Ab86cOYoXrQ7z9WbZyRbOSgyWjQAKboplj5AE9/4gWY/S6vDW4lX1+6
+	DW8ThMU9n13RrjowyqkWmI+880WtpaT0FnPn7khd+zl6tH2DdBnWPu6FbKNg4ugPtLuftkGu8=
+X-Received: by 2002:a05:600c:314b:b0:488:b241:2c5f with SMTP id 5b1f17b1804b1-488d687c076mr159606435e9.26.1776094413364;
+        Mon, 13 Apr 2026 08:33:33 -0700 (PDT)
+Received: from f (cst-prg-89-171.cust.vodafone.cz. [46.135.89.171])
+        by smtp.gmail.com with ESMTPSA id 5b1f17b1804b1-488d684406bsm94248555e9.24.2026.04.13.08.33.27
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Mon, 13 Apr 2026 08:33:31 -0700 (PDT)
+Date: Mon, 13 Apr 2026 17:33:21 +0200
+From: Mateusz Guzik <mjguzik@gmail.com>
+To: Huang Shijie <huangsj@hygon.cn>
+Cc: akpm@linux-foundation.org, viro@zeniv.linux.org.uk, brauner@kernel.org, 
+	linux-mm@kvack.org, linux-kernel@vger.kernel.org, 
+	linux-arm-kernel@lists.infradead.org, linux-fsdevel@vger.kernel.org, muchun.song@linux.dev, 
+	osalvador@suse.de, linux-trace-kernel@vger.kernel.org, 
+	linux-perf-users@vger.kernel.org, linux-parisc@vger.kernel.org, nvdimm@lists.linux.dev, 
+	zhongyuan@hygon.cn, fangbaoshun@hygon.cn, yingzhiwei@hygon.cn
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: inline
+In-Reply-To: <20260413062042.804-1-huangsj@hygon.cn>
+
+On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+>   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> In the UnixBench tests, there is a test "execl" which tests
+> the execve system call.
+> 
+>   When we test our server with "./Run -c 384 execl",
+> the test result is not good enough. The i_mmap locks contended heavily on
+> "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> The insert/remove operations do not run quickly enough.
+> 
+> patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> patch 3 splits the i_mmap into sibling trees, and we can get better 
+> performance with this patch set:
+>     we can get 77% performance improvement(10 times average)
+> 
+
+To my reading you kept the lock as-is and only distributed the protected
+state.
+
+While I don't doubt the improvement, I'm confident should you take a
+look at the profile you are going to find this still does not scale with
+rwsem being one of the problems (there are other global locks, some of
+which have experimental patches for).
+
+Apart from that this does nothing to help high core systems which are
+all one node, which imo puts another question mark on this specific
+proposal.
+
+Of course one may question whether a RB tree is the right choice here,
+it may be the lock-protected cost can go way down with merely a better
+data structure.
+
+Regardless of that, for actual scalability, there will be no way around
+decentralazing locking around this and partitioning per some core count
+(not just by numa awareness).
+
+Decentralizing locking is definitely possible, but I have not looked
+into specifics of how problematic it is. Best case scenario it will
+merely with separate locks. Worst case scenario something needs a fully
+stabilized state for traversal, in that case another rw lock can be
+slapped around this, creating locking order read lock -> per-subset
+write lock -- this will suffer scalability due to the read locking, but
+it will still scale drastically better as apart from that there will be
+no serialization. In this setting the problematic consumer will write
+lock the new thing to stabilize the state.
+
+So my non-maintainer opinion is that the patchset is not worth it as it
+fails to address anything for significantly more common and already
+affected setups.
+
+Have you looked into splitting the lock?
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id D23E33164BA
+	for <sashiko@lists.linux.dev>; Mon, 13 Apr 2026 06:55:07 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776063326; cv=none; b=q4GvdH2ecKd3onU+VbDftFO1mItF1BhoLVsjExfRKaAcfgzlS/T5GUHPfatqwoOZksy+KeXFWVyE4JcXgXZZtPJufGkzb2ZjD9fDfJ+8X/m1arINhc/YEo3KT0zYKDNF944KEF9TiY9LFRODsUrYqrTZffMg1SKPk3EtbfaCQ38=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776063326; c=relaxed/simple;
+	bh=X9nVPqu6ICn/GIyufxEXK5wFTDE/TwlyQH0t0LVCqeY=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=QY9phr5iljTU50VEFIOIzv2xysyBPzmvlSfGzNuhZaBt1YuTUIfCwmxe/TdxoAD45sV7sGYecUYrDPJZVhhFtfojr33ZyHG+gfJ7tmuuiv4nnjeTvbwPGXf72OSA5jgTPKzGSA8CUEF9nh3lrgqd7NwVaUyqqN7ZQTb8wVGd5zE=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvJ7Z0GPGz1YQpmD;
+	Mon, 13 Apr 2026 14:55:06 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvJ7Y6Qz4z1YQpmD;
+	Mon, 13 Apr 2026 14:55:05 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id CB25530004D3;
+	Mon, 13 Apr 2026 14:53:11 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 13 Apr
+ 2026 14:55:05 +0800
+Date: Mon, 13 Apr 2026 14:55:03 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: <sashiko@lists.linux.dev>
+CC: <linux-perf-users@vger.kernel.org>
+Subject: Re: [PATCH 2/3] mm: use get_i_mmap_root to access the file's i_mmap
+Message-ID: <adyTR7vqbBuQTddE@SH-HV00110.Hygon.cn>
+References: <20260413062042.804-3-huangsj@hygon.cn>
+ <20260413064431.12603C116C6@smtp.kernel.org>
+Precedence: bulk
+X-Mailing-List: sashiko@lists.linux.dev
+List-Id: <sashiko.lists.linux.dev>
+List-Subscribe: <mailto:sashiko+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:sashiko+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Disposition: inline
+In-Reply-To: <20260413064431.12603C116C6@smtp.kernel.org>
+X-ClientProxiedBy: cncheex05.Hygon.cn (172.23.18.115) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Mon, Apr 13, 2026 at 06:44:30AM +0000, sashiko-bot@kernel.org wrote:
+> Sashiko AI review found 1 potential issue(s):
+> - [Low] Compilation error in mm/nommu.c due to incorrect struct inode member access.
+> --
+> 
+> commit e38eaf1de7eaee855cd4763bac9c006d3d26fa76
+> Author: Huang Shijie <huangsj@hygon.cn>
+> 
+> mm: use get_i_mmap_root to access the file's i_mmap
+> 
+> This commit introduces get_i_mmap_root() to access the i_mmap interval tree 
+> in struct address_space and refactors multiple architectures and subsystems 
+> to use this new helper.
+> 
+> > diff --git a/mm/nommu.c b/mm/nommu.c
+> > index ed3934bc2de48..418c8c91689df 100644
+> > --- a/mm/nommu.c
+> > +++ b/mm/nommu.c
+> 
+> [ ... ]
+> 
+> > @@ -1804,6 +1804,7 @@ EXPORT_SYMBOL_GPL(copy_remote_vm_str);
+> >  int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+> >  				size_t newsize)
+> >  {
+> > +	struct rb_root_cached *root = get_i_mmap_root(&inode->mapping);
+> 
+> Does this cause a compilation error for nommu configurations? It looks like
+> struct inode uses the member name i_mapping, rather than mapping.
+> 
+> Also, since i_mapping is a pointer to an address_space, taking its address
+> with the & operator passes a pointer-to-pointer, whereas get_i_mmap_root()
+> expects a struct address_space *. Could this be updated to use
+> get_i_mmap_root(inode->i_mapping) instead?
+Yes. thanks for pointing this.
+
+Thanks
+Huang Shijie
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 8A65D311C1D
+	for <linux-perf-users@vger.kernel.org>; Mon, 13 Apr 2026 06:44:31 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776062671; cv=none; b=WZv3X+z1r61q/LSwXSJe0YrkAbHj4kzMkVdIAUQHH9sQKrUlXuWeoW250p5m58VfPxKJp8m2nvzsNpRavZxC6IvvtU8dAiqq3fubBdj05Cw7v7E+0GYzjpMrr9IKP7xQISGybAoEVpa/i9G+g0NDXgc/XLSGTZlerr4iLAjcdKw=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776062671; c=relaxed/simple;
+	bh=I4QmrNTxe84Evb92QdN9LGoIewP72CQvz52dmcvvB6U=;
+	h=From:Subject:To:Cc:In-Reply-To:References:Content-Type:Date:
+	 Message-Id; b=ljRkP/rLW6TCyAXnn1NJ6Kq0QTpbQu46Brhyczvy+FCED4NuAZqGAwj2/cczpZikoS9MWanXaPHY6sJRRZOnzbzlfOQzyUZex+n5s6wbuftelMsukwt8QUPNvRfWALsYG+WYkQy3mB3Qlfz5vUbsxivSAf6kXq+BzkI6uKc6zGM=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=rcYT5nnX; arc=none smtp.client-ip=10.30.226.201
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="rcYT5nnX"
+Received: by smtp.kernel.org (Postfix) with ESMTPSA id 12603C116C6;
+	Mon, 13 Apr 2026 06:44:31 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
+	s=k20201202; t=1776062671;
+	bh=I4QmrNTxe84Evb92QdN9LGoIewP72CQvz52dmcvvB6U=;
+	h=From:Subject:Reply-To:To:Cc:In-Reply-To:References:Date:From;
+	b=rcYT5nnXcWsBS0rP+tD2xLrVQn2McdzAaYaRVgXE5khPgiyUy7KkNHq8NGPK39/+B
+	 OQKEa5MENHPYNoNKjlDXHGaY854RYq1KoPICcp+2sQ8zvBlRdbu1N610IknxYHdkbB
+	 gMexG2i0Cvc0zrdWjytPaehT+1wL2T4Vp+KU1JY5MZ86uMH+Z2TS+irDwNemNC4QRK
+	 y3yCxUWXwMmF6/tmeQ6Xh6jGZRjt4AirfooShZTTGnbmO7Wa7etD9eOk7n4FfcfHmA
+	 FtKtvydwavhpLOxhNj14Qi1CN5ytsJQOIcvQrOk5H54omKQvYAKdBjSiaxv0ViZeoX
+	 BexSl3vw7LkLg==
+From: sashiko-bot@kernel.org
+Subject: Re: [PATCH 2/3] mm: use get_i_mmap_root to access the file's i_mmap
+Reply-To: sashiko@lists.linux.dev
+To: "Huang Shijie" <huangsj@hygon.cn>
+Cc: linux-perf-users@vger.kernel.org
+In-Reply-To: <20260413062042.804-3-huangsj@hygon.cn>
+References: <20260413062042.804-3-huangsj@hygon.cn>
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+Date: Mon, 13 Apr 2026 06:44:30 +0000
+Message-Id: <20260413064431.12603C116C6@smtp.kernel.org>
+Precedence: bulk
+X-Mailing-List: linux-perf-users@vger.kernel.org
+List-Id: <linux-perf-users.vger.kernel.org>
+List-Subscribe: <mailto:linux-perf-users+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-perf-users+unsubscribe@vger.kernel.org>
+
+Sashiko AI review found 1 potential issue(s):
+- [Low] Compilation error in mm/nommu.c due to incorrect struct inode membe=
+r access.
+--
+
+commit e38eaf1de7eaee855cd4763bac9c006d3d26fa76
+Author: Huang Shijie <huangsj@hygon.cn>
+
+mm: use get_i_mmap_root to access the file's i_mmap
+
+This commit introduces get_i_mmap_root() to access the i_mmap interval tree=
+=20
+in struct address_space and refactors multiple architectures and subsystems=
+=20
+to use this new helper.
+
+> diff --git a/mm/nommu.c b/mm/nommu.c
+> index ed3934bc2de48..418c8c91689df 100644
+> --- a/mm/nommu.c
+> +++ b/mm/nommu.c
+
+[ ... ]
+
+> @@ -1804,6 +1804,7 @@ EXPORT_SYMBOL_GPL(copy_remote_vm_str);
+>  int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+>  				size_t newsize)
+>  {
+> +	struct rb_root_cached *root =3D get_i_mmap_root(&inode->mapping);
+
+Does this cause a compilation error for nommu configurations? It looks like
+struct inode uses the member name i_mapping, rather than mapping.
+
+Also, since i_mapping is a pointer to an address_space, taking its address
+with the & operator passes a pointer-to-pointer, whereas get_i_mmap_root()
+expects a struct address_space *. Could this be updated to use
+get_i_mmap_root(inode->i_mapping) instead?
+
+>  	struct vm_area_struct *vma;
+>  	struct vm_region *region;
+>  	pgoff_t low, high;
+
+--=20
+Sashiko AI review =C2=B7 https://sashiko.dev/#/patchset/20260413062042.804-=
+1-huangsj@hygon.cn?part=3D2
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 387E9392C28
+	for <linux-perf-users@vger.kernel.org>; Mon, 13 Apr 2026 07:25:57 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776065158; cv=none; b=VT44dcxucOn4aWN+PsVYQ6QGvurC51tHwNS+c98lUbPRCLHIeEg1DY//J+ujofeV3rouM5lM9uuYKjWP0l9IcgbPO8lOiHlWn8b7GprTZEIxECH48IbhiR36V2WgXd9STtNR69S6/NLm9q0dKQcpWG1Zcjd/9DeAcYDOPOGGbaQ=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776065158; c=relaxed/simple;
+	bh=rmy4nhDne/7uE+mUw2Hbh/Eu69x8cN+cl5swxXZ9pO0=;
+	h=From:Subject:To:Cc:In-Reply-To:References:Content-Type:Date:
+	 Message-Id; b=AGYyT8F50Df9AIWWsWj+YLMKnqJy0+eESy6BsTHJiMCR4XGFPcLvX65jamu4Wsx5Ce/p2ezYW7D0Pm7TbiyPXeSECRHZQfoloMPONltGJ2YL8vt/z8r1pMWMOBKUfiMe3AbrxoZvK60F3SzQ/A4NtMjJ6PynIozkLe1Xw9kwXCM=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=ga2AZel4; arc=none smtp.client-ip=10.30.226.201
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="ga2AZel4"
+Received: by smtp.kernel.org (Postfix) with ESMTPSA id B2BFEC116C6;
+	Mon, 13 Apr 2026 07:25:57 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
+	s=k20201202; t=1776065157;
+	bh=rmy4nhDne/7uE+mUw2Hbh/Eu69x8cN+cl5swxXZ9pO0=;
+	h=From:Subject:Reply-To:To:Cc:In-Reply-To:References:Date:From;
+	b=ga2AZel4MNC/jgO2MBoEGj3M+mJhYfs/CCLe/6BFhUVzcqaw5a/pqz/78LsNFijAU
+	 wh+vorswiXCWdXi8Hlqk3nVkDBhFpfwHJjX8r6c5j2b6SL9TjzzX9xiOkuo4rPWrBt
+	 /gRtTQ2ogEvb9YH2c38u1Ir0eVpVCRhvXJU8I/60jpsAPNhEhTQuir335UQF+XzqBO
+	 mlROFdU6pk478DOaIrTpb6D5mryJ98YWzFs4eF4FrYAg2Zb5WO9BrmhMtkPUxmTsm9
+	 ILpfuwfY4ymy0BNpeNRiam/l0xUcHFQGJLpXvtaQwcU7o5Fve6S6mT07imCUL6CnY/
+	 Jg0Lp+V1zeaow==
+From: sashiko-bot@kernel.org
+Subject: Re: [PATCH 3/3] mm: split the file's i_mmap tree for NUMA
+Reply-To: sashiko@lists.linux.dev
+To: "Huang Shijie" <huangsj@hygon.cn>
+Cc: linux-perf-users@vger.kernel.org
+In-Reply-To: <20260413062042.804-4-huangsj@hygon.cn>
+References: <20260413062042.804-4-huangsj@hygon.cn>
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+Date: Mon, 13 Apr 2026 07:25:57 +0000
+Message-Id: <20260413072557.B2BFEC116C6@smtp.kernel.org>
+Precedence: bulk
+X-Mailing-List: linux-perf-users@vger.kernel.org
+List-Id: <linux-perf-users.vger.kernel.org>
+List-Subscribe: <mailto:linux-perf-users+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-perf-users+unsubscribe@vger.kernel.org>
+
+Sashiko AI review found 6 potential issue(s):
+- [Critical] Type confusion and kernel panic in `vma_interval_tree_foreach(=
+)` macro.
+- [High] Memory leak of LSM security blob on `init_mapping_i_mmap()` failur=
+e.
+- [High] Hardcoded `GFP_KERNEL` ignores caller's allocation constraints, ca=
+using deadlocks.
+- [High] Massive memory bloat and allocation overhead per inode.
+- [High] NULL pointer dereference in `first_vma()` for uninitialized `i_mma=
+p`.
+- [Medium] Integer truncation in `mapping_mapped()` leading to logic errors.
+--
+
+commit 8f800a00de85443e08da55055eb7cfb4938865a5
+Author: Huang Shijie <huangsj@hygon.cn>
+Subject: mm: split the file's i_mmap tree for NUMA
+
+This commit splits the i_mmap tree into multiple NUMA-node-specific
+trees to reduce lock contention during VMA operations. It introduces
+a vma_count field and rewrites vma_interval_tree_foreach to iterate
+over the new structure.
+
+> diff --git a/fs/inode.c b/fs/inode.c
+> index cc12b68e021b2..3067cb2558da0 100644
+> --- a/fs/inode.c
+> +++ b/fs/inode.c
+[ ... ]
+> +#ifdef CONFIG_NUMA
+> +static void free_mapping_i_mmap(struct address_space *mapping)
+[ ... ]
+> +static int init_mapping_i_mmap(struct address_space *mapping)
+> +{
+> +	struct rb_root_cached *root;
+> +	int i;
+> +
+> +	/* The extra one is used as terminator in vma_interval_tree_foreach() */
+> +	mapping->i_mmap =3D kzalloc(sizeof(root) * (nr_node_ids + 1), GFP_KERNE=
+L);
+
+Does hardcoding GFP_KERNEL here ignore the caller's allocation constraints?
+
+inode_init_always_gfp() is passed a gfp_t mask because it can be called in
+restricted contexts where blocking is not permitted, such as with GFP_NOFS
+or GFP_ATOMIC. Could using GFP_KERNEL unconditionally cause filesystem
+recursion or deadlocks under memory pressure?
+
+> +	if (!mapping->i_mmap)
+> +		return -ENOMEM;
+> +
+> +	for (i =3D 0; i < nr_node_ids; i++) {
+> +		root =3D kzalloc_node(sizeof(*root), GFP_KERNEL, i);
+
+Will allocating these arrays and root nodes for every single inode cause
+significant memory bloat?
+
+Since this applies to all inodes, including those that are never
+memory-mapped like directories, pipes, or sockets, does this negate the
+performance and scalability benefits of the optimized inode_cachep slab
+cache?
+
+[ ... ]
+> @@ -307,6 +357,9 @@ int inode_init_always_gfp(struct super_block *sb, str=
+uct inode *inode, gfp_t gfp
+>  	if (unlikely(security_inode_alloc(inode, gfp)))
+>  		return -ENOMEM;
+> =20
+> +	if (init_mapping_i_mmap(mapping))
+> +		return -ENOMEM;
+> +
+
+Does returning -ENOMEM here leak the LSM security blob?
+
+If init_mapping_i_mmap() fails, the function returns directly without
+calling security_inode_free(inode) to clean up the allocation made just
+above it.
+
+[ ... ]
+> diff --git a/include/linux/fs.h b/include/linux/fs.h
+> index 9fe59b8cc2e4e..9f337a56389d8 100644
+> --- a/include/linux/fs.h
+> +++ b/include/linux/fs.h
+[ ... ]
+> @@ -547,6 +552,27 @@ static inline void i_mmap_assert_write_locked(struct=
+ address_space *mapping)
+>  	lockdep_assert_held_write(&mapping->i_mmap_rwsem);
+>  }
+> =20
+> +#ifdef CONFIG_NUMA
+> +static inline int mapping_mapped(const struct address_space *mapping)
+> +{
+> +	return	READ_ONCE(mapping->vma_count);
+> +}
+
+Can this truncate the unsigned long vma_count?
+
+The vma_count field is defined as an unsigned long, but this function
+returns an int. On 64-bit systems, if the count reaches a multiple of 2^32,
+could it be implicitly cast to 0 and cause core MM routines to mistakenly
+treat the file as unmapped?
+
+[ ... ]
+> diff --git a/include/linux/mm.h b/include/linux/mm.h
+> index 4c775e5ed50cc..eda527424e225 100644
+> --- a/include/linux/mm.h
+> +++ b/include/linux/mm.h
+[ ... ]
+> @@ -4045,9 +4050,36 @@ struct vm_area_struct *vma_interval_tree_iter_next=
+(struct vm_area_struct *node,
+>  				unsigned long start, unsigned long last);
+> =20
+>  /* Please use get_i_mmap_root() to get the @root */
+> +#ifdef CONFIG_NUMA
+> +/* Find the first valid VMA in the sibling trees */
+> +static inline struct vm_area_struct *first_vma(struct rb_root_cached ***=
+__r,
+> +				unsigned long start, unsigned long last)
+> +{
+> +	struct vm_area_struct *vma =3D NULL;
+> +	struct rb_root_cached **tree =3D *__r;
+> +
+> +	while (*tree) {
+
+Can this dereference a NULL pointer if mapping->i_mmap is uninitialized?
+
+Address spaces initialized via address_space_init_once() (like
+swapper_spaces) will have i_mmap set to NULL. If a caller iterates without
+checking mapping_mapped() first, could get_i_mmap_root() return NULL,
+assigning NULL to tree and causing a panic here?
+
+> +		vma =3D vma_interval_tree_iter_first(*tree++, start, last);
+> +		if (vma)
+> +			break;
+> +	}
+> +
+> +	/* Save for the next loop */
+> +	*__r =3D tree;
+> +	return vma;
+> +}
+> +
+> +/* @_tmp is referenced to avoid unused variable warning. */
+> +#define vma_interval_tree_foreach(vma, root, start, last)		\
+> +	for (struct rb_root_cached **_r =3D (void *)(root),		\
+
+Is it safe to use a (void *) cast here?
+
+If an unmodified caller (e.g. an external driver) passes &mapping->i_mmap
+instead of using get_i_mmap_root(), the cast suppresses type checking. Since
+mapping->i_mmap is now a pointer to an array, evaluating it as an
+rb_root_cached node pointer could lead to a fatal out-of-bounds dereference.
+
+--=20
+Sashiko AI review =C2=B7 https://sashiko.dev/#/patchset/20260413062042.804-=
+1-huangsj@hygon.cn?part=3D3
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 963F1330D2A
+	for <nvdimm@lists.linux.dev>; Tue, 14 Apr 2026 09:11:41 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776157919; cv=none; b=dRj4Uf+hi8hZRxKDrbTzR4gbZNhnKL95dgTyQnWmhd5/bb/kcB/EUZ1UPsFxSzTZH2eNC2n7ZxDWASrA18St4lvfJzY+bKl2IYxmX7DPFZ8XssmK3WLlbK7f8LvFbZvJClxpWa6kLitW3EP8Ug1kjJNu8bNoFOOYMgLGPxHL+VY=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776157919; c=relaxed/simple;
+	bh=dHodftB+OpB9l4u4KD3gPbiUNw83vdZCZYrASb/dXlA=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=ldJS3SSJjyUcaFTRCScSdeJ/x26VtKKFR+JEEXwtDCN4ZjrEvnR5gf5D2XU/iTHftCqm7gBViJjxJ+zLz5m5h0pcc3DJCpRgRbgqR/2VZJZSOVApsKdmy8m6zeNeTn+yzbQm4v2CVQIaoGTw+c84svNZPvaW4FlXzcGnHrx9fiE=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvz6Y1Vswz1YQpmJ;
+	Tue, 14 Apr 2026 17:11:33 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fvz6V6YZ3z1YQpmJ;
+	Tue, 14 Apr 2026 17:11:30 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id 75DAD3005A41;
+	Tue, 14 Apr 2026 17:09:35 +0800 (CST)
+Received: from hsj-2U-Workstation (172.19.20.61) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Tue, 14 Apr
+ 2026 17:11:28 +0800
+Date: Tue, 14 Apr 2026 17:11:26 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: Mateusz Guzik <mjguzik@gmail.com>
+CC: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>, <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <ad4EvoDcAKE2Sl4+@hsj-2U-Workstation>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Disposition: inline
+In-Reply-To: <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+X-ClientProxiedBy: cncheex05.Hygon.cn (172.23.18.115) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > In the UnixBench tests, there is a test "execl" which tests
+> > the execve system call.
+> > 
+> >   When we test our server with "./Run -c 384 execl",
+> > the test result is not good enough. The i_mmap locks contended heavily on
+> > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > The insert/remove operations do not run quickly enough.
+> > 
+> > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > patch 3 splits the i_mmap into sibling trees, and we can get better 
+> > performance with this patch set:
+> >     we can get 77% performance improvement(10 times average)
+> > 
+> 
+> To my reading you kept the lock as-is and only distributed the protected
+> state.
+> 
+> While I don't doubt the improvement, I'm confident should you take a
+> look at the profile you are going to find this still does not scale with
+> rwsem being one of the problems (there are other global locks, some of
+> which have experimental patches for).
+IMHO, when the number of VMAs in the i_mmap is very large, only optimise the rwsem
+lock does not help too much for our NUMA case.
+
+In our NUMA server, the remote access could be the major issue.
+
+
+> 
+> Apart from that this does nothing to help high core systems which are
+> all one node, which imo puts another question mark on this specific
+> proposal.
+Yes, this patch set only focus on the NUMA case.
+The one-node case should use the original i_mmap.
+
+Maybe I can add a new config, CONFIG_SPILT_I_MMAP. The config is disabled
+by default, and enabled when the NUMA node is not one.
+
+> 
+> Of course one may question whether a RB tree is the right choice here,
+> it may be the lock-protected cost can go way down with merely a better
+> data structure.
+> 
+> Regardless of that, for actual scalability, there will be no way around
+> decentralazing locking around this and partitioning per some core count
+> (not just by numa awareness).
+> 
+> Decentralizing locking is definitely possible, but I have not looked
+> into specifics of how problematic it is. Best case scenario it will
+> merely with separate locks. Worst case scenario something needs a fully
+> stabilized state for traversal, in that case another rw lock can be
+Yes. 
+
+The traversal may need to hold many locks.
+
+> slapped around this, creating locking order read lock -> per-subset
+> write lock -- this will suffer scalability due to the read locking, but
+> it will still scale drastically better as apart from that there will be
+> no serialization. In this setting the problematic consumer will write
+> lock the new thing to stabilize the state.
+> 
+> So my non-maintainer opinion is that the patchset is not worth it as it
+> fails to address anything for significantly more common and already
+> affected setups.
+This patch set is to reduce the remote access latency for insert/remove VMA
+in NUMA.
+
+> 
+> Have you looked into splitting the lock?
+> 
+I ever tried. 
+
+But there are two disadvantages:
+  1.) The traversal may need to hold many locks which makes the
+      code very horrible.
+
+  2.) Even we split the locks. Each lock protects a tree, when the tree becomes
+      big enough, the VMA insert/remove will also become slow in NUMA.
+      The reason is that the tree has VMAs in different NUMA nodes.
+      
+
+Thanks
+Huang Shijie
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mail-ed1-f52.google.com (mail-ed1-f52.google.com [209.85.208.52])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 282FC39C00E
+	for <nvdimm@lists.linux.dev>; Thu, 16 Apr 2026 10:30:05 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=pass smtp.client-ip=209.85.208.52
+ARC-Seal:i=2; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776335409; cv=pass; b=XLlG2o32R7LcQjibP2ZpvFnhr7TDiwmN3RfZZ+bGqUDwXm0o+wJYD2QznnOrTy0g8cNFPlqqroMqPJpNfA1SX2lQzHE4IJKRjwPTmaexl20LxG9ybh+VXc1Rw8F3GdA8hUTDxq6eAdXWOzlmpduDT14EiRYS4j62ncoqDfYPElo=
+ARC-Message-Signature:i=2; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776335409; c=relaxed/simple;
+	bh=waJiDzOo49cMRleBM9fFS7wM9KT+ZlkCB7xqbkKrq9M=;
+	h=MIME-Version:References:In-Reply-To:From:Date:Message-ID:Subject:
+	 To:Cc:Content-Type; b=vBpxm5ragwokL/XJiwz5ISsN/Ho2vbeytBA9EmYdeJuh4dAaQJS4ps2h0O1JsNOBa/YszKaQmzgNSJaA0WLzFX7WeKlwbAx01msZUqEfmUISCT0S8a/DxUKDfJT+RkFP86snJX4oqqRT/aDClHfC9prhdXecquGlDNPkhlQRDyc=
+ARC-Authentication-Results:i=2; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com; spf=pass smtp.mailfrom=gmail.com; dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b=T84RsxHx; arc=pass smtp.client-ip=209.85.208.52
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=gmail.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b="T84RsxHx"
+Received: by mail-ed1-f52.google.com with SMTP id 4fb4d7f45d1cf-67251e91bc8so785211a12.1
+        for <nvdimm@lists.linux.dev>; Thu, 16 Apr 2026 03:30:05 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1776335404; cv=none;
+        d=google.com; s=arc-20240605;
+        b=K9UvpYFYLBgDsGzxqnK86S0fGK38VGuPq7g1d+hG4lY0/SeNtL72JXUB82r6pDaAIf
+         ozLqOujczNG/6rTxXeykrP2V28pb18to5TjNyJb0rtC7sU0j4bwbqhU2RVoWld+/Vl8m
+         itO1LVoAcTzH5t6h2fuZMdgnBwOcNK1du/kIXe6MgRI2P//6rrv1Ijcn8zdLiUQUTb9X
+         60xZAFRtLM29dzoj0RPriRxbiJQ5A/JN/pTxBo0CQeqVi2yKHhZAkY0UoFIJUFELwzpb
+         X8ndNCNZwbdcbsl6cdyz3Apahy3cBf2nalCUCBLNtbNuZycs7GIBIiNjCr/050NPuZVs
+         149Q==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:dkim-signature;
+        bh=O4x/p20rCdbt363tjV0+ABHeJuaMLyMj2lG+gRWDekg=;
+        fh=2JdrAf7ftKFpscgc7UE1gGOSDjvjz2IYRs2+Imu4TVM=;
+        b=D7kVbk2k24J77si9uR+BP5ODqI+AotXFcfN176GIz3czuGbzY5wSdwniDmRtHkgarI
+         7EOU+AgtcRoQumleWa564OsNrAcN6lKDrUPsNsz4GN9RBlcWf5O65Jf69CjUEauB+Qch
+         K4F8Yx/iWFnYec1/FhoQNnBy1pfRYDMZU/w7030IU02Ko3ljxbN0CUb41Rde+knvsLvJ
+         2HoBiuMgoYXLenMiTSe8+T/JHP5A3+IhUzZ/qij6Z/bAUBwhswJK6Aykcb9Pxn3KVcCa
+         yX4eW1YpQ/IEwdAmok2j9aTcPQXCERqmdtaN+aGu1a2lbROhPAwpp0f1QpMaiNlge3ek
+         FedA==;
+        darn=lists.linux.dev
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1776335404; x=1776940204; darn=lists.linux.dev;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=O4x/p20rCdbt363tjV0+ABHeJuaMLyMj2lG+gRWDekg=;
+        b=T84RsxHxh/lk8QkcHvGwR4S3vTKDFOLgHArd/JMpAgXU54jxKHMdFzep9owQwgGoAM
+         J3WZu2mG7PBPY1mhfJsBJzfZqYxTudRozXnRuFRa8+7hCbczwwbQERnygZEbDbVp5L41
+         hEsGbdF5e+tfwGWXcEe0fZE3UEF8UWQDx1szmo5JSlETJx/pGPFfJCkfzV2Hbg5gONgU
+         WnZEtQIo/lpMWzrwvnPDt/OxYUsk2wXOkPmuGKVaN/yY/qFrP723JG6b5RlI0oQMrWU5
+         bLKmK5Ob65QMz1bYshokTp5vywgAUFUlEwR/n3hMCH0P/RzlF1KTlrwm3L+0VARKexY5
+         OlbA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1776335404; x=1776940204;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:x-gm-gg:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to;
+        bh=O4x/p20rCdbt363tjV0+ABHeJuaMLyMj2lG+gRWDekg=;
+        b=Gdnx7P7U2nenPH8hsqdHCOO45J1J1tys0wh2RFdpWyMyr9U7W8hJ2LmeKiAdrbz/TQ
+         QsdXOjVQ+wbI+R7HvfDeClSiVOQVrD9dkbZaSfzrBK2wkHAxqi8cUaVTuYxn+DNHJlcJ
+         7Ow4SaIjc8YMasNX+/XQC6tHSuLUHmjBOKonYqzLGxrAHc/e3cvsMN9mgUGj9wGUEWP+
+         3ZlRlNS8oyOpceoJKCnWKL56mGw+lbGyBMD2cWZfLb3US1WKk0kOipZBcRYt0ztHTaWF
+         uAR9l70wsweCQ1cu2CkcCtj+rIcd8QrY/xgSQVtFKIrF61ULiYbMYSkN29JceOGdFQQC
+         FXFQ==
+X-Forwarded-Encrypted: i=1; AFNElJ+1rfYpnaU8JgPjNmrpNTJciR4687E7vQY7vclsUz/eeY73P6JTQSzrr+To5ky14F0kfywiGfI=@lists.linux.dev
+X-Gm-Message-State: AOJu0YxCpCRBX/iYl1FTAmyE0qkaxCNSAAChRBvzfywA3peop6xH2RpR
+	b7g3Gh6I7ZxVWjT3NoXlLbJPJ58GtUxeyakK+iloseEDVRPblm1dUfsizTqEhNJ1FcVhfnU7L0w
+	WkB/0KW92YJr1WP+n1u7YO+g81exytDo=
+X-Gm-Gg: AeBDiesqFkONMEpMlWSA4jN1Vs+L9zEiEzRtiKP/ixm1cfjDQLSrGiHUle7Tga5uqZz
+	2OSBSRC4mVNYWbUIByIIwT6AgCKccRA8lQfQNiA7DnToKftgZrxnWh2cRkmYR70t179b7WkwjRd
+	RyR9XOrdIRvDvbr9r+o29LEicGcOf6BSlARZD6bzO3jzL6XF+ZIT1GNu538auGiBi3qNrjXCgSs
+	Glq/nCv16173Y37V59BqWstQBsagxqRYkRsJZKGVeroueGhPjceEcMvjDg/oWez/dI1tk92ZmAl
+	SVFbcohLlXLbZrdjsfMR38vQdi59CAEmQI7Zd78/WMEKRYoGag==
+X-Received: by 2002:a05:6402:1bd0:b0:66e:103b:6350 with SMTP id
+ 4fb4d7f45d1cf-67271085617mr945994a12.7.1776335403710; Thu, 16 Apr 2026
+ 03:30:03 -0700 (PDT)
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+References: <20260413062042.804-1-huangsj@hygon.cn> <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+ <ad4EvoDcAKE2Sl4+@hsj-2U-Workstation>
+In-Reply-To: <ad4EvoDcAKE2Sl4+@hsj-2U-Workstation>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Thu, 16 Apr 2026 12:29:50 +0200
+X-Gm-Features: AQROBzC-j8c2wDPnYX4NqzriRAjav7sQoMIZaVyLzvRZ8lq-CJThcPkUuW_xSxI
+Message-ID: <CAGudoHGLaoc+CoBPNCvFRYojnj+6E_Lsdv7NaJWxFMoHezemMQ@mail.gmail.com>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+To: Huang Shijie <huangsj@hygon.cn>
+Cc: akpm@linux-foundation.org, viro@zeniv.linux.org.uk, brauner@kernel.org, 
+	linux-mm@kvack.org, linux-kernel@vger.kernel.org, 
+	linux-arm-kernel@lists.infradead.org, linux-fsdevel@vger.kernel.org, 
+	muchun.song@linux.dev, osalvador@suse.de, linux-trace-kernel@vger.kernel.org, 
+	linux-perf-users@vger.kernel.org, linux-parisc@vger.kernel.org, 
+	nvdimm@lists.linux.dev, zhongyuan@hygon.cn, fangbaoshun@hygon.cn, 
+	yingzhiwei@hygon.cn
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+On Tue, Apr 14, 2026 at 11:11=E2=80=AFAM Huang Shijie <huangsj@hygon.cn> wr=
+ote:
+>
+> On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> > On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> > >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > > In the UnixBench tests, there is a test "execl" which tests
+> > > the execve system call.
+> > >
+> > >   When we test our server with "./Run -c 384 execl",
+> > > the test result is not good enough. The i_mmap locks contended heavil=
+y on
+> > > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can=
+ have
+> > > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > > The insert/remove operations do not run quickly enough.
+> > >
+> > > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > > patch 3 splits the i_mmap into sibling trees, and we can get better
+> > > performance with this patch set:
+> > >     we can get 77% performance improvement(10 times average)
+> > >
+> >
+> > To my reading you kept the lock as-is and only distributed the protecte=
+d
+> > state.
+> >
+> > While I don't doubt the improvement, I'm confident should you take a
+> > look at the profile you are going to find this still does not scale wit=
+h
+> > rwsem being one of the problems (there are other global locks, some of
+> > which have experimental patches for).
+> IMHO, when the number of VMAs in the i_mmap is very large, only optimise =
+the rwsem
+> lock does not help too much for our NUMA case.
+>
+> In our NUMA server, the remote access could be the major issue.
+>
+
+I'm confused how this is not supposed to help. You moved your data to
+be stored per-domain. With my proposal the lock itself will also get
+that treatment.
+
+Modulo the issue of what to do with code wanting to iterate the entire
+thing, this is blatantly faster.
+
+>
+> >
+> > Apart from that this does nothing to help high core systems which are
+> > all one node, which imo puts another question mark on this specific
+> > proposal.
+> Yes, this patch set only focus on the NUMA case.
+> The one-node case should use the original i_mmap.
+>
+> Maybe I can add a new config, CONFIG_SPILT_I_MMAP. The config is disabled
+> by default, and enabled when the NUMA node is not one.
+>
+> >
+> > Of course one may question whether a RB tree is the right choice here,
+> > it may be the lock-protected cost can go way down with merely a better
+> > data structure.
+> >
+> > Regardless of that, for actual scalability, there will be no way around
+> > decentralazing locking around this and partitioning per some core count
+> > (not just by numa awareness).
+> >
+> > Decentralizing locking is definitely possible, but I have not looked
+> > into specifics of how problematic it is. Best case scenario it will
+> > merely with separate locks. Worst case scenario something needs a fully
+> > stabilized state for traversal, in that case another rw lock can be
+> Yes.
+>
+> The traversal may need to hold many locks.
+>
+
+The very paragraph you partially quoted answers what to do in that
+case: wrap everything with a new rwsem taken for reading when
+adding/removing entries and taken for writing when iterating the
+entire thing. Then the iteration sticks to one lock.
+
+The new rw lock puts an upper ceiling on scalability of the thing, but
+it is way higher than the current state.
+
+Given the extra overhead associated with it one could consider
+sticking to one centralized state by default and switching to
+distributed state if there is enough contention.
+
+> > slapped around this, creating locking order read lock -> per-subset
+> > write lock -- this will suffer scalability due to the read locking, but
+> > it will still scale drastically better as apart from that there will be
+> > no serialization. In this setting the problematic consumer will write
+> > lock the new thing to stabilize the state.
+> >
+> > So my non-maintainer opinion is that the patchset is not worth it as it
+> > fails to address anything for significantly more common and already
+> > affected setups.
+> This patch set is to reduce the remote access latency for insert/remove V=
+MA
+> in NUMA.
+>
+
+And I am saying the mmap semaphore is a significant problem already on
+high-core no-numa setups. Addressing scalability in that case would
+sort out the problem in your setup and to a significantly higher
+extent.
+
+> >
+> > Have you looked into splitting the lock?
+> >
+> I ever tried.
+>
+> But there are two disadvantages:
+>   1.) The traversal may need to hold many locks which makes the
+>       code very horrible.
+>
+
+I already above this is avoidable.
+
+>   2.) Even we split the locks. Each lock protects a tree, when the tree b=
+ecomes
+>       big enough, the VMA insert/remove will also become slow in NUMA.
+>       The reason is that the tree has VMAs in different NUMA nodes.
+>
+
+This is orthogonal to my proposal. In fact, if one is to pretend this
+is never a factor with your patch, I would like to point out it will
+remain not a factor if the per-numa struct gets its own lock.
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 5F78437F8AF
+	for <nvdimm@lists.linux.dev>; Thu, 16 Apr 2026 11:48:33 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776340131; cv=none; b=n7vztheC25PJ42u+XM3Vyu3vWQuPeliSPE+teGWXHhC46/4VfWORoeOJ6iP0yXFj5hmiCuqTQ0wck8Yu4cUf03SST5ZXjRBFECK8T6YkKd5LdtBc5Cb97TtIp0M+Mkoct4nD3SC5JOBRlA4lzmdU1A9ai2P/ptEPwTHfW9fTDi8=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776340131; c=relaxed/simple;
+	bh=zyZe1jx0hO5jVoW7hrnjF3AvZ7XWdFK+r/bsC+RDY5w=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=hvvqxOxm5zElrMjEgTeVVxYQMnp6Vj8j9jaxj24xlQEq6YVmPjuVNdXhASCrNwvB4FMuLfRZLJG0JfpHDck9hbIJK8zgUa+YkLDWmOT3S7Lrx2G7x3xYo/THOIxod1HKqBEoJb+YsxocKSbIn4kLP3CM9n3Zs+5EWea2wJafU7U=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fxGVj1kD1z1YQpmX;
+	Thu, 16 Apr 2026 19:48:29 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fxGVh5pwfz1YQpmX;
+	Thu, 16 Apr 2026 19:48:28 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id CC695300D1F6;
+	Thu, 16 Apr 2026 19:46:31 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Thu, 16 Apr
+ 2026 19:48:27 +0800
+Date: Thu, 16 Apr 2026 19:48:24 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: Mateusz Guzik <mjguzik@gmail.com>
+CC: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>, <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <aeDMiBqscm-CZA6D@SH-HV00110.Hygon.cn>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+ <ad4EvoDcAKE2Sl4+@hsj-2U-Workstation>
+ <CAGudoHGLaoc+CoBPNCvFRYojnj+6E_Lsdv7NaJWxFMoHezemMQ@mail.gmail.com>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Disposition: inline
+Content-Transfer-Encoding: 8bit
+In-Reply-To: <CAGudoHGLaoc+CoBPNCvFRYojnj+6E_Lsdv7NaJWxFMoHezemMQ@mail.gmail.com>
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Thu, Apr 16, 2026 at 12:29:50PM +0200, Mateusz Guzik wrote:
+> On Tue, Apr 14, 2026 at 11:11 AM Huang Shijie <huangsj@hygon.cn> wrote:
+> >
+> > On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> > > On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> > > >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > > > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > > > In the UnixBench tests, there is a test "execl" which tests
+> > > > the execve system call.
+> > > >
+> > > >   When we test our server with "./Run -c 384 execl",
+> > > > the test result is not good enough. The i_mmap locks contended heavily on
+> > > > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have
+> > > > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > > > The insert/remove operations do not run quickly enough.
+> > > >
+> > > > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > > > patch 3 splits the i_mmap into sibling trees, and we can get better
+> > > > performance with this patch set:
+> > > >     we can get 77% performance improvement(10 times average)
+> > > >
+> > >
+> > > To my reading you kept the lock as-is and only distributed the protected
+> > > state.
+> > >
+> > > While I don't doubt the improvement, I'm confident should you take a
+> > > look at the profile you are going to find this still does not scale with
+> > > rwsem being one of the problems (there are other global locks, some of
+> > > which have experimental patches for).
+> > IMHO, when the number of VMAs in the i_mmap is very large, only optimise the rwsem
+> > lock does not help too much for our NUMA case.
+> >
+> > In our NUMA server, the remote access could be the major issue.
+> >
+> 
+> I'm confused how this is not supposed to help. You moved your data to
+> be stored per-domain. With my proposal the lock itself will also get
+> that treatment.
+> 
+> Modulo the issue of what to do with code wanting to iterate the entire
+> thing, this is blatantly faster.
+> 
+
+I tested an old lock patch yesterday. It really helps a lot.
+The lock patch is from this link:
+  https://lkml.org/lkml/2024/9/14/280
+
+The test results:
+   v7.0-rc5 + (lock patch)                    : improve about %60%
+   v7.0-rc5 + (lock patch) + (this patch set) : improve about 130%			   
+
+						
+> >
+> > >
+> > > Apart from that this does nothing to help high core systems which are
+> > > all one node, which imo puts another question mark on this specific
+> > > proposal.
+> > Yes, this patch set only focus on the NUMA case.
+> > The one-node case should use the original i_mmap.
+> >
+> > Maybe I can add a new config, CONFIG_SPILT_I_MMAP. The config is disabled
+> > by default, and enabled when the NUMA node is not one.
+> >
+> > >
+> > > Of course one may question whether a RB tree is the right choice here,
+> > > it may be the lock-protected cost can go way down with merely a better
+> > > data structure.
+> > >
+> > > Regardless of that, for actual scalability, there will be no way around
+> > > decentralazing locking around this and partitioning per some core count
+> > > (not just by numa awareness).
+> > >
+> > > Decentralizing locking is definitely possible, but I have not looked
+> > > into specifics of how problematic it is. Best case scenario it will
+> > > merely with separate locks. Worst case scenario something needs a fully
+> > > stabilized state for traversal, in that case another rw lock can be
+> > Yes.
+> >
+> > The traversal may need to hold many locks.
+> >
+> 
+> The very paragraph you partially quoted answers what to do in that
+> case: wrap everything with a new rwsem taken for reading when
+> adding/removing entries and taken for writing when iterating the
+> entire thing. Then the iteration sticks to one lock.
+> 
+> The new rw lock puts an upper ceiling on scalability of the thing, but
+> it is way higher than the current state.
+Could you tell me the patch about it?
+Is this lock patch merged ? or not?
+
+I can test it.
+
+> 
+> Given the extra overhead associated with it one could consider
+> sticking to one centralized state by default and switching to
+> distributed state if there is enough contention.
+> 
+> > > slapped around this, creating locking order read lock -> per-subset
+> > > write lock -- this will suffer scalability due to the read locking, but
+> > > it will still scale drastically better as apart from that there will be
+> > > no serialization. In this setting the problematic consumer will write
+> > > lock the new thing to stabilize the state.
+> > >
+> > > So my non-maintainer opinion is that the patchset is not worth it as it
+> > > fails to address anything for significantly more common and already
+> > > affected setups.
+> > This patch set is to reduce the remote access latency for insert/remove VMA
+> > in NUMA.
+> >
+> 
+> And I am saying the mmap semaphore is a significant problem already on
+> high-core no-numa setups. Addressing scalability in that case would
+> sort out the problem in your setup and to a significantly higher
+> extent.
+I am afraid even the lock patch resolves the scalability high-core no-numa setups,
+we still need to split the i_mmap for NUMA.
+
+> 
+> > >
+> > > Have you looked into splitting the lock?
+> > >
+> > I ever tried.
+> >
+> > But there are two disadvantages:
+> >   1.) The traversal may need to hold many locks which makes the
+> >       code very horrible.
+> >
+> 
+> I already above this is avoidable.
+> 
+> >   2.) Even we split the locks. Each lock protects a tree, when the tree becomes
+> >       big enough, the VMA insert/remove will also become slow in NUMA.
+> >       The reason is that the tree has VMAs in different NUMA nodes.
+> >
+> 
+> This is orthogonal to my proposal. In fact, if one is to pretend this
+> is never a factor with your patch, I would like to point out it will
+> remain not a factor if the per-numa struct gets its own lock.
+Yes. It is orthogonal to your proposal.
+
+Thanks
+Huang Shijie
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw1.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 1DF0B1B4F0A
+	for <nvdimm@lists.linux.dev>; Fri, 17 Apr 2026 06:59:55 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776409212; cv=none; b=oIErM8NQlAHMHHmywx87z+z5B/yo9yzjHYDALqj1Ntkm4d55tGMNs6VIyRf7wcrbI2Rx7xAK/se/B39GHqlzeEfMYP2+aua9pCkbpStf6qa5i0PeroXhNGzVivjl27LmYlyrCKlpZ6B/aT4WaQZGLIKxCdT2RWq0tY3YoLlayDM=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776409212; c=relaxed/simple;
+	bh=2Qm1k46QeaCwP3PmXiD2vvdZ0MLoC5zsmI9lok6yqpc=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=iGB/uIFGXUWHW9hc9gS2JChprkghtXCkPpNsa1dep87wvKvfkq0C2n4XNyEp6H7tE7VcLb909cLsn4N4BZno9xgC4kbSE0VsPFSA2h0F4I0Wp3zUupXuRM75OREanuJ7veTECWNqHzVY5dFaJrIMUWRFFjnVWPyYdGqq6zbeueo=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fxm355c3TzwvXZ;
+	Fri, 17 Apr 2026 14:59:45 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4fxm342Yk4zvkdy;
+	Fri, 17 Apr 2026 14:59:44 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id 1F23A16E2;
+	Fri, 17 Apr 2026 14:59:44 +0800 (CST)
+Received: from hsj-2U-Workstation (172.19.20.61) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Fri, 17 Apr
+ 2026 14:59:42 +0800
+Date: Fri, 17 Apr 2026 14:59:41 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: Mateusz Guzik <mjguzik@gmail.com>
+CC: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>, <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <aeHaXXB2+mla7u2F@hsj-2U-Workstation>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Disposition: inline
+In-Reply-To: <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > In the UnixBench tests, there is a test "execl" which tests
+> > the execve system call.
+> > 
+> >   When we test our server with "./Run -c 384 execl",
+> > the test result is not good enough. The i_mmap locks contended heavily on
+> > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > The insert/remove operations do not run quickly enough.
+> > 
+> > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > patch 3 splits the i_mmap into sibling trees, and we can get better 
+> > performance with this patch set:
+> >     we can get 77% performance improvement(10 times average)
+> > 
+> 
+> To my reading you kept the lock as-is and only distributed the protected
+> state.
+> 
+> While I don't doubt the improvement, I'm confident should you take a
+> look at the profile you are going to find this still does not scale with
+> rwsem being one of the problems (there are other global locks, some of
+> which have experimental patches for).
+> 
+> Apart from that this does nothing to help high core systems which are
+> all one node, which imo puts another question mark on this specific
+> proposal.
+> 
+> Of course one may question whether a RB tree is the right choice here,
+> it may be the lock-protected cost can go way down with merely a better
+> data structure.
+> 
+> Regardless of that, for actual scalability, there will be no way around
+> decentralazing locking around this and partitioning per some core count
+> (not just by numa awareness).
+> 
+> Decentralizing locking is definitely possible, but I have not looked
+> into specifics of how problematic it is. Best case scenario it will
+> merely with separate locks. Worst case scenario something needs a fully
+> stabilized state for traversal, in that case another rw lock can be
+> slapped around this, creating locking order read lock -> per-subset
+> write lock -- this will suffer scalability due to the read locking, but
+> it will still scale drastically better as apart from that there will be
+> no serialization. In this setting the problematic consumer will write
+> lock the new thing to stabilize the state.
+For your proposal in no-numa, I hope you can create a patch set for it.
+I can test it in our machine.
+
+Thanks
+Huang Shijie
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id F40B8280338
+	for <nvdimm@lists.linux.dev>; Mon, 20 Apr 2026 02:10:44 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776651061; cv=none; b=VQsDpwkxDHrwrOOtqGxyXYMFm8Jdedc+wIz6bJAbDETWVz1n7o6uYTeM1h5HGoEFjWPBzyJmDGPRg2IkTtq7Tr7A8mjuA2Godd88Lb7aBPAiGls0G8A0sUKXRhchGQD94ToD7m94Kg1RXUk0kku4yaRXFTzDFpTK83jC6TUHN2E=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776651061; c=relaxed/simple;
+	bh=XZMDY39SIKnjgr9AwOz4guH12QSe5xlaKf0Q6+yWohc=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=qeXaFwLQNaepgAnoSOwzn1tIGaAqquX4ZisCGD4MlGIz59T97GtwiNlg6CS2hf++rjXLtQh6TaqhV6bI5HneZbNK4e2b8Noo1BYO+qVmrxZxHghFxBRnzJo15WMImPC4DcEHXqKwRoqZ951OrTdWdi3mjfNaGJXdF+aU2FYP078=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fzTTx2xMWz1YQpmD;
+	Mon, 20 Apr 2026 10:10:29 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4fzTTw3BqFz1YQpmD;
+	Mon, 20 Apr 2026 10:10:28 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id 29C42B53C;
+	Mon, 20 Apr 2026 10:10:25 +0800 (CST)
+Received: from SH-HV00110.Hygon.cn (172.19.26.208) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Mon, 20 Apr
+ 2026 10:10:17 +0800
+Date: Mon, 20 Apr 2026 10:10:19 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: Mateusz Guzik <mjguzik@gmail.com>
+CC: <akpm@linux-foundation.org>, <viro@zeniv.linux.org.uk>,
+	<brauner@kernel.org>, <linux-mm@kvack.org>, <linux-kernel@vger.kernel.org>,
+	<linux-arm-kernel@lists.infradead.org>, <linux-fsdevel@vger.kernel.org>,
+	<muchun.song@linux.dev>, <osalvador@suse.de>,
+	<linux-trace-kernel@vger.kernel.org>, <linux-perf-users@vger.kernel.org>,
+	<linux-parisc@vger.kernel.org>, <nvdimm@lists.linux.dev>,
+	<zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>, <yingzhiwei@hygon.cn>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <aeWLCxru6cLWsxvQ@SH-HV00110.Hygon.cn>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Disposition: inline
+In-Reply-To: <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+X-ClientProxiedBy: cncheex05.Hygon.cn (172.23.18.115) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > In the UnixBench tests, there is a test "execl" which tests
+> > the execve system call.
+> > 
+> >   When we test our server with "./Run -c 384 execl",
+> > the test result is not good enough. The i_mmap locks contended heavily on
+> > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > The insert/remove operations do not run quickly enough.
+> > 
+> > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > patch 3 splits the i_mmap into sibling trees, and we can get better 
+> > performance with this patch set:
+> >     we can get 77% performance improvement(10 times average)
+> > 
+> 
+> To my reading you kept the lock as-is and only distributed the protected
+> state.
+> 
+> While I don't doubt the improvement, I'm confident should you take a
+> look at the profile you are going to find this still does not scale with
+> rwsem being one of the problems (there are other global locks, some of
+> which have experimental patches for).
+> 
+> Apart from that this does nothing to help high core systems which are
+> all one node, which imo puts another question mark on this specific
+> proposal.
+> 
+> Of course one may question whether a RB tree is the right choice here,
+> it may be the lock-protected cost can go way down with merely a better
+> data structure.
+> 
+> Regardless of that, for actual scalability, there will be no way around
+> decentralazing locking around this and partitioning per some core count
+> (not just by numa awareness).
+> 
+> Decentralizing locking is definitely possible, but I have not looked
+> into specifics of how problematic it is. Best case scenario it will
+> merely with separate locks. Worst case scenario something needs a fully
+> stabilized state for traversal, in that case another rw lock can be
+> slapped around this, creating locking order read lock -> per-subset
+> write lock -- this will suffer scalability due to the read locking, but
+> it will still scale drastically better as apart from that there will be
+> no serialization. In this setting the problematic consumer will write
+> lock the new thing to stabilize the state.
+> 
+I thought over again.
+I can change this patch set to support the non-NUMA case by:
+  1.) Still use one rw lock.
+  2.) For NUMA, keep the patch set as it is.
+  3.) For non-NUMA case, split the i_mmap tree to several subtrees.
+      For example, if a machine has 192 CPUs, split the 32 CPUs as a tree.
+
+So extend the patch set to support both the NUMA and non-NUMA machines.
+
+Thanks
+Huang Shijie
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from smtp-out2.suse.de (smtp-out2.suse.de [195.135.223.131])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 4DB432C15A9
+	for <nvdimm@lists.linux.dev>; Mon, 20 Apr 2026 13:48:54 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=195.135.223.131
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776692936; cv=none; b=G9stppj1ULUQ/+9rFLAaDZkI54QHXQD77afuzsh0Xrr3fZAwJgoRcqMTk2Au5GxyaVfHyR6y+hV/OfbawBXUInu30CsY1TLf4q0Np1Hh8BMkwEmrFDQsTZQtqxKSLCyXZLijfhh3q+q0wLftsnWkO5Qcl48ww1ng4SaV/kcSqC4=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776692936; c=relaxed/simple;
+	bh=SKfYPvzrgT1y7LAQk992dLOb1/Ozag4guC9nIE4K0QY=;
+	h=Date:From:To:Cc:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=nGozQ9ROYOJQ6dfyRMTOdjLuwg9h8lHhxLxG+EVlBwt9Mml/6C4/o0lw1YfTmAWP2YsuHW4U31+0YWKFPkEKfPm6FwcvwTjdyTmjy2hDohAZvSOyEpXQFKlQoFPSpCubRdHSuZDJDO0jehSWF3vIHFA0iYgds8oRxwu2ChTlcX0=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=suse.de; spf=pass smtp.mailfrom=suse.de; dkim=pass (1024-bit key) header.d=suse.de header.i=@suse.de header.b=lLOw1NFe; dkim=permerror (0-bit key) header.d=suse.de header.i=@suse.de header.b=pS3fKW/B; dkim=pass (1024-bit key) header.d=suse.de header.i=@suse.de header.b=lLOw1NFe; dkim=permerror (0-bit key) header.d=suse.de header.i=@suse.de header.b=pS3fKW/B; arc=none smtp.client-ip=195.135.223.131
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=suse.de
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=suse.de
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (1024-bit key) header.d=suse.de header.i=@suse.de header.b="lLOw1NFe";
+	dkim=permerror (0-bit key) header.d=suse.de header.i=@suse.de header.b="pS3fKW/B";
+	dkim=pass (1024-bit key) header.d=suse.de header.i=@suse.de header.b="lLOw1NFe";
+	dkim=permerror (0-bit key) header.d=suse.de header.i=@suse.de header.b="pS3fKW/B"
+Received: from imap1.dmz-prg2.suse.org (imap1.dmz-prg2.suse.org [IPv6:2a07:de40:b281:104:10:150:64:97])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (4096 bits) server-digest SHA256)
+	(No client certificate requested)
+	by smtp-out2.suse.de (Postfix) with ESMTPS id 883D25BCD1;
+	Mon, 20 Apr 2026 13:48:52 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=suse.de; s=susede2_rsa;
+	t=1776692932; h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=c3G7vl254hKLWmCISgkXy81NC1sunGjVh1MU4tFAFiY=;
+	b=lLOw1NFeI/E4bVnzlRZvuI38z+UOWMiJ6WCTcpZ7bGOxdHC30NjLoPiW+EgsgZl/Pzst6V
+	qqY5/ua481n4ZfLe9BpQM7lLgTHMduMezIRA5R/zGegZWQ2wkp2XrVz3v9snvhnbPIKdkH
+	AZMDGB1IyMTJ/tZtJPo/Maum0DoAIeU=
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=suse.de;
+	s=susede2_ed25519; t=1776692932;
+	h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=c3G7vl254hKLWmCISgkXy81NC1sunGjVh1MU4tFAFiY=;
+	b=pS3fKW/BmxFU27m5F7wLrXMPhRUqPkVS5iBg7mv0bFsGeCijAraUqYAcOgioByN5iNlbUq
+	OJM/4gggnCadI6AA==
+Authentication-Results: smtp-out2.suse.de;
+	dkim=pass header.d=suse.de header.s=susede2_rsa header.b=lLOw1NFe;
+	dkim=pass header.d=suse.de header.s=susede2_ed25519 header.b="pS3fKW/B"
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=suse.de; s=susede2_rsa;
+	t=1776692932; h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=c3G7vl254hKLWmCISgkXy81NC1sunGjVh1MU4tFAFiY=;
+	b=lLOw1NFeI/E4bVnzlRZvuI38z+UOWMiJ6WCTcpZ7bGOxdHC30NjLoPiW+EgsgZl/Pzst6V
+	qqY5/ua481n4ZfLe9BpQM7lLgTHMduMezIRA5R/zGegZWQ2wkp2XrVz3v9snvhnbPIKdkH
+	AZMDGB1IyMTJ/tZtJPo/Maum0DoAIeU=
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=suse.de;
+	s=susede2_ed25519; t=1776692932;
+	h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=c3G7vl254hKLWmCISgkXy81NC1sunGjVh1MU4tFAFiY=;
+	b=pS3fKW/BmxFU27m5F7wLrXMPhRUqPkVS5iBg7mv0bFsGeCijAraUqYAcOgioByN5iNlbUq
+	OJM/4gggnCadI6AA==
+Received: from imap1.dmz-prg2.suse.org (localhost [127.0.0.1])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (4096 bits) server-digest SHA256)
+	(No client certificate requested)
+	by imap1.dmz-prg2.suse.org (Postfix) with ESMTPS id 61675593AE;
+	Mon, 20 Apr 2026 13:48:51 +0000 (UTC)
+Received: from dovecot-director2.suse.de ([2a07:de40:b281:106:10:150:64:167])
+	by imap1.dmz-prg2.suse.org with ESMTPSA
+	id c5N1FMMu5mnXQwAAD6G6ig
+	(envelope-from <pfalcato@suse.de>); Mon, 20 Apr 2026 13:48:51 +0000
+Date: Mon, 20 Apr 2026 14:48:49 +0100
+From: Pedro Falcato <pfalcato@suse.de>
+To: Huang Shijie <huangsj@hygon.cn>
+Cc: Mateusz Guzik <mjguzik@gmail.com>, akpm@linux-foundation.org, 
+	viro@zeniv.linux.org.uk, brauner@kernel.org, linux-mm@kvack.org, 
+	linux-kernel@vger.kernel.org, linux-arm-kernel@lists.infradead.org, 
+	linux-fsdevel@vger.kernel.org, muchun.song@linux.dev, osalvador@suse.de, 
+	linux-trace-kernel@vger.kernel.org, linux-perf-users@vger.kernel.org, linux-parisc@vger.kernel.org, 
+	nvdimm@lists.linux.dev, zhongyuan@hygon.cn, fangbaoshun@hygon.cn, yingzhiwei@hygon.cn
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <hshxzebq5y4gavo7mbrgn7qitz5j5wyun73wy7ooiiehzzpcui@hlknbp34sgja>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+ <aeWLCxru6cLWsxvQ@SH-HV00110.Hygon.cn>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <aeWLCxru6cLWsxvQ@SH-HV00110.Hygon.cn>
+X-Spamd-Result: default: False [-4.01 / 50.00];
+	BAYES_HAM(-3.00)[100.00%];
+	NEURAL_HAM_LONG(-1.00)[-1.000];
+	MID_RHS_NOT_FQDN(0.50)[];
+	R_DKIM_ALLOW(-0.20)[suse.de:s=susede2_rsa,suse.de:s=susede2_ed25519];
+	NEURAL_HAM_SHORT(-0.20)[-1.000];
+	MIME_GOOD(-0.10)[text/plain];
+	MX_GOOD(-0.01)[];
+	URIBL_BLOCKED(0.00)[suse.de:dkim,imap1.dmz-prg2.suse.org:helo,imap1.dmz-prg2.suse.org:rdns];
+	DKIM_SIGNED(0.00)[suse.de:s=susede2_rsa,suse.de:s=susede2_ed25519];
+	FREEMAIL_ENVRCPT(0.00)[gmail.com];
+	ARC_NA(0.00)[];
+	FUZZY_RATELIMITED(0.00)[rspamd.com];
+	RCPT_COUNT_TWELVE(0.00)[18];
+	MIME_TRACE(0.00)[0:+];
+	TO_MATCH_ENVRCPT_ALL(0.00)[];
+	FREEMAIL_CC(0.00)[gmail.com,linux-foundation.org,zeniv.linux.org.uk,kernel.org,kvack.org,vger.kernel.org,lists.infradead.org,linux.dev,suse.de,lists.linux.dev,hygon.cn];
+	RCVD_TLS_ALL(0.00)[];
+	RCVD_COUNT_TWO(0.00)[2];
+	FROM_EQ_ENVFROM(0.00)[];
+	FROM_HAS_DN(0.00)[];
+	TO_DN_SOME(0.00)[];
+	DNSWL_BLOCKED(0.00)[2a07:de40:b281:104:10:150:64:97:from,2a07:de40:b281:106:10:150:64:167:received];
+	MISSING_XM_UA(0.00)[];
+	RCVD_VIA_SMTP_AUTH(0.00)[];
+	DKIM_TRACE(0.00)[suse.de:+];
+	DBL_BLOCKED_OPENRESOLVER(0.00)[imap1.dmz-prg2.suse.org:helo,imap1.dmz-prg2.suse.org:rdns,suse.de:dkim]
+X-Rspamd-Action: no action
+X-Spam-Flag: NO
+X-Spam-Score: -4.01
+X-Spam-Level: 
+X-Rspamd-Server: rspamd1.dmz-prg2.suse.org
+X-Rspamd-Queue-Id: 883D25BCD1
+
+BTW you're missing _a lot_ of CC's here, including the whole of mm/rmap.c
+maintainership.
+
+On Mon, Apr 20, 2026 at 10:10:19AM +0800, Huang Shijie wrote:
+> On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> > On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> > >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > > In the UnixBench tests, there is a test "execl" which tests
+> > > the execve system call.
+> > > 
+> > >   When we test our server with "./Run -c 384 execl",
+> > > the test result is not good enough. The i_mmap locks contended heavily on
+> > > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> > > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > > The insert/remove operations do not run quickly enough.
+> > > 
+> > > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > > patch 3 splits the i_mmap into sibling trees, and we can get better 
+> > > performance with this patch set:
+> > >     we can get 77% performance improvement(10 times average)
+> > > 
+> > 
+> > To my reading you kept the lock as-is and only distributed the protected
+> > state.
+> > 
+> > While I don't doubt the improvement, I'm confident should you take a
+> > look at the profile you are going to find this still does not scale with
+> > rwsem being one of the problems (there are other global locks, some of
+> > which have experimental patches for).
+> > 
+> > Apart from that this does nothing to help high core systems which are
+> > all one node, which imo puts another question mark on this specific
+> > proposal.
+> > 
+> > Of course one may question whether a RB tree is the right choice here,
+> > it may be the lock-protected cost can go way down with merely a better
+> > data structure.
+> > 
+> > Regardless of that, for actual scalability, there will be no way around
+> > decentralazing locking around this and partitioning per some core count
+> > (not just by numa awareness).
+> > 
+> > Decentralizing locking is definitely possible, but I have not looked
+> > into specifics of how problematic it is. Best case scenario it will
+> > merely with separate locks. Worst case scenario something needs a fully
+> > stabilized state for traversal, in that case another rw lock can be
+> > slapped around this, creating locking order read lock -> per-subset
+> > write lock -- this will suffer scalability due to the read locking, but
+> > it will still scale drastically better as apart from that there will be
+> > no serialization. In this setting the problematic consumer will write
+> > lock the new thing to stabilize the state.
+> > 
+> I thought over again.
+> I can change this patch set to support the non-NUMA case by:
+>   1.) Still use one rw lock.
+
+No. This doesn't help anything.
+
+>   2.) For NUMA, keep the patch set as it is.
+
+Please no. No NUMA vs non-NUMA case.
+
+>   3.) For non-NUMA case, split the i_mmap tree to several subtrees.
+>       For example, if a machine has 192 CPUs, split the 32 CPUs as a tree.
+
+If lock contention is the problem, I don't see how splitting the tree helps,
+unless it helps reduce lock hold time in a way that randomly helps your workload.
+But that's entirely random.
+
+> 
+> So extend the patch set to support both the NUMA and non-NUMA machines.
+
+FYI I've discussed some concrete ideas for reworking file rmap with Mateusz.
+I'll be giving them a shot. Note that this needs to be done _carefully_,
+particularly as there are some hidden assumptions wrt forking that aren't
+very clear as to how they work[1].
+
+[1] https://lore.kernel.org/all/bnukmnuxxuhdfeasjz33miemgr7w35c4aa6pqdmgupx7oxmeeb@gozgc3yxhcdd/
+-- 
+Pedro
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 472DB377566
+	for <nvdimm@lists.linux.dev>; Tue, 21 Apr 2026 03:07:14 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776740850; cv=none; b=bBMslRj/kNVpfnh2k5A2T0WOvDpTgyQjLpbhbl5lEyJHFIbtGanPebh8MuAaFRvwzYvuexyqFUAujIRcxTRDZ3FVm84ll6+SBz6iAE1/ObIORjlI9yIEOwe+CEJN6pWOTz14CAYYh1gChVFW500v79RlbvpBD3iOIlBDJjnnV2M=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776740850; c=relaxed/simple;
+	bh=vVd/7SelOp7jYayhI2w6h4uvD0LPeSpGH137yQgPMc4=;
+	h=Date:From:To:CC:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=JpD2H0V+Y+/C5HNTwGLLCCcvLPj1NE2PY5/G9MLx9TBZLxc5LJo7BO7qnL9yrOVlVmhaC+F6WdrbzK0VeTt8uXxYqdSQPnZL+ai4CJ0dmkwVOCLU1v49G1B1C1PJxnnoMHEOx1gjdOrEc+c9HNY+jl0SlRmYS70ZLuv5U3pJTFQ=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g06hl3478z1YQpmD;
+	Tue, 21 Apr 2026 11:07:03 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g06hj31Ffz1YQpmD;
+	Tue, 21 Apr 2026 11:07:01 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id A77E933D4F40;
+	Tue, 21 Apr 2026 11:07:00 +0800 (CST)
+Received: from hsj-2U-Workstation (172.19.20.61) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Tue, 21 Apr
+ 2026 11:06:53 +0800
+Date: Tue, 21 Apr 2026 11:06:59 +0800
+From: Huang Shijie <huangsj@hygon.cn>
+To: Pedro Falcato <pfalcato@suse.de>
+CC: Mateusz Guzik <mjguzik@gmail.com>, <akpm@linux-foundation.org>,
+	<viro@zeniv.linux.org.uk>, <brauner@kernel.org>, <linux-mm@kvack.org>,
+	<linux-kernel@vger.kernel.org>, <linux-arm-kernel@lists.infradead.org>,
+	<linux-fsdevel@vger.kernel.org>, <muchun.song@linux.dev>,
+	<osalvador@suse.de>, <linux-trace-kernel@vger.kernel.org>,
+	<linux-perf-users@vger.kernel.org>, <linux-parisc@vger.kernel.org>,
+	<nvdimm@lists.linux.dev>, <zhongyuan@hygon.cn>, <fangbaoshun@hygon.cn>,
+	<yingzhiwei@hygon.cn>
+Subject: Re: [PATCH 0/3] mm: split the file's i_mmap tree for NUMA
+Message-ID: <aebp06qEMBx3yjHg@hsj-2U-Workstation>
+References: <20260413062042.804-1-huangsj@hygon.cn>
+ <76pfiwabdgsej6q2yxfh3efuqvsyg7mt7rvl5itzzjyhdrto5r@53viaxsackzv>
+ <aeWLCxru6cLWsxvQ@SH-HV00110.Hygon.cn>
+ <hshxzebq5y4gavo7mbrgn7qitz5j5wyun73wy7ooiiehzzpcui@hlknbp34sgja>
+Precedence: bulk
+X-Mailing-List: nvdimm@lists.linux.dev
+List-Id: <nvdimm.lists.linux.dev>
+List-Subscribe: <mailto:nvdimm+subscribe@lists.linux.dev>
+List-Unsubscribe: <mailto:nvdimm+unsubscribe@lists.linux.dev>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Disposition: inline
+In-Reply-To: <hshxzebq5y4gavo7mbrgn7qitz5j5wyun73wy7ooiiehzzpcui@hlknbp34sgja>
+X-ClientProxiedBy: cncheex05.Hygon.cn (172.23.18.115) To cncheex04.Hygon.cn
+ (172.23.18.114)
+
+On Mon, Apr 20, 2026 at 02:48:49PM +0100, Pedro Falcato wrote:
+> BTW you're missing _a lot_ of CC's here, including the whole of mm/rmap.c
+> maintainership.
+
+Thanks, my fault.
+
+> 
+> On Mon, Apr 20, 2026 at 10:10:19AM +0800, Huang Shijie wrote:
+> > On Mon, Apr 13, 2026 at 05:33:21PM +0200, Mateusz Guzik wrote:
+> > > On Mon, Apr 13, 2026 at 02:20:39PM +0800, Huang Shijie wrote:
+> > > >   In NUMA, there are maybe many NUMA nodes and many CPUs.
+> > > > For example, a Hygon's server has 12 NUMA nodes, and 384 CPUs.
+> > > > In the UnixBench tests, there is a test "execl" which tests
+> > > > the execve system call.
+> > > > 
+> > > >   When we test our server with "./Run -c 384 execl",
+> > > > the test result is not good enough. The i_mmap locks contended heavily on
+> > > > "libc.so" and "ld.so". For example, the i_mmap tree for "libc.so" can have 
+> > > > over 6000 VMAs, all the VMAs can be in different NUMA mode.
+> > > > The insert/remove operations do not run quickly enough.
+> > > > 
+> > > > patch 1 & patch 2 are try to hide the direct access of i_mmap.
+> > > > patch 3 splits the i_mmap into sibling trees, and we can get better 
+> > > > performance with this patch set:
+> > > >     we can get 77% performance improvement(10 times average)
+> > > > 
+> > > 
+> > > To my reading you kept the lock as-is and only distributed the protected
+> > > state.
+> > > 
+> > > While I don't doubt the improvement, I'm confident should you take a
+> > > look at the profile you are going to find this still does not scale with
+> > > rwsem being one of the problems (there are other global locks, some of
+> > > which have experimental patches for).
+> > > 
+> > > Apart from that this does nothing to help high core systems which are
+> > > all one node, which imo puts another question mark on this specific
+> > > proposal.
+> > > 
+> > > Of course one may question whether a RB tree is the right choice here,
+> > > it may be the lock-protected cost can go way down with merely a better
+> > > data structure.
+> > > 
+> > > Regardless of that, for actual scalability, there will be no way around
+> > > decentralazing locking around this and partitioning per some core count
+> > > (not just by numa awareness).
+> > > 
+> > > Decentralizing locking is definitely possible, but I have not looked
+> > > into specifics of how problematic it is. Best case scenario it will
+> > > merely with separate locks. Worst case scenario something needs a fully
+> > > stabilized state for traversal, in that case another rw lock can be
+> > > slapped around this, creating locking order read lock -> per-subset
+> > > write lock -- this will suffer scalability due to the read locking, but
+> > > it will still scale drastically better as apart from that there will be
+> > > no serialization. In this setting the problematic consumer will write
+> > > lock the new thing to stabilize the state.
+> > > 
+> > I thought over again.
+> > I can change this patch set to support the non-NUMA case by:
+> >   1.) Still use one rw lock.
+> 
+> No. This doesn't help anything.
+> 
+> >   2.) For NUMA, keep the patch set as it is.
+> 
+> Please no. No NUMA vs non-NUMA case.
+> 
+> >   3.) For non-NUMA case, split the i_mmap tree to several subtrees.
+> >       For example, if a machine has 192 CPUs, split the 32 CPUs as a tree.
+> 
+> If lock contention is the problem, I don't see how splitting the tree helps,
+> unless it helps reduce lock hold time in a way that randomly helps your workload.
+> But that's entirely random.
+We actually face two issues:
+   1.) the lock contention
+   2.) the lock hold time.
+
+IMHO, if we can reduce the lock hold time, we can ease the lock contention too.
+So this patch set is to reduce the lock hold time, which is much helpful in our
+NUMA server in UnixBench test.
+
+If we split the lock into small locks, we can also benefit from it. 
+If you or Mateusz create the patch in future, I can test it on our server.
+I wonder if it can give us better performance then current patch set.
+
+Thanks
+Huang Shijie
+
+
+

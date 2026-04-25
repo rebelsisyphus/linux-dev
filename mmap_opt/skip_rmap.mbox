@@ -1,0 +1,2259 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 9A54EF5A8D1
+	for <linux-mm@archiver.kernel.org>; Tue, 21 Apr 2026 02:11:39 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id 9D5EC6B0088; Mon, 20 Apr 2026 22:11:38 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id 9870B6B0089; Mon, 20 Apr 2026 22:11:38 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id 89C286B008A; Mon, 20 Apr 2026 22:11:38 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0013.hostedemail.com [216.40.44.13])
+	by kanga.kvack.org (Postfix) with ESMTP id 758506B0088
+	for <linux-mm@kvack.org>; Mon, 20 Apr 2026 22:11:38 -0400 (EDT)
+Received: from smtpin19.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay07.hostedemail.com (Postfix) with ESMTP id F318D160C21
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 02:11:37 +0000 (UTC)
+X-FDA: 84680936634.19.CA61B06
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by imf10.hostedemail.com (Postfix) with ESMTP id 6F9A2C000E
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 02:11:33 +0000 (UTC)
+Authentication-Results: imf10.hostedemail.com;
+	dkim=none;
+	spf=pass (imf10.hostedemail.com: domain of liuyibin@hygon.cn designates 101.204.27.37 as permitted sender) smtp.mailfrom=liuyibin@hygon.cn;
+	dmarc=pass (policy=none) header.from=hygon.cn
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776737496;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:
+	 content-transfer-encoding:content-transfer-encoding:in-reply-to:
+	 references; bh=GD6D6UP2JUVrIr8EF3zQGbO4YkzrUi9QUe7IsXPZTSY=;
+	b=Nr97ZYZeqqt8+9cQZeDi7cU0blGgKmKyhmxSLk5Atj2y1E30jvSy/98PSB+tn8nP6BVYCI
+	Il1lFU6ML6Gj9V+LMxI4xn8yc3hSHXlUT3AumvC0Zy2cj6GZfXsQ9LFWd6oyefB6a3LVCJ
+	2tKsqb+1wGtlfsRAiu4/IyQIoQYxOjA=
+ARC-Authentication-Results: i=1;
+	imf10.hostedemail.com;
+	dkim=none;
+	spf=pass (imf10.hostedemail.com: domain of liuyibin@hygon.cn designates 101.204.27.37 as permitted sender) smtp.mailfrom=liuyibin@hygon.cn;
+	dmarc=pass (policy=none) header.from=hygon.cn
+ARC-Seal: i=1; s=arc-20220608; d=hostedemail.com; t=1776737496; a=rsa-sha256;
+	cv=none;
+	b=TAxw7vxpAXTHFZC6iZIdrtlWcdzMAoUeMlkXtk+hk66wVGUY7PGCyfUIGdnpStpQcc9/z2
+	12ygcfUJXtnQP8Oyzo/P/rPfHtFwMM5nJCyPdSGqy/e0bq2oGpAywzu5sDyRx45GCwHlep
+	gYFTWpRSdYqu5JCWY2M8JCApCvUEBw8=
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g05SY10zgz1YQpmD;
+	Tue, 21 Apr 2026 10:11:25 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g05SV5qYMz1YQpmD;
+	Tue, 21 Apr 2026 10:11:22 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id 02B014B4C;
+	Tue, 21 Apr 2026 10:11:18 +0800 (CST)
+Received: from jianyong.hygon.cn (172.19.20.52) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Tue, 21 Apr
+ 2026 10:11:13 +0800
+From: Yibin Liu <liuyibin@hygon.cn>
+To: <linux-mm@kvack.org>
+CC: <akpm@linux-foundation.org>, <Liam.Howlett@oracle.com>,
+	<viro@zeniv.linux.org.uk>, <brauner@kernel.org>, <mjguzik@gmail.com>,
+	<wujianyong@hygon.cn>, <huangsj@hygon.cn>, <zhongyuan@hygon.cn>
+Subject: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap sharing
+Date: Tue, 21 Apr 2026 10:09:32 +0800
+Message-ID: <20260421020932.3212532-1-liuyibin@hygon.cn>
+X-Mailer: git-send-email 2.43.0
+MIME-Version: 1.0
+Content-Transfer-Encoding: 8bit
+Content-Type: text/plain
+X-Originating-IP: [172.19.20.52]
+X-ClientProxiedBy: cncheex06.Hygon.cn (172.23.18.116) To cncheex04.Hygon.cn
+ (172.23.18.114)
+X-Stat-Signature: bpae81fnzysnmjuh8m8src1amydad5ex
+X-Rspam-User: 
+X-Rspamd-Server: rspam02
+X-Rspamd-Queue-Id: 6F9A2C000E
+X-HE-Tag: 1776737493-843570
+X-HE-Meta: U2FsdGVkX19bNqs117w/qdJfMoYN5I8/DPuhogKVIhG3a4ldvKO37EBSE6JnJxdzfghKDVmJo2Dpfbpaz7sgT8l4Iybbeaz4dV0n1phE/fO/KJYHGIL2ZxcztbVuztqSw7gZsnMBzw8kGmEpuBSfKRdzmgNKIXTzuYTk8bNEeydCOhTBTsxjEJYGSJExcKeKQZIDKyHI8mR/fTH3G51gSGr+mRrmmtoM+dKSQS4XOMHQk4zMZO1R8dt0qOMkD2gUJomvHmuyl9CPH08VNMmsSddQdJB882b0PeK/3SdBNSu6c5gQ8HM4wszShTfp5fifF+ZoxRbn1Wb2kM87HYAd/MruldxRN3jVObDYafNyMtML/wO2xBToqLDTCQMQk4LDMWQsgmXY9KDpcMpAdSkLlfm2fsNduKrb5m8oTgRf73Qt6kLFEm5c1pgNuZxuO6RFTd9mKYlmS72roX16PLN7IGn00NwlZZ7hoWdXLVGPLFLhaSjD4iL3O7bsQKUEfledStOny77orr7vtdRmTxuIonLJkr2W0cswvbpXQHG1EjzacmMaIcj2fTwwE7EgGtrvbHsu3Q7thAkfPLbfi59RwGiJREHoW9KywIaTACM28wUqtQ3M8Cw4PhZgraikjU/v+fUhLlemKwsK9D8Nl+eXrTjQlD49XkWXvH3RWRTr4aBHz6nRBKYHKT28naLmAVD0yHdd6PZaM88T3aqiFUM/o8hBJKKqJ/uCbbde55bpdpDhFVQ0D5dZgcxHDNVMWuYbk/83a5iDejR8c4DOD/E7muabOhCouBV4Vls7MW6jc5FtJTTfc+iUsZw9OWECBKVWszcKkXXempLht/dLbm14VaL+MDctT8XBSRfz3WP1avxPoIxYdUZYxSzwl8Lx8l3eLQy37gvYw7CxMq+xhUYQaKLtmnWbxhhFSdEa+ApWXfHD+ZKP/GOm5YHxLF1jU+bI1F5dmSQVNxJ3oBGJ4mX
+ eVWWWhvY
+ wXZeixOe+whKVplk8jhb7QDlxharfIGO8R0GFE68pdgt9zvsdLOmXkoG2T8o87jb3Z26BNJdjaW/ewENkrxcVHx5UDoIUvuzVdsNIdpj94ZRnA8JuN8o7RoxJWzoFQdOJw6hgRqzjYZYknonad2xU5gFM6b1P1NfLqOdwPcv/n628kxfkmj+tFBgsp3Y4GAEC6o0UBCA8uzTcFFxVp4qByCvccV85ZIZfWkvu7EWBll3ivdWjThj4Gpl9MPHFyT4oVrPvqNkeCHjZw8dG50N/vesIQsiYbI+8kfA8BRd3SRWc0kmO4bCsjVa09REGLz2PtYVwTfRgp3Ad+dRqb5t6qT8gjBhZ+NXOYVvSgMF1t9vRvqkuS+Za2YgxaGBNLRbptsRoqB+9DqSDppbOogpvbUCWFPr9GKiMEyVeoUBAtHAANESbzFyZ0KYth5O2t3560bq5D4lF3NDXBRE=
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+UnixBench execl/shellscript (dynamically linked binaries) at 64+ cores are
+bottlenecked on the i_mmap_rwsem semaphore due to heavy vma insert/remove
+operations on the i_mmap tree, where libc.so.6 is the most frequent,
+followed by ld-linux-x86-64.so.2 and the test executable itself.
+
+This patch marks such files to skip rmap operations, avoiding frequent
+interval tree insert/remove that cause i_mmap_rwsem lock contention.
+The downside is these files can no longer be reclaimed (along with compact
+and ksm), but since they are small and resident anyway, it's acceptable.
+When all mapping processes exit, files can still be reclaimed normally.
+
+Performance testing shows ~80% improvement in UnixBench execl/shellscript
+scores on Hygon 7490, AMD zen4 9754 and Intel emerald rapids platform.
+
+Signed-off-by: Yibin Liu <liuyibin@hygon.cn>
+---
+ fs/fcntl.c                 | 1 +
+ fs/open.c                  | 6 ++++++
+ include/linux/fs.h         | 3 +++
+ include/uapi/linux/fcntl.h | 1 +
+ mm/mmap.c                  | 3 ++-
+ mm/vma.c                   | 8 +++++---
+ 6 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/fs/fcntl.c b/fs/fcntl.c
+index beab8080badf..9b7cc1544735 100644
+--- a/fs/fcntl.c
++++ b/fs/fcntl.c
+@@ -349,6 +349,7 @@ static bool rw_hint_valid(u64 hint)
+ 	case RWH_WRITE_LIFE_MEDIUM:
+ 	case RWH_WRITE_LIFE_LONG:
+ 	case RWH_WRITE_LIFE_EXTREME:
++	case RWH_RMAP_EXCLUDE:
+ 		return true;
+ 	default:
+ 		return false;
+diff --git a/fs/open.c b/fs/open.c
+index 681d405bc61e..643ab7c6b461 100644
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -46,6 +46,10 @@ int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry,
+ 	if (length < 0)
+ 		return -EINVAL;
+ 
++	/* Prevent truncate on files marked as RMAP_EXCLUDE (e.g., libc, ld.so) */
++	if (filp && (filp->f_mode & FMODE_RMAP_EXCLUDE))
++		return -EPERM;
++
+ 	newattrs.ia_size = length;
+ 	newattrs.ia_valid = ATTR_SIZE | time_attrs;
+ 	if (filp) {
+@@ -892,6 +896,8 @@ static int do_dentry_open(struct file *f,
+ 	path_get(&f->f_path);
+ 	f->f_inode = inode;
+ 	f->f_mapping = inode->i_mapping;
++	if (inode->i_write_hint == RWH_RMAP_EXCLUDE)
++		f->f_mode |= FMODE_RMAP_EXCLUDE;
+ 	f->f_wb_err = filemap_sample_wb_err(f->f_mapping);
+ 	f->f_sb_err = file_sample_sb_err(f);
+ 
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 11559c513dfb..d5c9e5a4c2b9 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -189,6 +189,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+ /* File does not contribute to nr_files count */
+ #define FMODE_NOACCOUNT		((__force fmode_t)(1 << 29))
+ 
++/* File should exclude vma from rmap interval tree */
++#define FMODE_RMAP_EXCLUDE	((__force fmode_t)(1 << 30))
++
+ /*
+  * The two FMODE_NONOTIFY* define which fsnotify events should not be generated
+  * for an open file. These are the possible values of
+diff --git a/include/uapi/linux/fcntl.h b/include/uapi/linux/fcntl.h
+index aadfbf6e0cb3..4969b4762071 100644
+--- a/include/uapi/linux/fcntl.h
++++ b/include/uapi/linux/fcntl.h
+@@ -72,6 +72,7 @@
+ #define RWH_WRITE_LIFE_MEDIUM	3
+ #define RWH_WRITE_LIFE_LONG	4
+ #define RWH_WRITE_LIFE_EXTREME	5
++#define RWH_RMAP_EXCLUDE	6
+ 
+ /*
+  * The originally introduced spelling is remained from the first
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 2311ae7c2ff4..3eb00997e86a 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1830,7 +1830,8 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 				mapping_allow_writable(mapping);
+ 			flush_dcache_mmap_lock(mapping);
+ 			/* insert tmp into the share list, just after mpnt */
+-			vma_interval_tree_insert_after(tmp, mpnt,
++			if (!(file->f_mode & FMODE_RMAP_EXCLUDE))
++				vma_interval_tree_insert_after(tmp, mpnt,
+ 					&mapping->i_mmap);
+ 			flush_dcache_mmap_unlock(mapping);
+ 			i_mmap_unlock_write(mapping);
+diff --git a/mm/vma.c b/mm/vma.c
+index 377321b48734..f1e36e6a8702 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -234,7 +234,8 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	if (!(vma->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
++		vma_interval_tree_insert(vma, &mapping->i_mmap);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -339,10 +340,11 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 			 struct mm_struct *mm)
+ {
+ 	if (vp->file) {
+-		if (vp->adj_next)
++		if (vp->adj_next && !(vp->adj_next->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
+ 			vma_interval_tree_insert(vp->adj_next,
+ 						 &vp->mapping->i_mmap);
+-		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
++		if (!(vp->vma->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
++			vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+-- 
+2.34.1
+
+
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 8B016F8FA86
+	for <linux-mm@archiver.kernel.org>; Tue, 21 Apr 2026 14:38:55 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id C0B296B0005; Tue, 21 Apr 2026 10:38:54 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id BBB6D6B0088; Tue, 21 Apr 2026 10:38:54 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id AF8766B0089; Tue, 21 Apr 2026 10:38:54 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0010.hostedemail.com [216.40.44.10])
+	by kanga.kvack.org (Postfix) with ESMTP id A13B86B0005
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 10:38:54 -0400 (EDT)
+Received: from smtpin28.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay02.hostedemail.com (Postfix) with ESMTP id 1713613C3FE
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 14:38:54 +0000 (UTC)
+X-FDA: 84682819788.28.73F4FEA
+Received: from casper.infradead.org (casper.infradead.org [90.155.50.34])
+	by imf10.hostedemail.com (Postfix) with ESMTP id A7F76C0002
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 14:38:51 +0000 (UTC)
+Authentication-Results: imf10.hostedemail.com;
+	dkim=pass header.d=infradead.org header.s=casper.20170209 header.b="sYjp/pUC";
+	dmarc=pass (policy=none) header.from=infradead.org;
+	spf=none (imf10.hostedemail.com: domain of willy@infradead.org has no SPF policy when checking 90.155.50.34) smtp.mailfrom=willy@infradead.org
+ARC-Seal: i=1; s=arc-20220608; d=hostedemail.com; t=1776782332; a=rsa-sha256;
+	cv=none;
+	b=kDyRCi0szCc6YakWqwsTOsAYrDWh7m3h10RyjELMQsH3N18VAJJJTTcMqucsj5sFEoI48R
+	3MT76v37samrbv1IiaPOgpUAQu6KBd6BdRoQh7RyfPQeKTALJG5Gi+JelP1ZQ9pYFFfHov
+	mwV51XunH9BDAqtX7hvdCNm3kUjeiVg=
+ARC-Authentication-Results: i=1;
+	imf10.hostedemail.com;
+	dkim=pass header.d=infradead.org header.s=casper.20170209 header.b="sYjp/pUC";
+	dmarc=pass (policy=none) header.from=infradead.org;
+	spf=none (imf10.hostedemail.com: domain of willy@infradead.org has no SPF policy when checking 90.155.50.34) smtp.mailfrom=willy@infradead.org
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776782332;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references:dkim-signature;
+	bh=vxcpXEAJe14k8AFRl2ZZUG/a8v1LTQkJz0YRHAz065Q=;
+	b=jYZ0Xg5IQTCcZ9B3DmQYqykmcZAlvDqcT7ezz+Jq2oArWZf6laC38rzZ0jqutYbEPZUI9k
+	3sTNCGluUdoHsnmC91s9hagbjj6ePhsTnYDisLH7Tt+j7WUt0VjlqLEKwyvsPNZafKoXqX
+	LtGwpQiMBwXzbvq/5USc8OvBH4YOqUA=
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/relaxed;
+	d=infradead.org; s=casper.20170209; h=In-Reply-To:Content-Type:MIME-Version:
+	References:Message-ID:Subject:Cc:To:From:Date:Sender:Reply-To:
+	Content-Transfer-Encoding:Content-ID:Content-Description;
+	bh=vxcpXEAJe14k8AFRl2ZZUG/a8v1LTQkJz0YRHAz065Q=; b=sYjp/pUCS09SsnpT8AOaExyGMF
+	QCmE/suHcQz3RYLWJxkp65JDqIjmpSIl4QJx+Y5kr4hx2EqQ3E3yAPmu50OEkk5a5gQtYFbv4/Twe
+	nXS93XBxj5ZhCtnwJF5X37TTA6soNY8nlyIg+docAg+qQBzH7pCqpHG3pM9oh5+kETJAreohIxyWM
+	Ke2noX0qW7IjyxO4URPmFgctnH6cYRZHbzymwT1FenmnCG5p3kgcKQgwtWkCnjYNPxHiyRAgpTf5R
+	6ZCw7b6xNbbj3N7QlfQO3Z54K2Kwq9HqxPNphX/tagiUDaiLLHQ++slvD6+q0TyiPw+8c38eIK2kS
+	SUL3YTrg==;
+Received: from willy by casper.infradead.org with local (Exim 4.98.2 #2 (Red Hat Linux))
+	id 1wFCFR-0000000AGpJ-1NHJ;
+	Tue, 21 Apr 2026 14:38:45 +0000
+Date: Tue, 21 Apr 2026 15:38:45 +0100
+From: Matthew Wilcox <willy@infradead.org>
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: linux-mm@kvack.org, akpm@linux-foundation.org, Liam.Howlett@oracle.com,
+	viro@zeniv.linux.org.uk, brauner@kernel.org, mjguzik@gmail.com,
+	wujianyong@hygon.cn, huangsj@hygon.cn, zhongyuan@hygon.cn
+Subject: Re: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+Message-ID: <aeeL9TVSZJe3sD6u@casper.infradead.org>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20260421020932.3212532-1-liuyibin@hygon.cn>
+X-Rspamd-Server: rspam10
+X-Stat-Signature: m87deirynst35okab8yd9jqh81np5ash
+X-Rspam-User: 
+X-Rspamd-Queue-Id: A7F76C0002
+X-HE-Tag: 1776782331-848529
+X-HE-Meta: U2FsdGVkX18HAttyMJgNja/LMABkXCfth3Ybthn6wYqQjq6L7GE6gY1Z1JrhfwAMviPURcDFC8Jao1IVOiT3mWA2VyJznVkQ2BNRcddkmVzzbYTbr5Chj6hx4TsdaVaggl4Kexs4oqr9oIGyA+O7DSm4YEro+633ln25n2nlVDpzigvpgQqOmAe+xuQPKi8FFP5WVGzt+W6mMO1Tyrcef7D27VS6g98FGW9/D0QF5+hRTnJ76JBV28L7yl24SHFR7aK1vc87MxZVT537vedOr9GlK3Y0Ggl9BUc3KVpWeYRkA/W/afvhH+BRmUcRF5t9CsM2Ak0/9ZK2MP/vOx8QTROUPVmriCKc11jMuHIZ9RO6WrVBMshb+PUCG4/3ORax6wNiOYndFlM0ZCR4RqJ4B5PeYfSRPNwHMny50wtpK4yV2ppXZ5ejdt3/Oi9UHjVfjImVzA2/+GGMJ+IpqxeRLfyu8KIsIKYOEagYhKNqisV4anFaKV1iLSAK9DTvb2OnJhfVYRJjcoO19pRZh0PyhpuRYrPwcIv9DTAgekE50cVTXDLFfJBAubrLq4z54J4X19rSKSYnMiPHysK57ZLzI+qi8ySEmuG1fpYzAP/DlQGcO0ZK5SFdQq3+lkk9RGmlcHDbQ2aMU6KpL8kCG2vGgc617sacsZKrr89O902PstUg/OTBta+XIzGSfrc/5Sb9GMRCgXyP53BI9qFwYvHlwOTZL07zJwuSO7MrEvUM9nRZgdY4dpc4oTn+HOnrGxmRDnUUnr2QyqN1eP7H+7cBV7LTvqLu9E3xdmO7fyjbc3UhNfYkf4lXRwkn17kwcum0fGWnS/+fTRF3h+k81/hmUxKalbu9zwuwzB5zyh+uzJyGP5ESMQS/2hJlSPs7DV16qN15fU6GQjcXibZ5bvAYF6PYz1CnU8lj2jlfTUa0vusCTlMA3JWFdDQJ3RvSRo2XAqZnd16Uf0kkd4/W/OW
+ mhy53jNm
+ rI2AbU+cGPvIVO5NBNMoBCkzJFX/w6ZuZeisarUHGXyA1Feuz1/kRLFUueHnptMs8gSe3mdF+8dZnOeTDRmG+oO7IfmvUqt4fOtMOPJzV0Y47eQCVi7xKmXNqFlZ/5c6JaCeQKKxvdu97y2sdH0T71AYuNQvTZM5o5r89cY54fahPSqAZPuDhBEPE7zysbxutgAO2HMXGnHDXv3yTsrNsK52W0iJ9cDFpui7h4M29qW/v2N8ecdK396+gYpEVIugKU7A9hAHX860R09Ffr+cCOKIs2haG2XL7Zhe5jEvbzcdBXuYKUnO1wSo7NqmqNhN3/RNT/tqL+X4BnMU=
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+On Tue, Apr 21, 2026 at 10:09:32AM +0800, Yibin Liu wrote:
+> +	/* Prevent truncate on files marked as RMAP_EXCLUDE (e.g., libc, ld.so) */
+> +	if (filp && (filp->f_mode & FMODE_RMAP_EXCLUDE))
+> +		return -EPERM;
+
+You can't do this.  It means I can prevent anybody else from truncating
+a file which I can open.
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 5C7EFF8FA90
+	for <linux-mm@archiver.kernel.org>; Tue, 21 Apr 2026 15:37:32 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id B03996B0088; Tue, 21 Apr 2026 11:37:31 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id AB40B6B0089; Tue, 21 Apr 2026 11:37:31 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id 9A4356B008C; Tue, 21 Apr 2026 11:37:31 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0010.hostedemail.com [216.40.44.10])
+	by kanga.kvack.org (Postfix) with ESMTP id 85EB36B0088
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 11:37:31 -0400 (EDT)
+Received: from smtpin24.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay05.hostedemail.com (Postfix) with ESMTP id 1C2825E292
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 15:37:31 +0000 (UTC)
+X-FDA: 84682967502.24.D002F37
+Received: from smtp-out1.suse.de (smtp-out1.suse.de [195.135.223.130])
+	by imf11.hostedemail.com (Postfix) with ESMTP id CA7D340010
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 15:37:28 +0000 (UTC)
+Authentication-Results: imf11.hostedemail.com;
+	dkim=pass header.d=suse.de header.s=susede2_rsa header.b=Gw+ND6w8;
+	dkim=pass header.d=suse.de header.s=susede2_ed25519 header.b=8Ui9Z02f;
+	dkim=pass header.d=suse.de header.s=susede2_rsa header.b=Gw+ND6w8;
+	dkim=pass header.d=suse.de header.s=susede2_ed25519 header.b=8Ui9Z02f;
+	spf=pass (imf11.hostedemail.com: domain of pfalcato@suse.de designates 195.135.223.130 as permitted sender) smtp.mailfrom=pfalcato@suse.de;
+	dmarc=pass (policy=none) header.from=suse.de
+ARC-Seal: i=1; s=arc-20220608; d=hostedemail.com; t=1776785849; a=rsa-sha256;
+	cv=none;
+	b=jGlO7jjV3NMri7PixPnfsjuRVmf4Z8vuua9m9UZZypk/93m5XYiE8J5wiqc1bfdFnL6z4X
+	ebKZMLceOy0GqmeNkZHJEh6gUIQzu+U1rauOIG5ypfWxUk0bEz3aFE1ySTiiFPy3Ccgnmn
+	Xw7BfcSViijjKkhz2ElEyEpdRGE8/Yg=
+ARC-Authentication-Results: i=1;
+	imf11.hostedemail.com;
+	dkim=pass header.d=suse.de header.s=susede2_rsa header.b=Gw+ND6w8;
+	dkim=pass header.d=suse.de header.s=susede2_ed25519 header.b=8Ui9Z02f;
+	dkim=pass header.d=suse.de header.s=susede2_rsa header.b=Gw+ND6w8;
+	dkim=pass header.d=suse.de header.s=susede2_ed25519 header.b=8Ui9Z02f;
+	spf=pass (imf11.hostedemail.com: domain of pfalcato@suse.de designates 195.135.223.130 as permitted sender) smtp.mailfrom=pfalcato@suse.de;
+	dmarc=pass (policy=none) header.from=suse.de
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776785849;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references:dkim-signature;
+	bh=uw6IqRgEY+vfODXlHN+dJEEHwH2Tp0tErQxt88DIksk=;
+	b=NRRNx1l4UwgRQWRStZajfTeWLepMD5MGJ8LkaFMMpMTEqqPNNBr2EBnOnq0nopXJ4vqfcc
+	rpHquYWmpAEotkOXT5dVbEMvELZ7CdfiWJ01HT6AhzfjsPPoNV7si+uR090EQNuYUXYc4P
+	wQA+nQOie2HUjtHhgV+m5Q57Xn2mb6g=
+Received: from imap1.dmz-prg2.suse.org (unknown [10.150.64.97])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (4096 bits) server-digest SHA256)
+	(No client certificate requested)
+	by smtp-out1.suse.de (Postfix) with ESMTPS id 218146A802;
+	Tue, 21 Apr 2026 15:37:27 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=suse.de; s=susede2_rsa;
+	t=1776785847; h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=uw6IqRgEY+vfODXlHN+dJEEHwH2Tp0tErQxt88DIksk=;
+	b=Gw+ND6w8gPbPHzST4PKoNQC+2YuZUQJtnTjkvOMqRdTnOFpMqZdkRrtjy3tA2d1EFJbwgm
+	ocC2SMaZqAXcAFDwm0VAEb55FQ5lO2EA4GgkQIrs8ZqZyd0xDWXTqaqOBlx/RPLQWy6xCf
+	DN8ZrstU1pgrYfYjWDgrTstVxHIirKk=
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=suse.de;
+	s=susede2_ed25519; t=1776785847;
+	h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=uw6IqRgEY+vfODXlHN+dJEEHwH2Tp0tErQxt88DIksk=;
+	b=8Ui9Z02fzXv6Zg3rbtQ4Cd7jnOMKlzqH/EH27AsbLYw9La9F6+Y1DvzY4tAtCrcKQ209h9
+	pYZd1+PQvfKDshCA==
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=suse.de; s=susede2_rsa;
+	t=1776785847; h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=uw6IqRgEY+vfODXlHN+dJEEHwH2Tp0tErQxt88DIksk=;
+	b=Gw+ND6w8gPbPHzST4PKoNQC+2YuZUQJtnTjkvOMqRdTnOFpMqZdkRrtjy3tA2d1EFJbwgm
+	ocC2SMaZqAXcAFDwm0VAEb55FQ5lO2EA4GgkQIrs8ZqZyd0xDWXTqaqOBlx/RPLQWy6xCf
+	DN8ZrstU1pgrYfYjWDgrTstVxHIirKk=
+DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed; d=suse.de;
+	s=susede2_ed25519; t=1776785847;
+	h=from:from:reply-to:date:date:message-id:message-id:to:to:cc:cc:
+	 mime-version:mime-version:content-type:content-type:
+	 in-reply-to:in-reply-to:references:references;
+	bh=uw6IqRgEY+vfODXlHN+dJEEHwH2Tp0tErQxt88DIksk=;
+	b=8Ui9Z02fzXv6Zg3rbtQ4Cd7jnOMKlzqH/EH27AsbLYw9La9F6+Y1DvzY4tAtCrcKQ209h9
+	pYZd1+PQvfKDshCA==
+Received: from imap1.dmz-prg2.suse.org (localhost [127.0.0.1])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (4096 bits) server-digest SHA256)
+	(No client certificate requested)
+	by imap1.dmz-prg2.suse.org (Postfix) with ESMTPS id 63744593AF;
+	Tue, 21 Apr 2026 15:37:26 +0000 (UTC)
+Received: from dovecot-director2.suse.de ([2a07:de40:b281:106:10:150:64:167])
+	by imap1.dmz-prg2.suse.org with ESMTPSA
+	id uldnE7aZ52lRDwAAD6G6ig
+	(envelope-from <pfalcato@suse.de>); Tue, 21 Apr 2026 15:37:26 +0000
+Date: Tue, 21 Apr 2026 16:37:24 +0100
+From: Pedro Falcato <pfalcato@suse.de>
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: linux-mm@kvack.org, akpm@linux-foundation.org, Liam.Howlett@oracle.com, 
+	viro@zeniv.linux.org.uk, brauner@kernel.org, mjguzik@gmail.com, wujianyong@hygon.cn, 
+	huangsj@hygon.cn, zhongyuan@hygon.cn
+Subject: Re: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+Message-ID: <rbc5ezm4uuzbcfaah6w6em6ndfbhamiug5jmp6srovqsx7u2zv@nvyvigon4hcw>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20260421020932.3212532-1-liuyibin@hygon.cn>
+X-Rspamd-Queue-Id: CA7D340010
+X-Stat-Signature: t97shwwkbxaoqibbhx6tzehdycsk5wk5
+X-Rspam-User: 
+X-Rspamd-Server: rspam09
+X-HE-Tag: 1776785848-209806
+X-HE-Meta: U2FsdGVkX1+YKpQa+dUnmMJJFuSDZXcsoBiRg4Dku/+KmVR1MD+WQKh//a9nHsXnxIzobNnvbGZqNDXcekDfTZMs9LyTWm4Ax3YnTeHg/3IARbXzMXsiMynBLN7DaeAlgmC97Bj0PP5ZsDo8w7Mery2bPy19DaE9OtSqqLFbs6rZMDq8pAgEnBBYMV6io+kASs+aFnmmvFuuV618+LAL+jkc+s3Le1kgJfhCxP/ckQ21stIQpYmaXpeC1SjBxSX8A+cQPKEuy2+6bwO0ukwTe/ltLsAHWpazYEW0IzqzezKkWRR2cxgkFJ5UzHCGCDMp2qWWlT5J8u5ODXxNALQSPPFV3FvCoAFhsnVT5cqSk6I+N05kZpl7ppFF1bUIZxXCjWxzPlPgSypRk3+CNLxUun2L10PjRnQqPvHyaLnWp76OICuYNPeJGRZEm+Kf4BmOC83qzN9aBaB92hfcbBR0OOy1IYiPn+diCX0KrtxJlNES7fY0cLeHkyY7GbApY+LjeG+a8/kD9/ueHqx0+jneikz/ovHSYCzTgd5VBwhzNhto5HEDS1jpvt12JaQQcQz+a/wx8/pTGY3Q2moCWdnLAZOCwIbWtuFOhsHRz8sq4Wc1Ubh3T9Ppl/iADXbSe7gFa/uxHiQkhS2GBgKbLBF+tsLRlUcD637fRBfbBaIobRWKDVUaLjZkjM3jRNSnsXCp4ehnDHLbz7fxYsFFMuUM219lANt8SBxjIKnrqlP0iCWEsqjZFtvp3sa71cRZhYq0+sRvn+OdXKGmYxpQQhxX5Mw1S2NkDNLmzJ4PUaG5Nl5iJRs0fDQH1mpwhftpmaRMuCIHtWQ0w8bsX1avQDXWO6CWuYgZyQtkgnEO7ez88jyaIjLuBBFUrdOIaBuwha9gwzHjE35kf6CxNn36aLEjkgf/2/YQH/Ui/xe2dxRhAzITlZq57pJiaIW3BnMBhDpU51vXJOFNwuEhZ7exc9i
+ NNZIntfR
+ Niv/tEgkME/vRrmV/lXaYURg+cO6Rh2Nz6S7uh8p7nBdRY9VXe3PxC/LG1bh0mJzwdr0eNCp8hs8PcM/nynWwdHlbKK5w7EpLodObHwN/E1XNiTuRmUhaGTZDQ148NyCskt2UP4ok8bp3H2HG07CCWuS6KKo5Tml0i3cDT8IxVHML7ibwZpMv3QdTgGlsKLzDq9XKd7R4kBv7qurGLNk73LvIoGjPXSor9pbLW14QMFF/o8l8JQY05CPF02erUdk9yA98x6R25sprfT3frkhpHsKHWOP2WlJTV9U5O+hckpE5lfmGYJLFU32uFL0d56tMnRIwzawjkbjqAMT2rYy+WdzfN5Mke6Hkhcce
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+I'm not sure how you're using get_maintainer.pl, but PLEASE CC people
+correctly.
+
+On Tue, Apr 21, 2026 at 10:09:32AM +0800, Yibin Liu wrote:
+> UnixBench execl/shellscript (dynamically linked binaries) at 64+ cores are
+> bottlenecked on the i_mmap_rwsem semaphore due to heavy vma insert/remove
+> operations on the i_mmap tree, where libc.so.6 is the most frequent,
+> followed by ld-linux-x86-64.so.2 and the test executable itself.
+> 
+> This patch marks such files to skip rmap operations, avoiding frequent
+> interval tree insert/remove that cause i_mmap_rwsem lock contention.
+> The downside is these files can no longer be reclaimed (along with compact
+
+This does not work.
+
+> and ksm), but since they are small and resident anyway, it's acceptable.
+
+Which ones? ELF executables commonly have a lot of padding. How do you know
+what to mark as !no_rmap? Who has permissions for that? This patch allows
+any user to create a full DoS of the system by simply marking a really large
+file as no-reclaim.
+
+> When all mapping processes exit, files can still be reclaimed normally.
+> 
+> Performance testing shows ~80% improvement in UnixBench execl/shellscript
+> scores on Hygon 7490, AMD zen4 9754 and Intel emerald rapids platform.
+> 
+> Signed-off-by: Yibin Liu <liuyibin@hygon.cn>
+> ---
+>  fs/fcntl.c                 | 1 +
+>  fs/open.c                  | 6 ++++++
+>  include/linux/fs.h         | 3 +++
+>  include/uapi/linux/fcntl.h | 1 +
+>  mm/mmap.c                  | 3 ++-
+>  mm/vma.c                   | 8 +++++---
+>  6 files changed, 18 insertions(+), 4 deletions(-)
+> 
+> diff --git a/fs/fcntl.c b/fs/fcntl.c
+> index beab8080badf..9b7cc1544735 100644
+> --- a/fs/fcntl.c
+> +++ b/fs/fcntl.c
+> @@ -349,6 +349,7 @@ static bool rw_hint_valid(u64 hint)
+>  	case RWH_WRITE_LIFE_MEDIUM:
+>  	case RWH_WRITE_LIFE_LONG:
+>  	case RWH_WRITE_LIFE_EXTREME:
+> +	case RWH_RMAP_EXCLUDE:
+>  		return true;
+>  	default:
+>  		return false;
+> diff --git a/fs/open.c b/fs/open.c
+> index 681d405bc61e..643ab7c6b461 100644
+> --- a/fs/open.c
+> +++ b/fs/open.c
+> @@ -46,6 +46,10 @@ int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry,
+>  	if (length < 0)
+>  		return -EINVAL;
+>  
+> +	/* Prevent truncate on files marked as RMAP_EXCLUDE (e.g., libc, ld.so) */
+> +	if (filp && (filp->f_mode & FMODE_RMAP_EXCLUDE))
+> +		return -EPERM;
+> +
+>  	newattrs.ia_size = length;
+>  	newattrs.ia_valid = ATTR_SIZE | time_attrs;
+>  	if (filp) {
+> @@ -892,6 +896,8 @@ static int do_dentry_open(struct file *f,
+>  	path_get(&f->f_path);
+>  	f->f_inode = inode;
+>  	f->f_mapping = inode->i_mapping;
+> +	if (inode->i_write_hint == RWH_RMAP_EXCLUDE)
+> +		f->f_mode |= FMODE_RMAP_EXCLUDE;
+>  	f->f_wb_err = filemap_sample_wb_err(f->f_mapping);
+>  	f->f_sb_err = file_sample_sb_err(f);
+>  
+> diff --git a/include/linux/fs.h b/include/linux/fs.h
+> index 11559c513dfb..d5c9e5a4c2b9 100644
+> --- a/include/linux/fs.h
+> +++ b/include/linux/fs.h
+> @@ -189,6 +189,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+>  /* File does not contribute to nr_files count */
+>  #define FMODE_NOACCOUNT		((__force fmode_t)(1 << 29))
+>  
+> +/* File should exclude vma from rmap interval tree */
+> +#define FMODE_RMAP_EXCLUDE	((__force fmode_t)(1 << 30))
+> +
+>  /*
+>   * The two FMODE_NONOTIFY* define which fsnotify events should not be generated
+>   * for an open file. These are the possible values of
+> diff --git a/include/uapi/linux/fcntl.h b/include/uapi/linux/fcntl.h
+> index aadfbf6e0cb3..4969b4762071 100644
+> --- a/include/uapi/linux/fcntl.h
+> +++ b/include/uapi/linux/fcntl.h
+> @@ -72,6 +72,7 @@
+>  #define RWH_WRITE_LIFE_MEDIUM	3
+>  #define RWH_WRITE_LIFE_LONG	4
+>  #define RWH_WRITE_LIFE_EXTREME	5
+> +#define RWH_RMAP_EXCLUDE	6
+
+Userspace does not know what "rmap" is, nor does it need to know. Even if you
+found a workable solution for the permission side, this is not a good solution,
+and it's not a good interface. It also might solve it for you, but definitely
+does not solve the whole issue with having a lock there (which you are, for
+the record, still acquiring).
+
+-- 
+Pedro
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id D3880F94CA9
+	for <linux-mm@archiver.kernel.org>; Tue, 21 Apr 2026 19:47:04 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id 419F56B0089; Tue, 21 Apr 2026 15:47:04 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id 3CBAB6B008A; Tue, 21 Apr 2026 15:47:04 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id 2BC9C6B008C; Tue, 21 Apr 2026 15:47:04 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0011.hostedemail.com [216.40.44.11])
+	by kanga.kvack.org (Postfix) with ESMTP id 19C096B0089
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 15:47:04 -0400 (EDT)
+Received: from smtpin13.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay01.hostedemail.com (Postfix) with ESMTP id A8296E6226
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 19:47:03 +0000 (UTC)
+X-FDA: 84683596326.13.D4DA7B0
+Received: from mail-ed1-f48.google.com (mail-ed1-f48.google.com [209.85.208.48])
+	by imf03.hostedemail.com (Postfix) with ESMTP id 981592000E
+	for <linux-mm@kvack.org>; Tue, 21 Apr 2026 19:47:01 +0000 (UTC)
+Authentication-Results: imf03.hostedemail.com;
+	dkim=pass header.d=gmail.com header.s=20251104 header.b=oIvgqvF9;
+	spf=pass (imf03.hostedemail.com: domain of mjguzik@gmail.com designates 209.85.208.48 as permitted sender) smtp.mailfrom=mjguzik@gmail.com;
+	dmarc=pass (policy=none) header.from=gmail.com;
+	arc=pass ("google.com:s=arc-20240605:i=1")
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776800821;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:
+	 content-transfer-encoding:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references:dkim-signature;
+	bh=Rpo02j8/66VoDG/NLu/upMgvf+nWTnCg0I+kiKS+Djg=;
+	b=Udu71SOJZgz656nZoga+2ZYyGVPsL5TDeRyjZIbC6xHPP4mMF48b0GlwZaDcp+BDi3Ljzv
+	Xa8BzFSCl1koZGdiImFtuCU+re2mBndg4xteowvSqPG0LPr0du3HHHAmjSdJVHfsBXrZC5
+	vUQW8+foWv2xRI+x8yKVzD2HRBTVEdE=
+ARC-Authentication-Results: i=2;
+	imf03.hostedemail.com;
+	dkim=pass header.d=gmail.com header.s=20251104 header.b=oIvgqvF9;
+	spf=pass (imf03.hostedemail.com: domain of mjguzik@gmail.com designates 209.85.208.48 as permitted sender) smtp.mailfrom=mjguzik@gmail.com;
+	dmarc=pass (policy=none) header.from=gmail.com;
+	arc=pass ("google.com:s=arc-20240605:i=1")
+ARC-Seal: i=2; s=arc-20220608; d=hostedemail.com; t=1776800821; a=rsa-sha256;
+	cv=pass;
+	b=D5AAMwZCCE9yypsZUmGmuFI1K9+xEisDookMrhCYae/GiPY9m/5RTNW8TjlB1/TePMszq8
+	M5NflUjBsOaWn3+W50zQGu4gquOBUTf+TSabhrQvncw8cjvprXTy5nODyDK7R2i3D0FdzG
+	nly8TUs1M0ZKfMHOQJDmRLoIW6frDkA=
+Received: by mail-ed1-f48.google.com with SMTP id 4fb4d7f45d1cf-67179ed133dso5207764a12.2
+        for <linux-mm@kvack.org>; Tue, 21 Apr 2026 12:47:01 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1776800820; cv=none;
+        d=google.com; s=arc-20240605;
+        b=A/FY7kJfPUDWY/gaauKNYPryRKjeOA4mK1o43dpnwuJpCpOEKZQ71en0eA38fIAeWb
+         T8BfKyFerA0MB4AmW3aOtClMKR0EPb6DP4EaEn7R24IkWTVoG7FR2sIB3Oz331EeYx61
+         HXkZNCvPnlajz2rnMc1X4T05ro+0zOiEo/WhkVLeM2aBAYxAmEPMt0raiR7JMsQPT4NV
+         yVGS1KwAibBcV0rXdnEmAL8RWpj9wkH161O3nmsuQ0F3EOOq5Brx1McGnqXAQAg8Xjgl
+         BtkP1Kd6zLn+pG7L/5OjRKXIylHqIsmdr22jHEAQ643f/ngf+mkEYdi7y9CRiRU8G3bN
+         Da+w==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:dkim-signature;
+        bh=Rpo02j8/66VoDG/NLu/upMgvf+nWTnCg0I+kiKS+Djg=;
+        fh=nq+rPghRVhf0kxcxs9KWeNeVMTXw4foOCEAHByqeQ2c=;
+        b=XiKF22IFAADzakx4UzT75nE77ybZLcBVkPJO3rc9iuzPldnfdqUd3CRMdmleeT+GOZ
+         PpaJotx0F2QH4uMe7189ZqJu4xv+zupresxfMS8OcXnef7tuaXfkHClPZYAXvXaIyyaI
+         V62IGYbOZsq9JF0FVfDHaRxOgaNbPvFnmb+lUR/Z2kDu7YuqCgaBCPBjWrmuN6j8BImj
+         3M0sGVDufmeu/u1RMTGF++DCCTaEGmQO4qpmi7juSLjK0dEUGu1ifjOohtBJ5HhGaSag
+         Qjy/PYau3tboGVqslYAXYgXlZYUk3YlmrsLkf1s2xwtmP5hhx9jVfnnbLxj3RRl2elJ6
+         SnsQ==;
+        darn=kvack.org
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1776800820; x=1777405620; darn=kvack.org;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=Rpo02j8/66VoDG/NLu/upMgvf+nWTnCg0I+kiKS+Djg=;
+        b=oIvgqvF9Q6R0vJyvDcZzkeBbAQvFdrx9a3GxkIjcYOLdERy28M+NUjGHtsd4FvEl2i
+         bmyQoP14E1cAVb1XkZ+cSqMGGooBGMKgl1I08ZobROHWbt5IPdMqkatiPerzm9EPhT4x
+         xXYj1LeyuiqwBEaMpKfNF/rrnlLu/954u00xL+JDueVfGifQRsWxcGLkRd5DZYMQAtlw
+         aM2wB5Rzz6wC9AZ7i3+LfuRlk/DuAIc6Sy6WOhIBAk77hLIwYjcRlE83h2yCQ7I1o1pK
+         8m1JB7mBG2KkXR6u07xO2aTEJ0bHnsj6artCX/keZdUl3qcZc3ReM9ZMUuWdXwrN/9tg
+         j9aw==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1776800820; x=1777405620;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:x-gm-gg:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to;
+        bh=Rpo02j8/66VoDG/NLu/upMgvf+nWTnCg0I+kiKS+Djg=;
+        b=F9c7rYnimWH4sirSMeNFqyWML1RxUFy1G7iPgl8NWuNttwl3j/MU14HYc0BHIFHW2r
+         ZafE5M7X/D5OHjSQ4Vsc/G8bccJ2/X5S1p5wNq38stKjQki8fwa3rCq7j5tD2VInqNqC
+         5o5Nj0mEz26wTVL5+sZ5pjeTUGuvtAFM2HA1EAoBeEush7+3mdeaFo/v4qWvNlP99Z4L
+         Rp+rrFqizPO1osLhrjDlxcztsosqUZ2s0ko9cU0yGNtKOeZRPH6M4PF/1DALhTyCvzA6
+         O3O28g1XTRq9gcm4SaDeYjZhlDEKSzc/Qi+to3o9Lsmj8RQ98HG0guL8IpdfE4z3T5W4
+         JfhA==
+X-Gm-Message-State: AOJu0YzV8Ys4pHvPwfb5n/Q5d3T6te51/ro7EOPKyrVWMgX0XhLzoyur
+	twf0t20EobrbT/7saSi5106V7K1unEqoIBr4IGgxdF8fmg/+XoVoHtbUYAfZx/S+vYSoh+AnE8c
+	8R3ONdwX02xOthFVumDADzxjTXHRdlXE=
+X-Gm-Gg: AeBDieth+8kXQpeYnidCMqCyAmqm+jcj4oHJ80kWKEybEjXM3ypmmg7SHRO/2iGyp/K
+	+B8r+QnLFfYK2KhRWBkfbCWQNRH8PPMuHXWsxkfxEtfs3NOzh9fFIQm8+afa+LvLb0Fi3C6QODp
+	v7mP7neDl7hRcOXpL7rdvsdWWwG3R5GTwfkZ/0+QCYXMM1V7LLYZUBMgAJPbAvgUgey5MqooMHV
+	cLIYIPBRuH79gXo2KEGmb4pR22UcNdg3JnadWFjU1R3jfO1pP9Etjybj+Vnlm/+gYGgdP/LUV4r
+	9JUqMJhJ8oFxOWBzv8CyTUsmAa0VaA2LG4jwaf97mZrGoUeh
+X-Received: by 2002:aa7:c917:0:b0:672:f3e:1475 with SMTP id
+ 4fb4d7f45d1cf-672bfda7c43mr6538765a12.12.1776800819653; Tue, 21 Apr 2026
+ 12:46:59 -0700 (PDT)
+MIME-Version: 1.0
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+In-Reply-To: <20260421020932.3212532-1-liuyibin@hygon.cn>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Tue, 21 Apr 2026 21:46:47 +0200
+X-Gm-Features: AQROBzChDJKcwP6MAVoTX03Ymo0fD3gy_UdcVi9TLYI0MQXJstPEsw0AMSmG01M
+Message-ID: <CAGudoHHki3gv-HXXMALePDoC+tmao4oWcYgCo9kXNDkEhW4E4g@mail.gmail.com>
+Subject: Re: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap sharing
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: linux-mm@kvack.org, akpm@linux-foundation.org, Liam.Howlett@oracle.com, 
+	viro@zeniv.linux.org.uk, brauner@kernel.org, wujianyong@hygon.cn, 
+	huangsj@hygon.cn, zhongyuan@hygon.cn
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+X-Stat-Signature: cdh7gymgbic5mny3nib3tqzy88d14r5w
+X-Rspam-User: 
+X-Rspamd-Server: rspam02
+X-Rspamd-Queue-Id: 981592000E
+X-HE-Tag: 1776800821-842179
+X-HE-Meta: U2FsdGVkX19ZzwwIY+JDMI4hQ2qNpoLq6GcYRPgWPqTWmXvvYAAfrNM2SmFTmiVNLeA5Cy0A60jl7My3wDgjRPUCPmJlDJeLTwoXWDkGERvRzypxyyp6CbhLTVYdXGWZ685PqhTqyWBILydwgMKORWNVQMRpuaQuJwKzBO1ygdYoPy/OscgekTONa2PZlfg7qFG+3a+E3ceXjehGy3/Q/K5WB3jcBrIKWY0qNg5PW9GlWtj/OrWiTS7ujc8lehHvsZ+CoN7nCi0Ou4wVSA4kxgcCvJDU6qAmfHDdz7dBZPSrx8loEyWc8rG+4jSaNDM2ccHaYoZ23NTU2tOjFRdQL5wzJxG74W3OZ5Cjwvd6u/WpjyiSi5WshjjLuaXwRGG/hzcI0qqHJhi8B4BJ8kuvoLh41tzmg1FM0A2N00VUyf2m9f0KOPw/cBgpkeJ+NXl1jih34SJh3UVfjlVt3+VK5Q2u/pTU7+5TvBY7NaiqD+0yJ0b2QzO+NJvPNA6qLvRHZoL4jzzSovvBFClfghY2PVxIPKEFUMtGmER8Tycq/8re0soFKOMWwCVddZNxObIu9d5HbVCyGcr/Dkj/gLHy093CW9ceLavvNnhVAG5IcjXDrRpkLsxPufiXW11Zpdh2QK9q06nAEiGo58XJGlSmho2moCRs1t/rXf/yOIdU/4MUSP7/JF6RMaHb8j0jtUMGo17jWXcr1D0+ahIKRheZcxCHZnk1oVSNgSzgHCNUeP86uvqSkv+QQJMup+iXj1R1RgyPDP2j63IZiqH1Z/IhzRXXmVWuOJASqYL2iNgE4zGGLDx7mObAEGcvJ9AcrbMqL1+q55BIkfdXQ/5Qb5dsUxeDZoAefJ5nEW8R20oxGTLqOBWet9Pq7RgIab14WFHo3gMXcf7ri2olvSEQLMWLUlXsGNl6ld9KydA4sxSm4AKImUb2oNTVpDDnLdLsQhcS5Ie9x9/OmIorFcewcq8
+ SyflIRXz
+ bWQ5VYjz/7DlaoF+xSN/OmZIqrV0gSc26BY+giNDiUTpuOabINxwlFdWNvwknRnzqZnVwLbUtGalMjS46FMH38NfaLfwH+ny5RRPBNInLPZf34U3XB3VLE+XRgYznOKPVC8pgDFHcUcb/5L1t52tzjqy+0lslGdQHlvDrzbu2ItTwx+3jWJEP9K4A/p3onEGEiyZ9IrfiIQIpFy3ue7sp1IXW3pOOJBrDHQgR1mkuhkvqYi/pEGMJy7SlbiN9XkFNWpTbRXwJK7TYMeGfmoe8qGnlaHY1+uCYlb9Ddegictej0VtjGSngwYXUe0joPg6tbLEq6MBDjBFMLIZD06xml90KYfRfM0Vl4nKUjs0k4Bay4G5YK04SuBx97jvnZIrRz3jkjRxnFgfDkS6rV9A109u0y6wVtVe+B9YSFSh9cBTwAtq4RbLCivOGftu12+JtlPv9
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+On Tue, Apr 21, 2026 at 4:11=E2=80=AFAM Yibin Liu <liuyibin@hygon.cn> wrote=
+:
+>
+> UnixBench execl/shellscript (dynamically linked binaries) at 64+ cores ar=
+e
+> bottlenecked on the i_mmap_rwsem semaphore due to heavy vma insert/remove
+> operations on the i_mmap tree, where libc.so.6 is the most frequent,
+> followed by ld-linux-x86-64.so.2 and the test executable itself.
+>
+> This patch marks such files to skip rmap operations, avoiding frequent
+> interval tree insert/remove that cause i_mmap_rwsem lock contention.
+> The downside is these files can no longer be reclaimed (along with compac=
+t
+> and ksm), but since they are small and resident anyway, it's acceptable.
+> When all mapping processes exit, files can still be reclaimed normally.
+>
+> Performance testing shows ~80% improvement in UnixBench execl/shellscript
+> scores on Hygon 7490, AMD zen4 9754 and Intel emerald rapids platform.
+>
+
+The other responders have been a little harsh and despite raising
+valid points I don't think they gave a proper review.
+
+The bigger picture is that the problematic rwsem is taken several
+times during fork + exec + exit cycle. Normally you end up with 5
+distinct mappings per binary/so, each created with a separate lock
+acquire.
+
+Some time ago I patched exit to batch processing, leaving 1 acquire in
+that codepath. fork can and should be patched in a similar vein, but I
+don't know if unixbench runs it in this benchmark (i.e., real
+workloads certainly suffer from it, I don't know if this particular
+bench includes that aspect). This is on top of forking itself being
+avoidable should the kernel grow a better interface for executing
+binaries.
+
+This leaves us with mapping creation on exec. This problem is
+unfixable without introduction of better APIs for userspace, which
+constitutes quite a challenge.
+
+The end result is the absolutely horrible case of multiple acquires of
+the same lock per iteration.
+
+One common idea how to reduce contention boils down to shortening lock
+hold time. This has very limited effect in face of the aforementioned
+multiple acquires and is at best a stop gap -- no matter what, the
+ceiling is dictated by the extra acquires and it is incredibly low.
+
+Your patch keeps the problematic acquire pattern intact and while the
+80% win might sound encouraging, the end result is still severely
+underperforming even a state where the lock is taken once in total
+during exec.
+
+Besides that, the internally-visible side effect of non-functional
+rmap is pretty bad (and thus e.g., truncate) is pretty bad in its own
+right, but let's ignore it. The primary problem here is that the patch
+exposes a mechanism for userspace to dictate this in the first place.
+Even ignoring the question of who should be using it and when, the
+real solution to the problem would be confined to the kernel. Suppose
+this patch lands and such a solution is implemented later -- now the
+kernel is stuck having to support a now-useless (if not outright
+harmful) feature.
+
+What will fix the problem is sharding the state in some capacity,
+provided no unfixable stopgap shows up.
+
+Any other approach is putting small bandaids on it and can be a
+consideration only if the decentralizing locking is proven too
+problematic.
+
+Pedro apparently volunteered to do the work, so I think we can wait to
+see what he is going to end up cooking.
+
+I hope this helps.
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 257A5F94CD8
+	for <linux-mm@archiver.kernel.org>; Wed, 22 Apr 2026 07:19:26 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id 915D56B0088; Wed, 22 Apr 2026 03:19:25 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id 8C4C16B008A; Wed, 22 Apr 2026 03:19:25 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id 7B40B6B008C; Wed, 22 Apr 2026 03:19:25 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0010.hostedemail.com [216.40.44.10])
+	by kanga.kvack.org (Postfix) with ESMTP id 670E06B0088
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 03:19:25 -0400 (EDT)
+Received: from smtpin30.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay03.hostedemail.com (Postfix) with ESMTP id 0E5FCBEB6B
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 07:19:25 +0000 (UTC)
+X-FDA: 84685341090.30.6A8D4E3
+Received: from tor.source.kernel.org (tor.source.kernel.org [172.105.4.254])
+	by imf09.hostedemail.com (Postfix) with ESMTP id 49A9E140009
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 07:19:23 +0000 (UTC)
+Authentication-Results: imf09.hostedemail.com;
+	dkim=pass header.d=kernel.org header.s=k20201202 header.b=bqnSDKZX;
+	dmarc=pass (policy=quarantine) header.from=kernel.org;
+	spf=pass (imf09.hostedemail.com: domain of david@kernel.org designates 172.105.4.254 as permitted sender) smtp.mailfrom=david@kernel.org
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776842363;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:
+	 content-transfer-encoding:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references:dkim-signature;
+	bh=8wOP9Y4U3NhqzjMaeXHHD98A+QLvYzRrmFGAUaPAUeM=;
+	b=RctEl03T40hGH2wWfh0ZXK3P50XJo24kZBeigEznzawaxIiIwCJEYHBR3/dk936N+uRY0c
+	v80RpJxIhxily6+dLti97L7hCp5iXcdO181sJbmZWFdWRH/BVjJ3oaVRoRMJsO7B2Vx5vU
+	tG1czygyK7efVrWXrmY7GhH8/ZNTjTY=
+ARC-Authentication-Results: i=1;
+	imf09.hostedemail.com;
+	dkim=pass header.d=kernel.org header.s=k20201202 header.b=bqnSDKZX;
+	dmarc=pass (policy=quarantine) header.from=kernel.org;
+	spf=pass (imf09.hostedemail.com: domain of david@kernel.org designates 172.105.4.254 as permitted sender) smtp.mailfrom=david@kernel.org
+ARC-Seal: i=1; s=arc-20220608; d=hostedemail.com; t=1776842363; a=rsa-sha256;
+	cv=none;
+	b=Qac+l2vKSR5UMt9M7fsNzDSgjb2RaE5bdpt/yA3rFTRsddfPXVcxg+4okkdvldaccfhUyM
+	wWQ/qTZkNz4oqzPtKyF7MCpC1k+W9sEQ+gxDVat2cw6M4MWxed1QVMVUMuHC+Y358dfgGO
+	zCxybJwSgrvAuIXF+Xrdu3S22UWnDSU=
+Received: from smtp.kernel.org (transwarp.subspace.kernel.org [100.75.92.58])
+	by tor.source.kernel.org (Postfix) with ESMTP id 969EA60018;
+	Wed, 22 Apr 2026 07:19:22 +0000 (UTC)
+Received: by smtp.kernel.org (Postfix) with ESMTPSA id 5E0EEC19425;
+	Wed, 22 Apr 2026 07:19:19 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
+	s=k20201202; t=1776842362;
+	bh=nKXNMWUEo1VbeoPSopgvF0WSPb/NT+EHG7TIVj26WSU=;
+	h=Date:Subject:To:Cc:References:From:In-Reply-To:From;
+	b=bqnSDKZXCr+H/gliDf/P2yfcsFo0GD7RbPqm3KaiqOx/JMkml2wvyk+2W7leWkEyw
+	 OnsDTR67hBQL+XoqtI+Bn/MKyBbS6X3aCuE4x1He9cp28m84PKH3ggGM2Lws/iSUgK
+	 dQowFOkvKtNWCY+9QcKX1f2edmhkdWEPK897ZHQazFGV5OCwlWzKV5rqVr68KqvGsu
+	 sKSKls9bnMALR5vIui+1PzyCJ/RXfdO3sebSHCV7zcug5sxTqI79Y06RCo8ANqwi+E
+	 hZ7hmSKMGRZL5+1a6fZ1yAROJhdNEJGIv9g/uQy5jlT17ajZ7Wu2lWD9yWrfoO7a+6
+	 zCrxw8vAXBdFQ==
+Message-ID: <272e2d8b-56b6-4d60-9daa-6743c2fa7209@kernel.org>
+Date: Wed, 22 Apr 2026 09:19:16 +0200
+MIME-Version: 1.0
+User-Agent: Mozilla Thunderbird
+Subject: Re: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+To: Pedro Falcato <pfalcato@suse.de>, Yibin Liu <liuyibin@hygon.cn>
+Cc: linux-mm@kvack.org, akpm@linux-foundation.org, Liam.Howlett@oracle.com,
+ viro@zeniv.linux.org.uk, brauner@kernel.org, mjguzik@gmail.com,
+ wujianyong@hygon.cn, huangsj@hygon.cn, zhongyuan@hygon.cn
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <rbc5ezm4uuzbcfaah6w6em6ndfbhamiug5jmp6srovqsx7u2zv@nvyvigon4hcw>
+From: "David Hildenbrand (Arm)" <david@kernel.org>
+Content-Language: en-US
+Autocrypt: addr=david@kernel.org; keydata=
+ xsFNBFXLn5EBEAC+zYvAFJxCBY9Tr1xZgcESmxVNI/0ffzE/ZQOiHJl6mGkmA1R7/uUpiCjJ
+ dBrn+lhhOYjjNefFQou6478faXE6o2AhmebqT4KiQoUQFV4R7y1KMEKoSyy8hQaK1umALTdL
+ QZLQMzNE74ap+GDK0wnacPQFpcG1AE9RMq3aeErY5tujekBS32jfC/7AnH7I0v1v1TbbK3Gp
+ XNeiN4QroO+5qaSr0ID2sz5jtBLRb15RMre27E1ImpaIv2Jw8NJgW0k/D1RyKCwaTsgRdwuK
+ Kx/Y91XuSBdz0uOyU/S8kM1+ag0wvsGlpBVxRR/xw/E8M7TEwuCZQArqqTCmkG6HGcXFT0V9
+ PXFNNgV5jXMQRwU0O/ztJIQqsE5LsUomE//bLwzj9IVsaQpKDqW6TAPjcdBDPLHvriq7kGjt
+ WhVhdl0qEYB8lkBEU7V2Yb+SYhmhpDrti9Fq1EsmhiHSkxJcGREoMK/63r9WLZYI3+4W2rAc
+ UucZa4OT27U5ZISjNg3Ev0rxU5UH2/pT4wJCfxwocmqaRr6UYmrtZmND89X0KigoFD/XSeVv
+ jwBRNjPAubK9/k5NoRrYqztM9W6sJqrH8+UWZ1Idd/DdmogJh0gNC0+N42Za9yBRURfIdKSb
+ B3JfpUqcWwE7vUaYrHG1nw54pLUoPG6sAA7Mehl3nd4pZUALHwARAQABzS5EYXZpZCBIaWxk
+ ZW5icmFuZCAoQ3VycmVudCkgPGRhdmlkQGtlcm5lbC5vcmc+wsGQBBMBCAA6AhsDBQkmWAik
+ AgsJBBUKCQgCFgICHgUCF4AWIQQb2cqtc1xMOkYN/MpN3hD3AP+DWgUCaYJt/AIZAQAKCRBN
+ 3hD3AP+DWriiD/9BLGEKG+N8L2AXhikJg6YmXom9ytRwPqDgpHpVg2xdhopoWdMRXjzOrIKD
+ g4LSnFaKneQD0hZhoArEeamG5tyo32xoRsPwkbpIzL0OKSZ8G6mVbFGpjmyDLQCAxteXCLXz
+ ZI0VbsuJKelYnKcXWOIndOrNRvE5eoOfTt2XfBnAapxMYY2IsV+qaUXlO63GgfIOg8RBaj7x
+ 3NxkI3rV0SHhI4GU9K6jCvGghxeS1QX6L/XI9mfAYaIwGy5B68kF26piAVYv/QZDEVIpo3t7
+ /fjSpxKT8plJH6rhhR0epy8dWRHk3qT5tk2P85twasdloWtkMZ7FsCJRKWscm1BLpsDn6EQ4
+ jeMHECiY9kGKKi8dQpv3FRyo2QApZ49NNDbwcR0ZndK0XFo15iH708H5Qja/8TuXCwnPWAcJ
+ DQoNIDFyaxe26Rx3ZwUkRALa3iPcVjE0//TrQ4KnFf+lMBSrS33xDDBfevW9+Dk6IISmDH1R
+ HFq2jpkN+FX/PE8eVhV68B2DsAPZ5rUwyCKUXPTJ/irrCCmAAb5Jpv11S7hUSpqtM/6oVESC
+ 3z/7CzrVtRODzLtNgV4r5EI+wAv/3PgJLlMwgJM90Fb3CB2IgbxhjvmB1WNdvXACVydx55V7
+ LPPKodSTF29rlnQAf9HLgCphuuSrrPn5VQDaYZl4N/7zc2wcWM7BTQRVy5+RARAA59fefSDR
+ 9nMGCb9LbMX+TFAoIQo/wgP5XPyzLYakO+94GrgfZjfhdaxPXMsl2+o8jhp/hlIzG56taNdt
+ VZtPp3ih1AgbR8rHgXw1xwOpuAd5lE1qNd54ndHuADO9a9A0vPimIes78Hi1/yy+ZEEvRkHk
+ /kDa6F3AtTc1m4rbbOk2fiKzzsE9YXweFjQvl9p+AMw6qd/iC4lUk9g0+FQXNdRs+o4o6Qvy
+ iOQJfGQ4UcBuOy1IrkJrd8qq5jet1fcM2j4QvsW8CLDWZS1L7kZ5gT5EycMKxUWb8LuRjxzZ
+ 3QY1aQH2kkzn6acigU3HLtgFyV1gBNV44ehjgvJpRY2cC8VhanTx0dZ9mj1YKIky5N+C0f21
+ zvntBqcxV0+3p8MrxRRcgEtDZNav+xAoT3G0W4SahAaUTWXpsZoOecwtxi74CyneQNPTDjNg
+ azHmvpdBVEfj7k3p4dmJp5i0U66Onmf6mMFpArvBRSMOKU9DlAzMi4IvhiNWjKVaIE2Se9BY
+ FdKVAJaZq85P2y20ZBd08ILnKcj7XKZkLU5FkoA0udEBvQ0f9QLNyyy3DZMCQWcwRuj1m73D
+ sq8DEFBdZ5eEkj1dCyx+t/ga6x2rHyc8Sl86oK1tvAkwBNsfKou3v+jP/l14a7DGBvrmlYjO
+ 59o3t6inu6H7pt7OL6u6BQj7DoMAEQEAAcLBfAQYAQgAJgIbDBYhBBvZyq1zXEw6Rg38yk3e
+ EPcA/4NaBQJonNqrBQkmWAihAAoJEE3eEPcA/4NaKtMQALAJ8PzprBEXbXcEXwDKQu+P/vts
+ IfUb1UNMfMV76BicGa5NCZnJNQASDP/+bFg6O3gx5NbhHHPeaWz/VxlOmYHokHodOvtL0WCC
+ 8A5PEP8tOk6029Z+J+xUcMrJClNVFpzVvOpb1lCbhjwAV465Hy+NUSbbUiRxdzNQtLtgZzOV
+ Zw7jxUCs4UUZLQTCuBpFgb15bBxYZ/BL9MbzxPxvfUQIPbnzQMcqtpUs21CMK2PdfCh5c4gS
+ sDci6D5/ZIBw94UQWmGpM/O1ilGXde2ZzzGYl64glmccD8e87OnEgKnH3FbnJnT4iJchtSvx
+ yJNi1+t0+qDti4m88+/9IuPqCKb6Stl+s2dnLtJNrjXBGJtsQG/sRpqsJz5x1/2nPJSRMsx9
+ 5YfqbdrJSOFXDzZ8/r82HgQEtUvlSXNaXCa95ez0UkOG7+bDm2b3s0XahBQeLVCH0mw3RAQg
+ r7xDAYKIrAwfHHmMTnBQDPJwVqxJjVNr7yBic4yfzVWGCGNE4DnOW0vcIeoyhy9vnIa3w1uZ
+ 3iyY2Nsd7JxfKu1PRhCGwXzRw5TlfEsoRI7V9A8isUCoqE2Dzh3FvYHVeX4Us+bRL/oqareJ
+ CIFqgYMyvHj7Q06kTKmauOe4Nf0l0qEkIuIzfoLJ3qr5UyXc2hLtWyT9Ir+lYlX9efqh7mOY
+ qIws/H2t
+In-Reply-To: <rbc5ezm4uuzbcfaah6w6em6ndfbhamiug5jmp6srovqsx7u2zv@nvyvigon4hcw>
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Rspamd-Server: rspam03
+X-Rspamd-Queue-Id: 49A9E140009
+X-Stat-Signature: wms9b3fqxix7rkrd4enwmzhxhnoe6y9x
+X-Rspam-User: 
+X-HE-Tag: 1776842363-859266
+X-HE-Meta: U2FsdGVkX1/VxRx0HiSdRd7PHMSltRPdImIT28sMAWb8d0IOqvccsolUHqlfYty3BdW1Ilfg0GvEFyMi0iUjDviLo8a0HkHAKFEA3T86jsNk9ZbW3RomEmOz4Q1toW4lXQ/eHaR9MDl9mPbs7IRqofkyXsvxbx0GZuq3GeFqx/qjxNasZZXZ8CyZoEyebMSMrhfAIJoXnlBTJp3ozmHquPvlXK+MYnHmIoDezcdcegaP/CVM0TXVTIjfFKeqMUT4/3zIFfFpxPlSWT4iV/btpOx/0S438GuyxlzBFNgOu3vc47ESgp2OsoiYaAQ117/1eKJBIuXlasi5nmASKFgAzT3A7/fBNmsCQAHLj5DDQ7Sf7aKDwwsc/wQHv6MuITHthtwXJ0i59dhSnHepwH1yrFKyD8zZNWJjs2etJv5VxDalrHNOqLD1Do1+Gz90eDCUgtfc1FS6UUKkkUEhSZNZgNKDNFHTgDaDE4VIlsrNMJAXmVCJeW8zZoNesIeK00WUYSTuMq4cRkPV/ueKVgd/jH1VCRkez4envMLn7gorfq4i+n2kuUcGZKLnrNPtkQRp+tmRHe2ylWh4qKMuP4ce892WYUVchKAh38a/Ql2Phnt0sJF75CHWvztK8uyX8WjaZlCA0XAiELa8F+POy8w2QwkpP0SuI93xn7HMWJ8rjJUzCs0r3ZKtbftUfTkr0XQz1eDyTJK6X3cqn4nTG3p22YOe2jLj8YCE7eYgF8ELkQiavgFBuGJ3Q40sMra9znoECwf52gYbd+lmXxGrmS7GPaZG9mwwDeuxKqtTt8xCo+WNcgX21ZLjZpxLQve1Vd9uxVOWV98oMnN32PyFqj+Dh2oP6yY68BG2yDYfblHmRp1OxIT/sysodWpRCPNIt119RZ9QFtvAPIYDE2eWmOTYBDMf3PGk/LX4gm5hBBMEqz608UQssZMRTTnLe7p3u8jgLUJTUCDTeKsvUU4Ibj6
+ IjBf34KP
+ D0KhvoJhYh9Xhq4ezkm6J6J872IlRgx28y4lQAj0iMCuKK7Ho/QQY0M4ou/u3bkKnvJjmNQqX6YPMPOsKWOpe4NYpunZZZLSyltADBpCEJQkM25StzDQS7XJcPFXI9Bfnx+wPRIDIL2CPpx5CzBFFPvshgNNOEXadR2fdkVrXoVch7XwRrLnY/NA6SpQ5ZDBaunfwXESnlwu1RaeMRpC2RgEVRiMRhyOSD85asGY/dpFR8KjandtUMKk4niDsfkWo1tVikIgVofg6dxVkslxitRSLwq/dCefLIfjewdu3+qBFVApjDsDmz4iSAQ==
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+>> @@ -72,6 +72,7 @@
+>>  #define RWH_WRITE_LIFE_MEDIUM	3
+>>  #define RWH_WRITE_LIFE_LONG	4
+>>  #define RWH_WRITE_LIFE_EXTREME	5
+>> +#define RWH_RMAP_EXCLUDE	6
+> 
+> Userspace does not know what "rmap" is, nor does it need to know. Even if you
+> found a workable solution for the permission side, this is not a good solution,
+> and it's not a good interface. 
+
+It's horrible and I am surprised this patch is not tagged as RFC :)
+
+-- 
+Cheers,
+
+David
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Return-Path: <owner-linux-mm@kvack.org>
+X-Spam-Checker-Version: SpamAssassin 3.4.0 (2014-02-07) on
+	aws-us-west-2-korg-lkml-1.web.codeaurora.org
+Received: from kanga.kvack.org (kanga.kvack.org [205.233.56.17])
+	(using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+	(No client certificate requested)
+	by smtp.lore.kernel.org (Postfix) with ESMTPS id 68FEFF9B617
+	for <linux-mm@archiver.kernel.org>; Wed, 22 Apr 2026 10:49:13 +0000 (UTC)
+Received: by kanga.kvack.org (Postfix)
+	id 9D7056B00A7; Wed, 22 Apr 2026 06:49:12 -0400 (EDT)
+Received: by kanga.kvack.org (Postfix, from userid 40)
+	id 987E46B00A8; Wed, 22 Apr 2026 06:49:12 -0400 (EDT)
+X-Delivered-To: int-list-linux-mm@kvack.org
+Received: by kanga.kvack.org (Postfix, from userid 63042)
+	id 89DFB6B00A9; Wed, 22 Apr 2026 06:49:12 -0400 (EDT)
+X-Delivered-To: linux-mm@kvack.org
+Received: from relay.hostedemail.com (smtprelay0015.hostedemail.com [216.40.44.15])
+	by kanga.kvack.org (Postfix) with ESMTP id 7C6FB6B00A7
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 06:49:12 -0400 (EDT)
+Received: from smtpin18.hostedemail.com (a10.router.float.18 [10.200.18.1])
+	by unirelay04.hostedemail.com (Postfix) with ESMTP id 2A8E51A1276
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 10:49:12 +0000 (UTC)
+X-FDA: 84685869744.18.918C01E
+Received: from sea.source.kernel.org (sea.source.kernel.org [172.234.252.31])
+	by imf12.hostedemail.com (Postfix) with ESMTP id 64F444000B
+	for <linux-mm@kvack.org>; Wed, 22 Apr 2026 10:49:10 +0000 (UTC)
+Authentication-Results: imf12.hostedemail.com;
+	dkim=pass header.d=kernel.org header.s=k20201202 header.b=cFIBUW8W;
+	dmarc=pass (policy=quarantine) header.from=kernel.org;
+	spf=pass (imf12.hostedemail.com: domain of ljs@kernel.org designates 172.234.252.31 as permitted sender) smtp.mailfrom=ljs@kernel.org
+ARC-Seal: i=1; s=arc-20220608; d=hostedemail.com; t=1776854950; a=rsa-sha256;
+	cv=none;
+	b=aEP7ZbetRuKk72KWgNNpzE3IdU7+Fz/hMTVj0BXC2SyeEruWbdB186pK86Tu/QLNxWB+38
+	NsQ+E8SndHHeC2HygEGaNyiAxYofudmOIPHpvp2+vdq8paZ7OAw/gMLSUCa++wRZlNWOce
+	cOrAqstdRaneZAxl+Or84uz006KGNoY=
+ARC-Authentication-Results: i=1;
+	imf12.hostedemail.com;
+	dkim=pass header.d=kernel.org header.s=k20201202 header.b=cFIBUW8W;
+	dmarc=pass (policy=quarantine) header.from=kernel.org;
+	spf=pass (imf12.hostedemail.com: domain of ljs@kernel.org designates 172.234.252.31 as permitted sender) smtp.mailfrom=ljs@kernel.org
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=hostedemail.com;
+	s=arc-20220608; t=1776854950;
+	h=from:from:sender:reply-to:subject:subject:date:date:
+	 message-id:message-id:to:to:cc:cc:mime-version:mime-version:
+	 content-type:content-type:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references:dkim-signature;
+	bh=NfxVEK4qLlLxDtqlXyTJqo+EFxKhaV8IP6TujFHsdtQ=;
+	b=JfFFjZcOXx5TsqLmiBjBB74dKhebYuQHzIHGC2Qf16D/LGJijei6/Lo8U6rpxQTyB2WnSQ
+	W0oYkmlriCExGdRv3QwM4J6o3PpNLJknjiWizzS2nsHlo2fuT6hAs+RtqJyCSe8kWNO0B6
+	oMm7uxp5ResNYtmnPT9s1f0xGIiO8Do=
+Received: from smtp.kernel.org (transwarp.subspace.kernel.org [100.75.92.58])
+	by sea.source.kernel.org (Postfix) with ESMTP id 536EC44246;
+	Wed, 22 Apr 2026 10:49:09 +0000 (UTC)
+Received: by smtp.kernel.org (Postfix) with ESMTPSA id 95DA2C19425;
+	Wed, 22 Apr 2026 10:49:08 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
+	s=k20201202; t=1776854949;
+	bh=6qChCjWiVQTZrkRtgEPhex3vx0I/O/K8QVjVHKvTp9c=;
+	h=Date:From:To:Cc:Subject:References:In-Reply-To:From;
+	b=cFIBUW8WLZUuEOv/Wn8JMOTYg9Xr9yAc7G3UGl0EZ4yzht39tIyhcLppOK45Y+gHo
+	 Ow6XPoNQrGY5JXj1bSps0DzZy9ozWg2n1AmhLlquIRYb/fgeCLUv7XCrmqND3Frv5K
+	 gNxOpoFphRMLkSI/CipEwZIGvdIXrB9TMWzQvZyTBWcyUx0uuBwPvpIQ5kozlPN4nA
+	 VJErjAg4Tvr9kL9mw2pY4yER6wnfQmmgAybc6p14eVSdC9Cqyhyg7m20sTGygD+jCN
+	 Rw9r8ddfwsbKUemKTasCGNWn1/BUE6faSCWIYZ/CqjBRm+Kfg5isZBuBnrXJx406gz
+	 KpwUzLUw+Q+LA==
+Date: Wed, 22 Apr 2026 11:49:06 +0100
+From: Lorenzo Stoakes <ljs@kernel.org>
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: linux-mm@kvack.org, akpm@linux-foundation.org, Liam.Howlett@oracle.com, 
+	viro@zeniv.linux.org.uk, brauner@kernel.org, mjguzik@gmail.com, wujianyong@hygon.cn, 
+	huangsj@hygon.cn, zhongyuan@hygon.cn
+Subject: Re: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+Message-ID: <aeikm2e5Gh5reJ30@lucifer>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <20260421020932.3212532-1-liuyibin@hygon.cn>
+X-Rspamd-Queue-Id: 64F444000B
+X-Rspamd-Server: rspam12
+X-Stat-Signature: wo68m7qioj5yedm5z66fnfmcjn563spj
+X-Rspam-User: 
+X-HE-Tag: 1776854950-18100
+X-HE-Meta: U2FsdGVkX1+RTIHCCfAHniLZ2WIkT3/6pXyc1zBuHVjAP3UCw6dQC9nrNBLHdPV/KGWu/4/KuCt8BaNI0XqGn4ThFQ42Xedm1th0HR94SgbXqJ/J61YBmdJbNtgbD20HR2j06BfrK4d/F3mLUpQjGcL3s3SOq8osk0bNEbwz/CJl3pjDUXHn6b0j4o2bcl2cSWgZpBem9NhDEI/GHujOlpQF2tyLiCy3q9yepozZlUWMsgCsCYzBL7Te7uU3On0Unm9yMXVJ0CFsGhzvau8fSmvhJ7g5SrkRcKzi8DtZSEIkpinIWtJydQmCI6W/3I23HTPgkI2aNhGWrxpiKq9PSWuxtFHU6M9zV5GV5CoWxmIIIR1VCXDDoqQj968C9hd5bw1qTG6iYSo4YicNHNRzngUEEzu8PuJQqP/Arn3eJ4k86fXDjaiVcQnhom3UsABFhlf9LrSQgAVLsX7AshjNt+8MqogAIgaT1550otWIdtJr0fhu/EZZ8/uUNnK/Q79YW+RdyUPjX6vVvx2TMJJqwkK3DSLoj8JjgQ/1Po5BXiROzHmMj1ctCZQ1viNMg+bfRw7ohUbz1KOwALY3NV61L5+5fEPRzh5jzQ094In1u9jVCejuzkf+um/cadrTO892AIjygydI8Xjg9qatSkKsviw63WVpclhMWTb1lzjKI9cyRArIyRn/3Gd9Stf/c/KpA4Hi+rHKblyhOeAJ4dtZOj50KTDsQCO/qZrdGQF/nrYEMk0VRUI59RDxJVMcWCRtsAOQck+Sn5F96AzkeNbXVJAMYFJO/Qz9xEHeSr6vSfhBRQxaiX1M+xKW9OMuwLjhoTJq5Ozy1dTIlQY9yeI2rP8sKEOz1fbFru+NHSfU6Bj1M5gmDzTZIIwyuxoQawZ/qDB6GM8b+1BLFFF5sFIiRYI57si5Si0TAQhL1z+EKZDcjtdzPEC5Fdosm+C2Q9HWCg0IvJjvQNcwY6rojL4
+ pG0n1ewq
+ yHlfWBVsu1y2ayyUVcvIBgrHd309WwoTnwKeaxFzFnX7f60Xj4BdFZyHBXawgJ2jibF4BkYwME2/WHd6CpH/M+9aJzZxFpg9eqTSpNqH1S+nDPkb5w6VSB8o9Ef2B74QLwkGYVsvhJRmfl+f6yUzRNE5pwy+pwxoOfj8DakseS2H6Mx57dUY7uHXn19b1bacuuGuE1/XE9y0x+oUKFEo6LotuPVvR5OhfT+JFhVaqjmWs5Ldun8zNDPwBjwE2ya+dRg2NCufLbcSYWqO7j6sqGHxcykxhTaUree4eHEtwROPZY/8JyRF22Z3jT+kr2Iizf5PklQAQTfXjbDZeVDZnF0ZlqMLpsQQDwodQtCEOd4GRe4633R2VyBlZS5BiRk2LQbh61M9EQopLbi781DyJwZzWd3W5uIcxH4pAw3e717Uku5Hp4DdsHt+cvRM+Ho0JivCbmGbBDNoegvfUvPvOHJLQc7bVhSgDbPW4ZrhzQuKA5FcCBr5oRX0TFQ78GxyzqWs/EZaQJ1aheT+MDMfm8xfF1Hpww3oqOB2mRXdEpHE5hBveEzEu1TYYnOBPSEyZLaw2
+Sender: owner-linux-mm@kvack.org
+Precedence: bulk
+X-Loop: owner-majordomo@kvack.org
+List-ID: <linux-mm.kvack.org>
+List-Subscribe: <mailto:majordomo@kvack.org>
+List-Unsubscribe: <mailto:majordomo@kvack.org>
+
+NAK obviously.
+
+I hate to keep saying this to people, but you've got no excuse at this stage
+it's been a year or so since we added mm maintainers/reviewers and you're not
+sending this to the right people.
+
+How hard is doing:
+
+$ scripts/get_maintainer.pl --no-git fs/fcntl.c fs/open.c include/linux/fs.h \
+	include/uapi/linux/fcntl.h mm/mmap.c mm/vma.c
+Jeff Layton <jlayton@kernel.org> (maintainer:FILE LOCKING (flock() and fcntl()/lockf()))
+Chuck Lever <chuck.lever@oracle.com> (maintainer:FILE LOCKING (flock() and fcntl()/lockf()))
+Alexander Aring <alex.aring@gmail.com> (reviewer:FILE LOCKING (flock() and fcntl()/lockf()))
+Alexander Viro <viro@zeniv.linux.org.uk> (maintainer:FILESYSTEMS (VFS and infrastructure))
+Christian Brauner <brauner@kernel.org> (maintainer:FILESYSTEMS (VFS and infrastructure))
+Jan Kara <jack@suse.cz> (reviewer:FILESYSTEMS (VFS and infrastructure))
+Andrew Morton <akpm@linux-foundation.org> (maintainer:MEMORY MAPPING)
+"Liam R. Howlett" <Liam.Howlett@oracle.com> (maintainer:MEMORY MAPPING)
+Lorenzo Stoakes <ljs@kernel.org> (maintainer:MEMORY MAPPING)
+Vlastimil Babka <vbabka@kernel.org> (reviewer:MEMORY MAPPING)
+Jann Horn <jannh@google.com> (reviewer:MEMORY MAPPING)
+Pedro Falcato <pfalcato@suse.de> (reviewer:MEMORY MAPPING)
+linux-fsdevel@vger.kernel.org (open list:FILE LOCKING (flock() and fcntl()/lockf()))
+linux-kernel@vger.kernel.org (open list)
+linux-mm@kvack.org (open list:MEMORY MAPPING)
+
+?
+
+You're sending an insane patch that breaks core mm and you can't even send it to
+the right people...
+
+(And yet Mateusz is somehow cc'd (he loves that :))
+
+This kind of craziness should be an RFC also as David said.
+
+Both of these things are just rude and not helpful wrt upstream.
+
+On Tue, Apr 21, 2026 at 10:09:32AM +0800, Yibin Liu wrote:
+> UnixBench execl/shellscript (dynamically linked binaries) at 64+ cores are
+> bottlenecked on the i_mmap_rwsem semaphore due to heavy vma insert/remove
+> operations on the i_mmap tree, where libc.so.6 is the most frequent,
+> followed by ld-linux-x86-64.so.2 and the test executable itself.
+
+OK that's good to know, but please provide _actual data_. Hand waving isn't ok.
+
+>
+> This patch marks such files to skip rmap operations, avoiding frequent
+> interval tree insert/remove that cause i_mmap_rwsem lock contention.
+
+OK that's totally insane.
+
+This is a classic example of 'I have problem X, therefore <do something insane
+that happens to addess X>'.
+
+> The downside is these files can no longer be reclaimed (along with compact
+> and ksm), but since they are small and resident anyway, it's acceptable.
+> When all mapping processes exit, files can still be reclaimed normally.
+>
+
+Yeah, that's quite the bloody downside. And 'they're small and resident
+anyway'... err what on earth makes that a thing?
+
+Also as Matthew points out, you're impacting _everybody else_, you're giving
+avenues for unprivileged users to trigger total kernel lockups, you're breaking
+migration, you're breaking reclaim, you're breaking basically all of rmap to fix
+a performance issue.
+
+> Performance testing shows ~80% improvement in UnixBench execl/shellscript
+> scores on Hygon 7490, AMD zen4 9754 and Intel emerald rapids platform.
+
+Yeah ok, I'm sure if I remove rmap altogether I'll get even better numbers :)
+
+I can also take the oxygen system out of a plane and make it way more fuel
+efficient!
+
+>
+> Signed-off-by: Yibin Liu <liuyibin@hygon.cn>
+> ---
+>  fs/fcntl.c                 | 1 +
+>  fs/open.c                  | 6 ++++++
+>  include/linux/fs.h         | 3 +++
+>  include/uapi/linux/fcntl.h | 1 +
+>  mm/mmap.c                  | 3 ++-
+>  mm/vma.c                   | 8 +++++---
+>  6 files changed, 18 insertions(+), 4 deletions(-)
+>
+> diff --git a/fs/fcntl.c b/fs/fcntl.c
+> index beab8080badf..9b7cc1544735 100644
+> --- a/fs/fcntl.c
+> +++ b/fs/fcntl.c
+> @@ -349,6 +349,7 @@ static bool rw_hint_valid(u64 hint)
+>  	case RWH_WRITE_LIFE_MEDIUM:
+>  	case RWH_WRITE_LIFE_LONG:
+>  	case RWH_WRITE_LIFE_EXTREME:
+> +	case RWH_RMAP_EXCLUDE:
+>  		return true;
+>  	default:
+>  		return false;
+> diff --git a/fs/open.c b/fs/open.c
+> index 681d405bc61e..643ab7c6b461 100644
+> --- a/fs/open.c
+> +++ b/fs/open.c
+> @@ -46,6 +46,10 @@ int do_truncate(struct mnt_idmap *idmap, struct dentry *dentry,
+>  	if (length < 0)
+>  		return -EINVAL;
+>
+> +	/* Prevent truncate on files marked as RMAP_EXCLUDE (e.g., libc, ld.so) */
+
+Prevent truncation :)
+
+RMAP_EXCLUDE :)))
+
+Seriously no.
+
+> +	if (filp && (filp->f_mode & FMODE_RMAP_EXCLUDE))
+> +		return -EPERM;
+> +
+>  	newattrs.ia_size = length;
+>  	newattrs.ia_valid = ATTR_SIZE | time_attrs;
+>  	if (filp) {
+> @@ -892,6 +896,8 @@ static int do_dentry_open(struct file *f,
+>  	path_get(&f->f_path);
+>  	f->f_inode = inode;
+>  	f->f_mapping = inode->i_mapping;
+> +	if (inode->i_write_hint == RWH_RMAP_EXCLUDE)
+> +		f->f_mode |= FMODE_RMAP_EXCLUDE;
+>  	f->f_wb_err = filemap_sample_wb_err(f->f_mapping);
+>  	f->f_sb_err = file_sample_sb_err(f);
+>
+> diff --git a/include/linux/fs.h b/include/linux/fs.h
+> index 11559c513dfb..d5c9e5a4c2b9 100644
+> --- a/include/linux/fs.h
+> +++ b/include/linux/fs.h
+> @@ -189,6 +189,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+>  /* File does not contribute to nr_files count */
+>  #define FMODE_NOACCOUNT		((__force fmode_t)(1 << 29))
+>
+> +/* File should exclude vma from rmap interval tree */
+> +#define FMODE_RMAP_EXCLUDE	((__force fmode_t)(1 << 30))
+> +
+>  /*
+>   * The two FMODE_NONOTIFY* define which fsnotify events should not be generated
+>   * for an open file. These are the possible values of
+> diff --git a/include/uapi/linux/fcntl.h b/include/uapi/linux/fcntl.h
+> index aadfbf6e0cb3..4969b4762071 100644
+> --- a/include/uapi/linux/fcntl.h
+> +++ b/include/uapi/linux/fcntl.h
+> @@ -72,6 +72,7 @@
+>  #define RWH_WRITE_LIFE_MEDIUM	3
+>  #define RWH_WRITE_LIFE_LONG	4
+>  #define RWH_WRITE_LIFE_EXTREME	5
+> +#define RWH_RMAP_EXCLUDE	6
+
+As others have pointed out, rmap is not a user API, and it will NEVER be.
+
+>
+>  /*
+>   * The originally introduced spelling is remained from the first
+> diff --git a/mm/mmap.c b/mm/mmap.c
+> index 2311ae7c2ff4..3eb00997e86a 100644
+> --- a/mm/mmap.c
+> +++ b/mm/mmap.c
+> @@ -1830,7 +1830,8 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+>  				mapping_allow_writable(mapping);
+>  			flush_dcache_mmap_lock(mapping);
+>  			/* insert tmp into the share list, just after mpnt */
+> -			vma_interval_tree_insert_after(tmp, mpnt,
+> +			if (!(file->f_mode & FMODE_RMAP_EXCLUDE))
+> +				vma_interval_tree_insert_after(tmp, mpnt,
+
+Yeah this is just... this seems completely broken?
+
+I'd be curious to see what sashiko finds for this lord :)
+
+>  					&mapping->i_mmap);
+>  			flush_dcache_mmap_unlock(mapping);
+>  			i_mmap_unlock_write(mapping);
+> diff --git a/mm/vma.c b/mm/vma.c
+> index 377321b48734..f1e36e6a8702 100644
+> --- a/mm/vma.c
+> +++ b/mm/vma.c
+> @@ -234,7 +234,8 @@ static void __vma_link_file(struct vm_area_struct *vma,
+>  		mapping_allow_writable(mapping);
+>
+>  	flush_dcache_mmap_lock(mapping);
+> -	vma_interval_tree_insert(vma, &mapping->i_mmap);
+> +	if (!(vma->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
+> +		vma_interval_tree_insert(vma, &mapping->i_mmap);
+>  	flush_dcache_mmap_unlock(mapping);
+>  }
+>
+> @@ -339,10 +340,11 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+>  			 struct mm_struct *mm)
+>  {
+>  	if (vp->file) {
+> -		if (vp->adj_next)
+> +		if (vp->adj_next && !(vp->adj_next->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
+>  			vma_interval_tree_insert(vp->adj_next,
+>  						 &vp->mapping->i_mmap);
+> -		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
+> +		if (!(vp->vma->vm_file->f_mode & FMODE_RMAP_EXCLUDE))
+> +			vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
+
+Hang on, this is struct file * state that impacts folio-granularity behaviour?
+
+I mean ugh anyway.
+
+>  		flush_dcache_mmap_unlock(vp->mapping);
+>  	}
+>
+> --
+> 2.34.1
+>
+>
+>
+
+This idea is totally broken.
+
+If you want to contribute usefully, PLEASE drop this silly idea, come back with
+some NUMBERS about the contention you see, and let's have a sensible discussion
+about what we can do to address that?
+
+Also follow standard upstream kernel procedures - figure out who to email
+properly, RFC insane ideas, etc.
+
+Thanks, Lorenzo
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id CA79C3D171E;
+	Wed, 22 Apr 2026 12:51:21 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776862298; cv=none; b=qhRd2T0+BBr5LTB3IJci7n+vy9ORBgbVfhoOJUZvG78gjKdkw6Uq/SerEa+c8t4VxV9b3onCSbi7TejIrGIXKDPMk4S43QRQnW13yrFl+xPHXc5uP8fmb0GF4Utt1zW07dzAu/w9EK6MlFxPKCk8ZLROrhDW1UAwJiEsM45pcqA=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776862298; c=relaxed/simple;
+	bh=FbWrEtMT6Sl1f+Ova3sk6iYyCjKrFCZqgD7p8fcRdVc=;
+	h=From:To:CC:Subject:Date:Message-ID:References:In-Reply-To:
+	 Content-Type:MIME-Version; b=o0rakGZ7sAUai9S6C/wAywiIjp4zv1VfOJmuw7uXMF57YoCmim1NvDX4QzStn7IThWHEUH9DEqGkyO2YynTWiRH4xymnOMd/IS+6DJRLzDjTzohKhQ0GBsAo9N+4ikhAm3WPp/ofB15nTY8D0wenNSCyqXWZAaHNaQC1eolAOOY=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=fail (p=none dis=none) header.from=hygon.cn; spf=fail smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=fail (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=fail smtp.mailfrom=hygon.cn
+Received: from maildlp1.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g0zcP68v7z1YQpmG;
+	Wed, 22 Apr 2026 20:51:17 +0800 (CST)
+Received: from maildlp1.hygon.cn (unknown [172.23.18.60])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g0zcM4DVvz1YQpmG;
+	Wed, 22 Apr 2026 20:51:15 +0800 (CST)
+Received: from cncheex05.Hygon.cn (unknown [172.23.18.115])
+	by maildlp1.hygon.cn (Postfix) with ESMTPS id A69D75943;
+	Wed, 22 Apr 2026 20:51:08 +0800 (CST)
+Received: from cncheex04.Hygon.cn (172.23.18.114) by cncheex05.Hygon.cn
+ (172.23.18.115) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Wed, 22 Apr
+ 2026 20:51:06 +0800
+Received: from cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d]) by
+ cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d%10]) with mapi id
+ 15.02.1544.036; Wed, 22 Apr 2026 20:51:06 +0800
+From: Yibin Liu <liuyibin@hygon.cn>
+To: Lorenzo Stoakes <ljs@kernel.org>
+CC: "linux-mm@kvack.org" <linux-mm@kvack.org>, "akpm@linux-foundation.org"
+	<akpm@linux-foundation.org>, "Liam.Howlett@oracle.com"
+	<Liam.Howlett@oracle.com>, "viro@zeniv.linux.org.uk"
+	<viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>,
+	"mjguzik@gmail.com" <mjguzik@gmail.com>, Jianyong Wu <wujianyong@hygon.cn>,
+	Huangsj <huangsj@hygon.cn>, Yuan Zhong <zhongyuan@hygon.cn>, "jack@suse.cz"
+	<jack@suse.cz>, "jlayton@kernel.org" <jlayton@kernel.org>,
+	"chuck.lever@oracle.com" <chuck.lever@oracle.com>, "alex.aring@gmail.com"
+	<alex.aring@gmail.com>, "vbabka@kernel.org" <vbabka@kernel.org>,
+	"jannh@google.com" <jannh@google.com>, "pfalcato@suse.de" <pfalcato@suse.de>,
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>,
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Subject: =?gb2312?B?tPC4tDogW1BBVENIXSBtbTogQWRkIFJXSF9STUFQX0VYQ0xVREUgZmxhZyB0?=
+ =?gb2312?Q?o_exclude_files_from_rmap_sharing?=
+Thread-Topic: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+Thread-Index: AQHc0kWjdlrDL8nbPE+Fpw0BQ/z5wrXrBF9Q
+Date: Wed, 22 Apr 2026 12:51:06 +0000
+Message-ID: <bc514883d6154420b3cfde4ab25a20c7@hygon.cn>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <aeikm2e5Gh5reJ30@lucifer>
+In-Reply-To: <aeikm2e5Gh5reJ30@lucifer>
+Accept-Language: zh-CN, en-US
+Content-Language: zh-CN
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+Content-Type: text/plain; charset="gb2312"
+Content-Transfer-Encoding: base64
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+
+Rmlyc3Qgb2YgYWxsLCBJIGFtIHRydWx5IHNvcnJ5IGZvciBub3QgdXNpbmcgUkZDLg0KU2Vjb25k
+bHksIEkgb21pdHRlZCBtYW55IG1haW50YWluZXJzIGJlY2F1c2UgSSB3YW50ZWQgdG8gobBub3Qg
+ZGlzdHVyYiB0b28gbWFueSBwZW9wbGWhsSwgDQphbmQgSSBhcG9sb2dpemUgZGVlcGx5IGZvciB0
+aGF0LiBJIHdpbGwgZnVsbHkgZm9sbG93IHRoZXNlIHR3byBydWxlcyBmcm9tIG5vdyBvbi4NCg0K
+QXMgZm9yIHRoaXMgcGF0Y2gsIGluZGVlZCwgYXMgTWF0dGhldyBzYWlkLCB0aGUgdHJ1bmNhdGUg
+cGFydCBpcyBub3QgZmVhc2libGUuIA0KTXkgb3JpZ2luYWwgaW50ZW50aW9uIHdhcyB0byBhcHBs
+eSB0aGlzIHRvIGZyZXF1ZW50bHkgdXNlZCBsaWJyYXJ5IGZpbGVzIGxpa2UgbGliYyBhbmQgbGQu
+DQpDb250ZW50aW9uIG9uIHRoZSBpX21tYXBfcndzZW0gbG9jayAod2hpY2ggZXZlbnR1YWxseSB0
+dXJucyBpbnRvIG9zcV9sb2NrKSBjYXVzZWQgYnkNCnRoZXNlIHR3byBmaWxlcyBhbG9uZSByZWFj
+aGVzIHVwIHRvIDcwJSBpbiB0aGUgobAyNTYtY29yZSBleGVjbKGxIGNhc2UsIGFzIG9ic2VydmVk
+IGZyb20NCmZsYW1lIGdyYXBocy4gQmVzaWRlcywgbm8gb25lIHBlcmZvcm1zIHRydW5jYXRlIG9w
+ZXJhdGlvbnMgb24gbGliYyBhbmQgbGQgYW55d2F5Lg0KDQpTbyBJIHdhbnRlZCB0byB0cnkgc2tp
+cHBpbmcgcm1hcCBmb3IgdGhlbS4gU2luY2UgdGhleSBhcmUgc21hbGwsIGV2ZW4gaWYgdGhleSBj
+YW5ub3QNCmJlIHJlY2xhaW1lZCBvciBtaWdyYXRlZCwgSSBhc3N1bWVkIGl0IHdvdWxkIG5vdCBj
+YXVzZSBtdWNoIHRyb3VibGUuIE9mIGNvdXJzZSwNCnRoaXMgaWRlYSB3YXMgdG90YWxseSB3cm9u
+ZywgYW5kIEkgd2lsbCBkZWZpbml0ZWx5IG1hcmsgc3VjaCBpbnNhbmUgcHJvcG9zYWxzIHdpdGgg
+UkZDIGluIHRoZSBmdXR1cmUuDQoNClRoZXNlIGlkZWFzIGFyZSBpbnNwaXJlZCBieSBNYXRldXN6
+oa9zIHdvcmsgYW5kIHRob3VnaHRzDQooaHR0cHM6Ly9sb3JlLmtlcm5lbC5vcmcvbGludXgtbW0v
+Q0FHdWRvSEVmaU9QSjJWR0VWM2ZEVDljRHN1b0hCLXdrOGpnLWstRUs2SmhXZ2lIa1d3QG1haWwu
+Z21haWwuY29tLyksDQpzbyBJIHNwZWNpZmljYWxseSBDQ6GvZCBoaW0gdG8gc2VlayBtb3JlIG9w
+aW5pb25zIGFuZCBpbnNpZ2h0cy4NCg0KTGFzdGx5LCBJIHNpbmNlcmVseSBhcG9sb2dpemUgZm9y
+IHRoZSB0cm91YmxlIEkgaGF2ZSBjYXVzZWQgdGhlIGNvbW11bml0eS4NCkkgd2lsbCBzdHJpY3Rs
+eSBmb2xsb3cgY29tbXVuaXR5IGNvbnZlbnRpb25zIHdoZW4gc2VuZGluZyBwYXRjaGVzIGluIHRo
+ZSBmdXR1cmUuDQoNCj4gTkFLIG9idmlvdXNseS4NCj4gDQo+IEkgaGF0ZSB0byBrZWVwIHNheWlu
+ZyB0aGlzIHRvIHBlb3BsZSwgYnV0IHlvdSd2ZSBnb3Qgbm8gZXhjdXNlIGF0IHRoaXMgc3RhZ2UN
+Cj4gaXQncyBiZWVuIGEgeWVhciBvciBzbyBzaW5jZSB3ZSBhZGRlZCBtbSBtYWludGFpbmVycy9y
+ZXZpZXdlcnMgYW5kIHlvdSdyZSBub3QNCj4gc2VuZGluZyB0aGlzIHRvIHRoZSByaWdodCBwZW9w
+bGUuDQo+IA0KPiBIb3cgaGFyZCBpcyBkb2luZzoNCj4gDQo+ICQgc2NyaXB0cy9nZXRfbWFpbnRh
+aW5lci5wbCAtLW5vLWdpdCBmcy9mY250bC5jIGZzL29wZW4uYyBpbmNsdWRlL2xpbnV4L2ZzLmgg
+XA0KPiAJaW5jbHVkZS91YXBpL2xpbnV4L2ZjbnRsLmggbW0vbW1hcC5jIG1tL3ZtYS5jDQo+IEpl
+ZmYgTGF5dG9uIDxqbGF5dG9uQGtlcm5lbC5vcmc+IChtYWludGFpbmVyOkZJTEUgTE9DS0lORyAo
+ZmxvY2soKSBhbmQNCj4gZmNudGwoKS9sb2NrZigpKSkNCj4gQ2h1Y2sgTGV2ZXIgPGNodWNrLmxl
+dmVyQG9yYWNsZS5jb20+IChtYWludGFpbmVyOkZJTEUgTE9DS0lORyAoZmxvY2soKSBhbmQNCj4g
+ZmNudGwoKS9sb2NrZigpKSkNCj4gQWxleGFuZGVyIEFyaW5nIDxhbGV4LmFyaW5nQGdtYWlsLmNv
+bT4gKHJldmlld2VyOkZJTEUgTE9DS0lORyAoZmxvY2soKSBhbmQNCj4gZmNudGwoKS9sb2NrZigp
+KSkNCj4gQWxleGFuZGVyIFZpcm8gPHZpcm9AemVuaXYubGludXgub3JnLnVrPiAobWFpbnRhaW5l
+cjpGSUxFU1lTVEVNUyAoVkZTIGFuZA0KPiBpbmZyYXN0cnVjdHVyZSkpDQo+IENocmlzdGlhbiBC
+cmF1bmVyIDxicmF1bmVyQGtlcm5lbC5vcmc+IChtYWludGFpbmVyOkZJTEVTWVNURU1TIChWRlMg
+YW5kDQo+IGluZnJhc3RydWN0dXJlKSkNCj4gSmFuIEthcmEgPGphY2tAc3VzZS5jej4gKHJldmll
+d2VyOkZJTEVTWVNURU1TIChWRlMgYW5kIGluZnJhc3RydWN0dXJlKSkNCj4gQW5kcmV3IE1vcnRv
+biA8YWtwbUBsaW51eC1mb3VuZGF0aW9uLm9yZz4gKG1haW50YWluZXI6TUVNT1JZDQo+IE1BUFBJ
+TkcpDQo+ICJMaWFtIFIuIEhvd2xldHQiIDxMaWFtLkhvd2xldHRAb3JhY2xlLmNvbT4gKG1haW50
+YWluZXI6TUVNT1JZDQo+IE1BUFBJTkcpDQo+IExvcmVuem8gU3RvYWtlcyA8bGpzQGtlcm5lbC5v
+cmc+IChtYWludGFpbmVyOk1FTU9SWSBNQVBQSU5HKQ0KPiBWbGFzdGltaWwgQmFia2EgPHZiYWJr
+YUBrZXJuZWwub3JnPiAocmV2aWV3ZXI6TUVNT1JZIE1BUFBJTkcpDQo+IEphbm4gSG9ybiA8amFu
+bmhAZ29vZ2xlLmNvbT4gKHJldmlld2VyOk1FTU9SWSBNQVBQSU5HKQ0KPiBQZWRybyBGYWxjYXRv
+IDxwZmFsY2F0b0BzdXNlLmRlPiAocmV2aWV3ZXI6TUVNT1JZIE1BUFBJTkcpDQo+IGxpbnV4LWZz
+ZGV2ZWxAdmdlci5rZXJuZWwub3JnIChvcGVuIGxpc3Q6RklMRSBMT0NLSU5HIChmbG9jaygpIGFu
+ZCBmY250bCgpL2xvY2tmKCkpKQ0KPiBsaW51eC1rZXJuZWxAdmdlci5rZXJuZWwub3JnIChvcGVu
+IGxpc3QpDQo+IGxpbnV4LW1tQGt2YWNrLm9yZyAob3BlbiBsaXN0Ok1FTU9SWSBNQVBQSU5HKQ0K
+PiANCj4gPw0KPiANCj4gWW91J3JlIHNlbmRpbmcgYW4gaW5zYW5lIHBhdGNoIHRoYXQgYnJlYWtz
+IGNvcmUgbW0gYW5kIHlvdSBjYW4ndCBldmVuIHNlbmQgaXQNCj4gdG8NCj4gdGhlIHJpZ2h0IHBl
+b3BsZS4uLg0KPiANCj4gKEFuZCB5ZXQgTWF0ZXVzeiBpcyBzb21laG93IGNjJ2QgKGhlIGxvdmVz
+IHRoYXQgOikpDQo+IA0KPiBUaGlzIGtpbmQgb2YgY3JhemluZXNzIHNob3VsZCBiZSBhbiBSRkMg
+YWxzbyBhcyBEYXZpZCBzYWlkLg0KPiANCj4gQm90aCBvZiB0aGVzZSB0aGluZ3MgYXJlIGp1c3Qg
+cnVkZSBhbmQgbm90IGhlbHBmdWwgd3J0IHVwc3RyZWFtLg0KPiAuLi4gLi4uDQo+IC4uLiAuLi4N
+Cj4gVGhpcyBpZGVhIGlzIHRvdGFsbHkgYnJva2VuLg0KPiANCj4gSWYgeW91IHdhbnQgdG8gY29u
+dHJpYnV0ZSB1c2VmdWxseSwgUExFQVNFIGRyb3AgdGhpcyBzaWxseSBpZGVhLCBjb21lIGJhY2sg
+d2l0aA0KPiBzb21lIE5VTUJFUlMgYWJvdXQgdGhlIGNvbnRlbnRpb24geW91IHNlZSwgYW5kIGxl
+dCdzIGhhdmUgYSBzZW5zaWJsZQ0KPiBkaXNjdXNzaW9uDQo+IGFib3V0IHdoYXQgd2UgY2FuIGRv
+IHRvIGFkZHJlc3MgdGhhdD8NCj4gDQo+IEFsc28gZm9sbG93IHN0YW5kYXJkIHVwc3RyZWFtIGtl
+cm5lbCBwcm9jZWR1cmVzIC0gZmlndXJlIG91dCB3aG8gdG8gZW1haWwNCj4gcHJvcGVybHksIFJG
+QyBpbnNhbmUgaWRlYXMsIGV0Yy4NCj4gDQo+IFRoYW5rcywgTG9yZW56bw0KDQo=
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw2.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id AF55D212554;
+	Wed, 22 Apr 2026 13:03:35 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776863036; cv=none; b=YmYbIfqMFjC+uwn2m4QXj4V9ozv90i4HLesYL84Eq2i2O1P4h+vFg1Hjq3uMaIH+pCj2skNEzstkC76gYQUbmWsvfb87CAvpu7K02SV44iIW5GvOWUVhZavsY7iFYryiFt30XGUNl3df3ehxMM0w4vis/Yxh1dBmVeyPwYqWlSg=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776863036; c=relaxed/simple;
+	bh=UCVUeGdlFfGlA93XmYUteXT3qdaKxKb/nR4f2YXDczw=;
+	h=From:To:CC:Subject:Date:Message-ID:References:In-Reply-To:
+	 Content-Type:MIME-Version; b=Wk5vMYP39VtRm7XoVFD4GRsM9lf0O+G9iW2pLi48H+YZznTmUjrCrFSbyHi6Mj+pVHmc0ocyWsAPpbCR+0DBa1v8GnGRElqTqixM4Uubx657aBMhOhcYqjg4YlsV9W2fiIJvEjzvbRGRXDvwlT+LY24eCjtvrXGgWn9O4Jun8bw=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g0ztT6lWXz1YQpmJ;
+	Wed, 22 Apr 2026 21:03:29 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw2.hygon.cn (Postfix) with ESMTP id 4g0ztS3Mx8z1YQpmJ;
+	Wed, 22 Apr 2026 21:03:28 +0800 (CST)
+Received: from cncheex05.Hygon.cn (unknown [172.23.18.115])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id E658932B354C;
+	Wed, 22 Apr 2026 21:03:24 +0800 (CST)
+Received: from cncheex04.Hygon.cn (172.23.18.114) by cncheex05.Hygon.cn
+ (172.23.18.115) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Wed, 22 Apr
+ 2026 21:03:19 +0800
+Received: from cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d]) by
+ cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d%10]) with mapi id
+ 15.02.1544.036; Wed, 22 Apr 2026 21:03:19 +0800
+From: Yibin Liu <liuyibin@hygon.cn>
+To: Mateusz Guzik <mjguzik@gmail.com>
+CC: "linux-mm@kvack.org" <linux-mm@kvack.org>, "akpm@linux-foundation.org"
+	<akpm@linux-foundation.org>, "Liam.Howlett@oracle.com"
+	<Liam.Howlett@oracle.com>, "viro@zeniv.linux.org.uk"
+	<viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>,
+	Jianyong Wu <wujianyong@hygon.cn>, Huangsj <huangsj@hygon.cn>, Yuan Zhong
+	<zhongyuan@hygon.cn>, "jack@suse.cz" <jack@suse.cz>, "jlayton@kernel.org"
+	<jlayton@kernel.org>, "chuck.lever@oracle.com" <chuck.lever@oracle.com>,
+	"alex.aring@gmail.com" <alex.aring@gmail.com>, "vbabka@kernel.org"
+	<vbabka@kernel.org>, "jannh@google.com" <jannh@google.com>,
+	"pfalcato@suse.de" <pfalcato@suse.de>, "linux-fsdevel@vger.kernel.org"
+	<linux-fsdevel@vger.kernel.org>, "linux-kernel@vger.kernel.org"
+	<linux-kernel@vger.kernel.org>, Lorenzo Stoakes <ljs@kernel.org>
+Subject: =?utf-8?B?562U5aSNOiBbUEFUQ0hdIG1tOiBBZGQgUldIX1JNQVBfRVhDTFVERSBmbGFn?=
+ =?utf-8?Q?_to_exclude_files_from_rmap_sharing?=
+Thread-Topic: [PATCH] mm: Add RWH_RMAP_EXCLUDE flag to exclude files from rmap
+ sharing
+Thread-Index: AQHc0ceWdlrDL8nbPE+Fpw0BQ/z5wrXrCmTg
+Date: Wed, 22 Apr 2026 13:03:19 +0000
+Message-ID: <67a71b489eb3413ab0907351d3c56d31@hygon.cn>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <CAGudoHHki3gv-HXXMALePDoC+tmao4oWcYgCo9kXNDkEhW4E4g@mail.gmail.com>
+In-Reply-To: <CAGudoHHki3gv-HXXMALePDoC+tmao4oWcYgCo9kXNDkEhW4E4g@mail.gmail.com>
+Accept-Language: zh-CN, en-US
+Content-Language: zh-CN
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+
+PiBPbiBUdWUsIEFwciAyMSwgMjAyNiBhdCA0OjEx4oCvQU0gWWliaW4gTGl1IDxsaXV5aWJpbkBo
+eWdvbi5jbj4gd3JvdGU6DQo+ID4NCj4gPiBVbml4QmVuY2ggZXhlY2wvc2hlbGxzY3JpcHQgKGR5
+bmFtaWNhbGx5IGxpbmtlZCBiaW5hcmllcykgYXQgNjQrIGNvcmVzIGFyZQ0KPiA+IGJvdHRsZW5l
+Y2tlZCBvbiB0aGUgaV9tbWFwX3J3c2VtIHNlbWFwaG9yZSBkdWUgdG8gaGVhdnkgdm1hDQo+IGlu
+c2VydC9yZW1vdmUNCj4gPiBvcGVyYXRpb25zIG9uIHRoZSBpX21tYXAgdHJlZSwgd2hlcmUgbGli
+Yy5zby42IGlzIHRoZSBtb3N0IGZyZXF1ZW50LA0KPiA+IGZvbGxvd2VkIGJ5IGxkLWxpbnV4LXg4
+Ni02NC5zby4yIGFuZCB0aGUgdGVzdCBleGVjdXRhYmxlIGl0c2VsZi4NCj4gPg0KPiA+IFRoaXMg
+cGF0Y2ggbWFya3Mgc3VjaCBmaWxlcyB0byBza2lwIHJtYXAgb3BlcmF0aW9ucywgYXZvaWRpbmcg
+ZnJlcXVlbnQNCj4gPiBpbnRlcnZhbCB0cmVlIGluc2VydC9yZW1vdmUgdGhhdCBjYXVzZSBpX21t
+YXBfcndzZW0gbG9jayBjb250ZW50aW9uLg0KPiA+IFRoZSBkb3duc2lkZSBpcyB0aGVzZSBmaWxl
+cyBjYW4gbm8gbG9uZ2VyIGJlIHJlY2xhaW1lZCAoYWxvbmcgd2l0aCBjb21wYWN0DQo+ID4gYW5k
+IGtzbSksIGJ1dCBzaW5jZSB0aGV5IGFyZSBzbWFsbCBhbmQgcmVzaWRlbnQgYW55d2F5LCBpdCdz
+IGFjY2VwdGFibGUuDQo+ID4gV2hlbiBhbGwgbWFwcGluZyBwcm9jZXNzZXMgZXhpdCwgZmlsZXMg
+Y2FuIHN0aWxsIGJlIHJlY2xhaW1lZCBub3JtYWxseS4NCj4gPg0KPiA+IFBlcmZvcm1hbmNlIHRl
+c3Rpbmcgc2hvd3MgfjgwJSBpbXByb3ZlbWVudCBpbiBVbml4QmVuY2ggZXhlY2wvc2hlbGxzY3Jp
+cHQNCj4gPiBzY29yZXMgb24gSHlnb24gNzQ5MCwgQU1EIHplbjQgOTc1NCBhbmQgSW50ZWwgZW1l
+cmFsZCByYXBpZHMgcGxhdGZvcm0uDQo+ID4NCj4gDQo+IFRoZSBvdGhlciByZXNwb25kZXJzIGhh
+dmUgYmVlbiBhIGxpdHRsZSBoYXJzaCBhbmQgZGVzcGl0ZSByYWlzaW5nDQo+IHZhbGlkIHBvaW50
+cyBJIGRvbid0IHRoaW5rIHRoZXkgZ2F2ZSBhIHByb3BlciByZXZpZXcuDQo+IA0KPiBUaGUgYmln
+Z2VyIHBpY3R1cmUgaXMgdGhhdCB0aGUgcHJvYmxlbWF0aWMgcndzZW0gaXMgdGFrZW4gc2V2ZXJh
+bA0KPiB0aW1lcyBkdXJpbmcgZm9yayArIGV4ZWMgKyBleGl0IGN5Y2xlLiBOb3JtYWxseSB5b3Ug
+ZW5kIHVwIHdpdGggNQ0KPiBkaXN0aW5jdCBtYXBwaW5ncyBwZXIgYmluYXJ5L3NvLCBlYWNoIGNy
+ZWF0ZWQgd2l0aCBhIHNlcGFyYXRlIGxvY2sNCj4gYWNxdWlyZS4NCj4gDQo+IFNvbWUgdGltZSBh
+Z28gSSBwYXRjaGVkIGV4aXQgdG8gYmF0Y2ggcHJvY2Vzc2luZywgbGVhdmluZyAxIGFjcXVpcmUg
+aW4NCj4gdGhhdCBjb2RlcGF0aC4gZm9yayBjYW4gYW5kIHNob3VsZCBiZSBwYXRjaGVkIGluIGEg
+c2ltaWxhciB2ZWluLCBidXQgSQ0KPiBkb24ndCBrbm93IGlmIHVuaXhiZW5jaCBydW5zIGl0IGlu
+IHRoaXMgYmVuY2htYXJrIChpLmUuLCByZWFsDQo+IHdvcmtsb2FkcyBjZXJ0YWlubHkgc3VmZmVy
+IGZyb20gaXQsIEkgZG9uJ3Qga25vdyBpZiB0aGlzIHBhcnRpY3VsYXINCj4gYmVuY2ggaW5jbHVk
+ZXMgdGhhdCBhc3BlY3QpLiBUaGlzIGlzIG9uIHRvcCBvZiBmb3JraW5nIGl0c2VsZiBiZWluZw0K
+PiBhdm9pZGFibGUgc2hvdWxkIHRoZSBrZXJuZWwgZ3JvdyBhIGJldHRlciBpbnRlcmZhY2UgZm9y
+IGV4ZWN1dGluZw0KPiBiaW5hcmllcy4NCj4gDQpUaGFuayB5b3UgZm9yIHlvdXIgb3BuaW9ucyBh
+bmQgYWR2aWNlcywgSSdsbCB0cnkgdGhpcyB3YXkNCj4gVGhpcyBsZWF2ZXMgdXMgd2l0aCBtYXBw
+aW5nIGNyZWF0aW9uIG9uIGV4ZWMuIFRoaXMgcHJvYmxlbSBpcw0KPiB1bmZpeGFibGUgd2l0aG91
+dCBpbnRyb2R1Y3Rpb24gb2YgYmV0dGVyIEFQSXMgZm9yIHVzZXJzcGFjZSwgd2hpY2gNCj4gY29u
+c3RpdHV0ZXMgcXVpdGUgYSBjaGFsbGVuZ2UuDQo+IA0KPiBUaGUgZW5kIHJlc3VsdCBpcyB0aGUg
+YWJzb2x1dGVseSBob3JyaWJsZSBjYXNlIG9mIG11bHRpcGxlIGFjcXVpcmVzIG9mDQo+IHRoZSBz
+YW1lIGxvY2sgcGVyIGl0ZXJhdGlvbi4NCj4gDQo+IE9uZSBjb21tb24gaWRlYSBob3cgdG8gcmVk
+dWNlIGNvbnRlbnRpb24gYm9pbHMgZG93biB0byBzaG9ydGVuaW5nIGxvY2sNCj4gaG9sZCB0aW1l
+LiBUaGlzIGhhcyB2ZXJ5IGxpbWl0ZWQgZWZmZWN0IGluIGZhY2Ugb2YgdGhlIGFmb3JlbWVudGlv
+bmVkDQo+IG11bHRpcGxlIGFjcXVpcmVzIGFuZCBpcyBhdCBiZXN0IGEgc3RvcCBnYXAgLS0gbm8g
+bWF0dGVyIHdoYXQsIHRoZQ0KPiBjZWlsaW5nIGlzIGRpY3RhdGVkIGJ5IHRoZSBleHRyYSBhY3F1
+aXJlcyBhbmQgaXQgaXMgaW5jcmVkaWJseSBsb3cuDQo+IA0KPiBZb3VyIHBhdGNoIGtlZXBzIHRo
+ZSBwcm9ibGVtYXRpYyBhY3F1aXJlIHBhdHRlcm4gaW50YWN0IGFuZCB3aGlsZSB0aGUNCj4gODAl
+IHdpbiBtaWdodCBzb3VuZCBlbmNvdXJhZ2luZywgdGhlIGVuZCByZXN1bHQgaXMgc3RpbGwgc2V2
+ZXJlbHkNCj4gdW5kZXJwZXJmb3JtaW5nIGV2ZW4gYSBzdGF0ZSB3aGVyZSB0aGUgbG9jayBpcyB0
+YWtlbiBvbmNlIGluIHRvdGFsDQo+IGR1cmluZyBleGVjLg0KPiANCj4gQmVzaWRlcyB0aGF0LCB0
+aGUgaW50ZXJuYWxseS12aXNpYmxlIHNpZGUgZWZmZWN0IG9mIG5vbi1mdW5jdGlvbmFsDQo+IHJt
+YXAgaXMgcHJldHR5IGJhZCAoYW5kIHRodXMgZS5nLiwgdHJ1bmNhdGUpIGlzIHByZXR0eSBiYWQg
+aW4gaXRzIG93bg0KPiByaWdodCwgYnV0IGxldCdzIGlnbm9yZSBpdC4gVGhlIHByaW1hcnkgcHJv
+YmxlbSBoZXJlIGlzIHRoYXQgdGhlIHBhdGNoDQo+IGV4cG9zZXMgYSBtZWNoYW5pc20gZm9yIHVz
+ZXJzcGFjZSB0byBkaWN0YXRlIHRoaXMgaW4gdGhlIGZpcnN0IHBsYWNlLg0KPiBFdmVuIGlnbm9y
+aW5nIHRoZSBxdWVzdGlvbiBvZiB3aG8gc2hvdWxkIGJlIHVzaW5nIGl0IGFuZCB3aGVuLCB0aGUN
+Cj4gcmVhbCBzb2x1dGlvbiB0byB0aGUgcHJvYmxlbSB3b3VsZCBiZSBjb25maW5lZCB0byB0aGUg
+a2VybmVsLiBTdXBwb3NlDQo+IHRoaXMgcGF0Y2ggbGFuZHMgYW5kIHN1Y2ggYSBzb2x1dGlvbiBp
+cyBpbXBsZW1lbnRlZCBsYXRlciAtLSBub3cgdGhlDQo+IGtlcm5lbCBpcyBzdHVjayBoYXZpbmcg
+dG8gc3VwcG9ydCBhIG5vdy11c2VsZXNzIChpZiBub3Qgb3V0cmlnaHQNCj4gaGFybWZ1bCkgZmVh
+dHVyZS4NCk9LLiBJIHVuZGVyc3RhbmQgaXQgbm93Lg0KPiANCj4gV2hhdCB3aWxsIGZpeCB0aGUg
+cHJvYmxlbSBpcyBzaGFyZGluZyB0aGUgc3RhdGUgaW4gc29tZSBjYXBhY2l0eSwNCj4gcHJvdmlk
+ZWQgbm8gdW5maXhhYmxlIHN0b3BnYXAgc2hvd3MgdXAuDQo+IA0KPiBBbnkgb3RoZXIgYXBwcm9h
+Y2ggaXMgcHV0dGluZyBzbWFsbCBiYW5kYWlkcyBvbiBpdCBhbmQgY2FuIGJlIGENCj4gY29uc2lk
+ZXJhdGlvbiBvbmx5IGlmIHRoZSBkZWNlbnRyYWxpemluZyBsb2NraW5nIGlzIHByb3ZlbiB0b28N
+Cj4gcHJvYmxlbWF0aWMuDQo+IA0KPiBQZWRybyBhcHBhcmVudGx5IHZvbHVudGVlcmVkIHRvIGRv
+IHRoZSB3b3JrLCBzbyBJIHRoaW5rIHdlIGNhbiB3YWl0IHRvDQo+IHNlZSB3aGF0IGhlIGlzIGdv
+aW5nIHRvIGVuZCB1cCBjb29raW5nLg0KPiANCj4gSSBob3BlIHRoaXMgaGVscHMuDQo+IA0KDQo=
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from smtp.kernel.org (aws-us-west-2-korg-mail-1.web.codeaurora.org [10.30.226.201])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id CA0E329A9E9;
+	Wed, 22 Apr 2026 16:16:20 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=10.30.226.201
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776874580; cv=none; b=gGVxQfnbuXPcA5gMn43hBFMx6RK/rzjm+7G29H5jw07/4wGqETsa1wzLyES9LmG0tOzxNMb51d5IgymAerC5qNxJwPFbapzTxEyWD8eNGK7Vkwg7pLle3OlyvS0epkOoc7w06xYd9gyLlhApIv84MtxLrqykSfLo6eIXclaUefY=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776874580; c=relaxed/simple;
+	bh=h4eanJxpXrlVIm1nqyyHsFboSSOCzHcJax3wSI6MyVc=;
+	h=Date:From:To:Cc:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=t5isvBy8QBLO6t7aQNdM/n08GSaRySe1usbEo6wK1uNxLHALIwkEtimcm8d9X2a3rihHNlo7vffov72eDbsQHMseiQuSvhZOYfOmloSGDhgbmMxhOs7wOBcKkByEkK5Syj1j6j64qeB/H4PCFx6QW+NQSb5cIvjycf6n1BQwIas=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b=grwWin7u; arc=none smtp.client-ip=10.30.226.201
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=kernel.org header.i=@kernel.org header.b="grwWin7u"
+Received: by smtp.kernel.org (Postfix) with ESMTPSA id 4A938C19425;
+	Wed, 22 Apr 2026 16:16:16 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=kernel.org;
+	s=k20201202; t=1776874580;
+	bh=h4eanJxpXrlVIm1nqyyHsFboSSOCzHcJax3wSI6MyVc=;
+	h=Date:From:To:Cc:Subject:References:In-Reply-To:From;
+	b=grwWin7uGtk1gv9Nd1Kir0V4xj0jvFveBwjVZTD3oGvKd49DvP5u6v8pEMgDFDEjK
+	 8nYa2WCbvWrBg5cb74IPu+2P+U9wU/yhdPaOqzO5cUzFvd4PzavFN7L28PfJEZDPiF
+	 oLViFud9JXn9Npa9J8F2Ld3c1PGSx5TEwas8y8pU98z9/7dYZBSIakuK52Nf4yFlCG
+	 mQxzHhQt3J/6+cF0isxEoI5Mt2wE37hXmACmFH/xwAwXC6Hm1OvzorlgTf3QipY+1O
+	 gOIhrL6N3RePh9Xdb1iRqXASSdxlfTFU4c25o88bdWKKIH5xF04Of98tB7atP/5Bdu
+	 3Uczsh5tPB6AA==
+Date: Wed, 22 Apr 2026 17:16:12 +0100
+From: Lorenzo Stoakes <ljs@kernel.org>
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: "linux-mm@kvack.org" <linux-mm@kvack.org>, 
+	"akpm@linux-foundation.org" <akpm@linux-foundation.org>, "Liam.Howlett@oracle.com" <Liam.Howlett@oracle.com>, 
+	"viro@zeniv.linux.org.uk" <viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>, 
+	"mjguzik@gmail.com" <mjguzik@gmail.com>, Jianyong Wu <wujianyong@hygon.cn>, Huangsj <huangsj@hygon.cn>, 
+	Yuan Zhong <zhongyuan@hygon.cn>, "jack@suse.cz" <jack@suse.cz>, 
+	"jlayton@kernel.org" <jlayton@kernel.org>, "chuck.lever@oracle.com" <chuck.lever@oracle.com>, 
+	"alex.aring@gmail.com" <alex.aring@gmail.com>, "vbabka@kernel.org" <vbabka@kernel.org>, 
+	"jannh@google.com" <jannh@google.com>, "pfalcato@suse.de" <pfalcato@suse.de>, 
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>, "linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Subject: Re: =?utf-8?B?562U5aSNOiBbUEFUQ0hdIG1tOiBBZA==?= =?utf-8?Q?d?=
+ RWH_RMAP_EXCLUDE flag to exclude files from rmap sharing
+Message-ID: <aejzSsiXZBK1emv7@lucifer>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <aeikm2e5Gh5reJ30@lucifer>
+ <bc514883d6154420b3cfde4ab25a20c7@hygon.cn>
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: inline
+Content-Transfer-Encoding: 8bit
+In-Reply-To: <bc514883d6154420b3cfde4ab25a20c7@hygon.cn>
+
+On Wed, Apr 22, 2026 at 12:51:06PM +0000, Yibin Liu wrote:
+> First of all, I am truly sorry for not using RFC.
+> Secondly, I omitted many maintainers because I wanted to “not disturb too many people”,
+> and I apologize deeply for that. I will fully follow these two rules from now on.
+>
+> As for this patch, indeed, as Matthew said, the truncate part is not feasible.
+> My original intention was to apply this to frequently used library files like libc and ld.
+> Contention on the i_mmap_rwsem lock (which eventually turns into osq_lock) caused by
+> these two files alone reaches up to 70% in the “256-core execl” case, as observed from
+> flame graphs. Besides, no one performs truncate operations on libc and ld anyway.
+
+Interesting, would be good to see these? And more details on the scenario?
+
+What workloads are contending that exactly?
+
+>
+> So I wanted to try skipping rmap for them. Since they are small, even if they cannot
+> be reclaimed or migrated, I assumed it would not cause much trouble. Of course,
+> this idea was totally wrong, and I will definitely mark such insane proposals with RFC in the future.
+>
+> These ideas are inspired by Mateusz’s work and thoughts
+> (https://lore.kernel.org/linux-mm/CAGudoHEfiOPJ2VGEV3fDT9cDsuoHB-wk8jg-k-EK6JhWgiHkWw@mail.gmail.com/),
+> so I specifically CC’d him to seek more opinions and insights.
+
+I think the best thing in general going forwards is to bring up this issues in
+advance, we're more than happy to look into things and very interested in issues
+with lock contention, latency, etc.
+
+And that way you can discuss ideas you might have to tackle up front and we can
+give you early feedback, which should save time all round and help get us to a
+good solution :)
+
+Just send with a [DISCUSSION] preface and cc- people you feel are relevant (use
+MAINTAINERS to figure out e.g. maintainers of relevant things, like rmap, mmap,
+etc.)
+
+>
+> Lastly, I sincerely apologize for the trouble I have caused the community.
+> I will strictly follow community conventions when sending patches in the future.
+
+It's no problem, better to be direct about this - it's more useful to discuss
+rather than to jump to a solution without community involvement, which might not
+work out/conflict with other stuff etc.
+
+Thanks, Lorenzo
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mailgw1.hygon.cn (unknown [101.204.27.37])
+	by smtp.subspace.kernel.org (Postfix) with ESMTP id 00B881E511;
+	Fri, 24 Apr 2026 01:08:52 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=101.204.27.37
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776992951; cv=none; b=GZ0qhlIWQ2KLpP/lsey8aABw9RvP03CK9gRf8pD0s24MMmE48Cg7BcQ7CjhZ5igcuzK0PykwVS2hiskLB9ip0UqGAcHlqMfjUKDIMYNSql0t/30/f7xlwy2+bmFfgEvHXx2+OAMAaqhbwzZOi/ZnUZmueG/BrjPQR7bZdoJ+9Y4=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776992951; c=relaxed/simple;
+	bh=rnq4RWnsTy4lXDa/rQB6twwAVqU3G0R+DkIdM741GHA=;
+	h=From:To:CC:Subject:Date:Message-ID:References:In-Reply-To:
+	 Content-Type:MIME-Version; b=WfWeAAkmJvX1POVUvA9LDOpGRTzIjdRjivnK8TRs97dcd7qYvZND4A1O37wAvO6eT04XhMp0eveLwxHXqHsq1Ms67O0OU0J16S1HKirOj8qhq46ekZ+RwShQZBlIlMCFLvGdZgwx9Pb9kNiZjavDgJ0cqg/6bN/vfi1BMdelcGA=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn; spf=pass smtp.mailfrom=hygon.cn; arc=none smtp.client-ip=101.204.27.37
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=hygon.cn
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=hygon.cn
+Received: from maildlp2.hygon.cn (unknown [127.0.0.1])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4g1vwq6lpCz4r78b;
+	Fri, 24 Apr 2026 09:08:43 +0800 (CST)
+Received: from maildlp2.hygon.cn (unknown [172.23.18.61])
+	by mailgw1.hygon.cn (Postfix) with ESMTP id 4g1vwq243jz4r78b;
+	Fri, 24 Apr 2026 09:08:43 +0800 (CST)
+Received: from cncheex04.Hygon.cn (unknown [172.23.18.114])
+	by maildlp2.hygon.cn (Postfix) with ESMTPS id 03A6D3006724;
+	Fri, 24 Apr 2026 09:08:37 +0800 (CST)
+Received: from cncheex04.Hygon.cn (172.23.18.114) by cncheex04.Hygon.cn
+ (172.23.18.114) with Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.2.1544.36; Fri, 24 Apr
+ 2026 09:08:35 +0800
+Received: from cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d]) by
+ cncheex04.Hygon.cn ([fe80::1b6f:6c58:58a4:430d%10]) with mapi id
+ 15.02.1544.036; Fri, 24 Apr 2026 09:08:35 +0800
+From: Yibin Liu <liuyibin@hygon.cn>
+To: Lorenzo Stoakes <ljs@kernel.org>
+CC: "linux-mm@kvack.org" <linux-mm@kvack.org>, "akpm@linux-foundation.org"
+	<akpm@linux-foundation.org>, "Liam.Howlett@oracle.com"
+	<Liam.Howlett@oracle.com>, "viro@zeniv.linux.org.uk"
+	<viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>,
+	"mjguzik@gmail.com" <mjguzik@gmail.com>, Jianyong Wu <wujianyong@hygon.cn>,
+	Huangsj <huangsj@hygon.cn>, Yuan Zhong <zhongyuan@hygon.cn>, "jack@suse.cz"
+	<jack@suse.cz>, "jlayton@kernel.org" <jlayton@kernel.org>,
+	"chuck.lever@oracle.com" <chuck.lever@oracle.com>, "alex.aring@gmail.com"
+	<alex.aring@gmail.com>, "vbabka@kernel.org" <vbabka@kernel.org>,
+	"jannh@google.com" <jannh@google.com>, "pfalcato@suse.de" <pfalcato@suse.de>,
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>,
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Subject: =?utf-8?B?562U5aSNOiDnrZTlpI06IFtQQVRDSF0gbW06IEFkZCBSV0hfUk1BUF9FWENM?=
+ =?utf-8?Q?UDE_flag_to_exclude_files_from_rmap_sharing?=
+Thread-Topic: =?utf-8?B?562U5aSNOiBbUEFUQ0hdIG1tOiBBZGQgUldIX1JNQVBfRVhDTFVERSBmbGFn?=
+ =?utf-8?Q?_to_exclude_files_from_rmap_sharing?=
+Thread-Index: AQHc0kWjdlrDL8nbPE+Fpw0BQ/z5wrXrBF9Q//+3pQCAAqdBAA==
+Date: Fri, 24 Apr 2026 01:08:35 +0000
+Message-ID: <a96c20b74b874248bc0cdc2b926a43fe@hygon.cn>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <aeikm2e5Gh5reJ30@lucifer> <bc514883d6154420b3cfde4ab25a20c7@hygon.cn>
+ <aejzSsiXZBK1emv7@lucifer>
+In-Reply-To: <aejzSsiXZBK1emv7@lucifer>
+Accept-Language: zh-CN, en-US
+Content-Language: zh-CN
+X-MS-Has-Attach:
+X-MS-TNEF-Correlator:
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+
+PiBPbiBXZWQsIEFwciAyMiwgMjAyNiBhdCAxMjo1MTowNlBNICswMDAwLCBZaWJpbiBMaXUgd3Jv
+dGU6DQo+ID4gRmlyc3Qgb2YgYWxsLCBJIGFtIHRydWx5IHNvcnJ5IGZvciBub3QgdXNpbmcgUkZD
+Lg0KPiA+IFNlY29uZGx5LCBJIG9taXR0ZWQgbWFueSBtYWludGFpbmVycyBiZWNhdXNlIEkgd2Fu
+dGVkIHRvIOKAnG5vdCBkaXN0dXJiIHRvbw0KPiBtYW55IHBlb3BsZeKAnSwNCj4gPiBhbmQgSSBh
+cG9sb2dpemUgZGVlcGx5IGZvciB0aGF0LiBJIHdpbGwgZnVsbHkgZm9sbG93IHRoZXNlIHR3byBy
+dWxlcyBmcm9tIG5vdyBvbi4NCj4gPg0KPiA+IEFzIGZvciB0aGlzIHBhdGNoLCBpbmRlZWQsIGFz
+IE1hdHRoZXcgc2FpZCwgdGhlIHRydW5jYXRlIHBhcnQgaXMgbm90IGZlYXNpYmxlLg0KPiA+IE15
+IG9yaWdpbmFsIGludGVudGlvbiB3YXMgdG8gYXBwbHkgdGhpcyB0byBmcmVxdWVudGx5IHVzZWQg
+bGlicmFyeSBmaWxlcyBsaWtlIGxpYmMNCj4gYW5kIGxkLg0KPiA+IENvbnRlbnRpb24gb24gdGhl
+IGlfbW1hcF9yd3NlbSBsb2NrICh3aGljaCBldmVudHVhbGx5IHR1cm5zIGludG8gb3NxX2xvY2sp
+DQo+IGNhdXNlZCBieQ0KPiA+IHRoZXNlIHR3byBmaWxlcyBhbG9uZSByZWFjaGVzIHVwIHRvIDcw
+JSBpbiB0aGUg4oCcMjU2LWNvcmUgZXhlY2zigJ0gY2FzZSwgYXMNCj4gb2JzZXJ2ZWQgZnJvbQ0K
+PiA+IGZsYW1lIGdyYXBocy4gQmVzaWRlcywgbm8gb25lIHBlcmZvcm1zIHRydW5jYXRlIG9wZXJh
+dGlvbnMgb24gbGliYyBhbmQgbGQNCj4gYW55d2F5Lg0KPiANCj4gSW50ZXJlc3RpbmcsIHdvdWxk
+IGJlIGdvb2QgdG8gc2VlIHRoZXNlPyBBbmQgbW9yZSBkZXRhaWxzIG9uIHRoZSBzY2VuYXJpbz8N
+Cj4gDQo+IFdoYXQgd29ya2xvYWRzIGFyZSBjb250ZW5kaW5nIHRoYXQgZXhhY3RseT8NCj4gDQoN
+Ckl0IGlzIGdvb2QgdG8gc2VlLg0KT24gYW4gSW50ZWwgRW1lcmFsZCBSYXBpZHMgc2VydmVyICgx
+MTIgY29yZXMpLCBydW4gdGhlIGV4ZWNsIGJlbmNobWFyayBmcm9tDQpVbml4QmVuY2ggd2l0aCB0
+aGUgY29tbWFuZDogLi9SdW4gLWMgMjIwIGV4ZWNsDQpUaGVuIHBlcmYgdG9wIHNob3dzOg0KDQog
+IDkxLjUzJSAgW2tlcm5lbF0gICAgICAgICAgICAgICAgICAgIFtrXSBvc3FfbG9jaw0KICAgMC41
+MCUgIFtrZXJuZWxdICAgICAgICAgICAgICAgICAgICBba10gcndzZW1fc3Bpbl9vbl9vd25lcg0K
+ICAgMC40NSUgIHBlcmYgICAgICAgICAgICAgICAgICAgICAgICBbLl0gcXVldWVfZXZlbnQNCiAg
+IDAuNDIlICBba2VybmVsXSAgICAgICAgICAgICAgICAgICAgW2tdIHZtYV9pbnRlcnZhbF90cmVl
+X2luc2VydA0KICAgMC4zNiUgIFtrZXJuZWxdICAgICAgICAgICAgICAgICAgICBba10gbmV4dF91
+cHRvZGF0ZV9mb2xpbw0KICAgMC4yNSUgIFtrZXJuZWxdICAgICAgICAgICAgICAgICAgICBba10g
+X196YXBfdm1hX3JhbmdlDQoNCkFsbCB0aGUgb3NxX2xvY2sgb3ZlcmhlYWQgaGVyZSBjb21lcyBm
+cm9tIHJ3c2VtX29wdGltaXN0aWNfc3BpbiwgYW5kDQpyd3NlbV9vcHRpbWlzdGljX3NwaW4gaGFz
+IG1hbnkgY2FsbCBzb3VyY2VzLg0KVGhlIGJyZWFrZG93biBpcyByb3VnaGx5IGFzIGZvbGxvd3M6
+DQoNCjYuMTMlICBfZGxfbWFpbi0tPm1wcm90ZWN0LS0+Li4uLS0+X19zcGxpdF92bWEtLT52bWFf
+cHJlcGFyZS0tPmRvd25fd3JpdGUoJm1hcHBpbmctPmlfbW1hcF9yd3NlbSkNCjYuMTUlICBicHJt
+X2V4ZWN2ZS0tPi4uLi0tPmV4aXRfbW1hcC0tPi4uLi0tPnVubGlua19maWxlX3ZtYV9iYXRjaF9w
+cm9jZXNzLS0+ZG93bl93cml0ZSgmbWFwcGluZy0+aV9tbWFwX3J3c2VtKQ0KMjQuNzElIHZtYV9s
+aW5rX2ZpbGUtLT4uLi4tLT5kb3duX3dyaXRlKCZtYXBwaW5nLT5pX21tYXBfcndzZW0pDQoyNC44
+MiUgbW1hcF9yZWdpb24tLT4uLi4tLT5mcmVlX3BndGFsYmVzLS0+dW5saW5rX2ZpbGVfdm1hX2Jh
+dGNoX3Byb2Nlc3MtLT5kb3duX3dyaXRlKCZtYXBwaW5nLT5pX21tYXBfcndzZW0pDQoxOC41JSAg
+bW1hcF9yZWdpb24tLT4uLi4tLT5fX3NwbGl0X3ZtYS0+dm1hX3ByZWFwcmUtLT5kb3duX3dyaXRl
+KCZtYXBwaW5nLT5pX21tYXBfcndzZW0pDQoxMi40NCUgX2RsX21hcF9wcm9qZWN0LS0+bXByb3Rl
+Y3QtLT4uLi4tLT5fX3NwbGl0X3ZtYS0tPnZtYV9wcmVwYXJlLS0+ZG93bl93cml0ZSgmbWFwcGlu
+Zy0+aV9tbWFwX3J3c2VtKQ0KDQpBbmQgQU1EIFplbjUoOTc1NSkgcGVyZm9ybXMgcHJldHR5IG11
+Y2ggdGhlIHNhbWUgd2F5ICh0ZXN0ZWQgd2l0aCAuL1J1biAtYyAyNTAgZXhlY2wpLg0KDQo+ID4N
+Cj4gPiBTbyBJIHdhbnRlZCB0byB0cnkgc2tpcHBpbmcgcm1hcCBmb3IgdGhlbS4gU2luY2UgdGhl
+eSBhcmUgc21hbGwsIGV2ZW4gaWYgdGhleQ0KPiBjYW5ub3QNCj4gPiBiZSByZWNsYWltZWQgb3Ig
+bWlncmF0ZWQsIEkgYXNzdW1lZCBpdCB3b3VsZCBub3QgY2F1c2UgbXVjaCB0cm91YmxlLiBPZg0K
+PiBjb3Vyc2UsDQo+ID4gdGhpcyBpZGVhIHdhcyB0b3RhbGx5IHdyb25nLCBhbmQgSSB3aWxsIGRl
+ZmluaXRlbHkgbWFyayBzdWNoIGluc2FuZSBwcm9wb3NhbHMNCj4gd2l0aCBSRkMgaW4gdGhlIGZ1
+dHVyZS4NCj4gPg0KPiA+IFRoZXNlIGlkZWFzIGFyZSBpbnNwaXJlZCBieSBNYXRldXN64oCZcyB3
+b3JrIGFuZCB0aG91Z2h0cw0KPiA+DQo+IChodHRwczovL2xvcmUua2VybmVsLm9yZy9saW51eC1t
+bS9DQUd1ZG9IRWZpT1BKMlZHRVYzZkRUOWNEc3VvSEItd2s4amctaw0KPiAtRUs2SmhXZ2lIa1d3
+QG1haWwuZ21haWwuY29tLyksDQo+ID4gc28gSSBzcGVjaWZpY2FsbHkgQ0PigJlkIGhpbSB0byBz
+ZWVrIG1vcmUgb3BpbmlvbnMgYW5kIGluc2lnaHRzLg0KPiANCj4gSSB0aGluayB0aGUgYmVzdCB0
+aGluZyBpbiBnZW5lcmFsIGdvaW5nIGZvcndhcmRzIGlzIHRvIGJyaW5nIHVwIHRoaXMgaXNzdWVz
+IGluDQo+IGFkdmFuY2UsIHdlJ3JlIG1vcmUgdGhhbiBoYXBweSB0byBsb29rIGludG8gdGhpbmdz
+IGFuZCB2ZXJ5IGludGVyZXN0ZWQgaW4gaXNzdWVzDQo+IHdpdGggbG9jayBjb250ZW50aW9uLCBs
+YXRlbmN5LCBldGMuDQo+IA0KPiBBbmQgdGhhdCB3YXkgeW91IGNhbiBkaXNjdXNzIGlkZWFzIHlv
+dSBtaWdodCBoYXZlIHRvIHRhY2tsZSB1cCBmcm9udCBhbmQgd2UgY2FuDQo+IGdpdmUgeW91IGVh
+cmx5IGZlZWRiYWNrLCB3aGljaCBzaG91bGQgc2F2ZSB0aW1lIGFsbCByb3VuZCBhbmQgaGVscCBn
+ZXQgdXMgdG8gYQ0KPiBnb29kIHNvbHV0aW9uIDopDQo+IA0KPiBKdXN0IHNlbmQgd2l0aCBhIFtE
+SVNDVVNTSU9OXSBwcmVmYWNlIGFuZCBjYy0gcGVvcGxlIHlvdSBmZWVsIGFyZSByZWxldmFudCAo
+dXNlDQo+IE1BSU5UQUlORVJTIHRvIGZpZ3VyZSBvdXQgZS5nLiBtYWludGFpbmVycyBvZiByZWxl
+dmFudCB0aGluZ3MsIGxpa2Ugcm1hcCwNCj4gbW1hcCwNCj4gZXRjLikNCj4gDQo+ID4NCj4gPiBM
+YXN0bHksIEkgc2luY2VyZWx5IGFwb2xvZ2l6ZSBmb3IgdGhlIHRyb3VibGUgSSBoYXZlIGNhdXNl
+ZCB0aGUgY29tbXVuaXR5Lg0KPiA+IEkgd2lsbCBzdHJpY3RseSBmb2xsb3cgY29tbXVuaXR5IGNv
+bnZlbnRpb25zIHdoZW4gc2VuZGluZyBwYXRjaGVzIGluIHRoZQ0KPiBmdXR1cmUuDQo+IA0KPiBJ
+dCdzIG5vIHByb2JsZW0sIGJldHRlciB0byBiZSBkaXJlY3QgYWJvdXQgdGhpcyAtIGl0J3MgbW9y
+ZSB1c2VmdWwgdG8gZGlzY3Vzcw0KPiByYXRoZXIgdGhhbiB0byBqdW1wIHRvIGEgc29sdXRpb24g
+d2l0aG91dCBjb21tdW5pdHkgaW52b2x2ZW1lbnQsIHdoaWNoIG1pZ2h0DQo+IG5vdA0KPiB3b3Jr
+IG91dC9jb25mbGljdCB3aXRoIG90aGVyIHN0dWZmIGV0Yy4NCj4gDQo+IFRoYW5rcywgTG9yZW56
+bw0KDQpUaGFua3MgZm9yIHRoZSBraW5kIGFkdmljZS4NCg0KSSB3aWxsIHN0YXJ0IGEgZGlzY3Vz
+c2lvbiBmaXJzdCB3aXRoIGEgW0RJU0NVU1NJT05dIHRhZyBhbmQgaW52b2x2ZSByZWxldmFudA0K
+bWFpbnRhaW5lcnMgZm9yIHNpbWlsYXIgaWRlYXMgaW4gdGhlIGZ1dHVyZS4NCg0KVGhhbmtzLCBZ
+aWJpbg0K
+
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from casper.infradead.org (casper.infradead.org [90.155.50.34])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 7021C224FA;
+	Fri, 24 Apr 2026 03:20:52 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=90.155.50.34
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1777000855; cv=none; b=EjIHWlCpXI9mKW2aNKnbfpmgGesfD9tphvjgPKw47lSrjwH02vvgosKOJ/V//a5nKFZ+zY6pbFIFu96sQrSdeaK+hdTH3KfvkSv07JFwwEpXBlQSqTXT6o36G/roj3SP15LL+azfj0un2lQVFAMc/EO6/hH3zeHx/LEb4yllK34=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1777000855; c=relaxed/simple;
+	bh=HnbcZuJRm5gwp5waDh2UgtplEn2VXuo2oozw9jzfTd0=;
+	h=Date:From:To:Cc:Subject:Message-ID:References:MIME-Version:
+	 Content-Type:Content-Disposition:In-Reply-To; b=s8q9uwBrgY1GNjrdyuzpniia9ftxlMqm5zkH8hu3BYEcvHetHkUEk5KHqmw5aBOIjhzK8xu2qVHYwfDfVeg0JKIpHdEPjCXIPKay37f0vpq/orzp5RuvYMz78ZapJNRd7k9GoXck7lWAxH+0cMUJAnn0wuB9+F8rLGraFlVoVVU=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=infradead.org; spf=none smtp.mailfrom=infradead.org; dkim=pass (2048-bit key) header.d=infradead.org header.i=@infradead.org header.b=KgS2rpB5; arc=none smtp.client-ip=90.155.50.34
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=infradead.org
+Authentication-Results: smtp.subspace.kernel.org; spf=none smtp.mailfrom=infradead.org
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=infradead.org header.i=@infradead.org header.b="KgS2rpB5"
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/relaxed;
+	d=infradead.org; s=casper.20170209; h=In-Reply-To:Content-Type:MIME-Version:
+	References:Message-ID:Subject:Cc:To:From:Date:Sender:Reply-To:
+	Content-Transfer-Encoding:Content-ID:Content-Description;
+	bh=vF1AU0LXlnhIfmJBF/DVKC/jdqA8hAJ+qqGd+yTOFkg=; b=KgS2rpB5V/NgcXiZBzBut1nFMM
+	VXy6TDHg2uPCUyKs50GnvU925GmHjYdme9k93ETpkPAcMi4yGAcHfoloHON5royLGcfk8+E08UqPw
+	naQHxuP1Ae5cpfKVxnSmm3CrrlOmlG8Z5N2UpAfZUhfEQhojGoZ1YG4o9AYgbK/XNG1c7lR+QYFLS
+	uZVbeirmfMjaa+0naIO+FQir+qgxIig2+vN0cuJ+zvrC9eX/Dm2LJuul3conDsK9cZNJW92dW6eV7
+	C0LLBztiFOrzhZhwKq+Gv6w/0pBl7kmGRUdJhEs2thWxRXXuAoCXgq+y1/NEw8Tua6QB7h3wlsfUh
+	e8zCrlEg==;
+Received: from willy by casper.infradead.org with local (Exim 4.98.2 #2 (Red Hat Linux))
+	id 1wG75r-0000000EUjd-3o1v;
+	Fri, 24 Apr 2026 03:20:40 +0000
+Date: Fri, 24 Apr 2026 04:20:39 +0100
+From: Matthew Wilcox <willy@infradead.org>
+To: Yibin Liu <liuyibin@hygon.cn>
+Cc: Lorenzo Stoakes <ljs@kernel.org>,
+	"linux-mm@kvack.org" <linux-mm@kvack.org>,
+	"akpm@linux-foundation.org" <akpm@linux-foundation.org>,
+	"Liam.Howlett@oracle.com" <Liam.Howlett@oracle.com>,
+	"viro@zeniv.linux.org.uk" <viro@zeniv.linux.org.uk>,
+	"brauner@kernel.org" <brauner@kernel.org>,
+	"mjguzik@gmail.com" <mjguzik@gmail.com>,
+	Jianyong Wu <wujianyong@hygon.cn>, Huangsj <huangsj@hygon.cn>,
+	Yuan Zhong <zhongyuan@hygon.cn>, "jack@suse.cz" <jack@suse.cz>,
+	"jlayton@kernel.org" <jlayton@kernel.org>,
+	"chuck.lever@oracle.com" <chuck.lever@oracle.com>,
+	"alex.aring@gmail.com" <alex.aring@gmail.com>,
+	"vbabka@kernel.org" <vbabka@kernel.org>,
+	"jannh@google.com" <jannh@google.com>,
+	"pfalcato@suse.de" <pfalcato@suse.de>,
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>,
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Subject: Re: =?utf-8?B?562U5aSNOiDnrZTlpI06IFtQQVRD?=
+ =?utf-8?B?SF0gbW06IEFk?= =?utf-8?Q?d?= RWH_RMAP_EXCLUDE flag to exclude
+ files from rmap sharing
+Message-ID: <aerhh_tzSs5XapUz@casper.infradead.org>
+References: <20260421020932.3212532-1-liuyibin@hygon.cn>
+ <aeikm2e5Gh5reJ30@lucifer>
+ <bc514883d6154420b3cfde4ab25a20c7@hygon.cn>
+ <aejzSsiXZBK1emv7@lucifer>
+ <a96c20b74b874248bc0cdc2b926a43fe@hygon.cn>
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+In-Reply-To: <a96c20b74b874248bc0cdc2b926a43fe@hygon.cn>
+
+On Fri, Apr 24, 2026 at 01:08:35AM +0000, Yibin Liu wrote:
+> On an Intel Emerald Rapids server (112 cores), run the execl benchmark from
+> UnixBench with the command: ./Run -c 220 execl
+> Then perf top shows:
+> 
+>   91.53%  [kernel]                    [k] osq_lock
+>    0.50%  [kernel]                    [k] rwsem_spin_on_owner
+
+OK, but does this represent a realistic workload?  It's pretty easy to
+construct workloads that hammer on particular locks; the question is
+whether it's a relevant performance bottleneck that customers care about.
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mail-ed1-f44.google.com (mail-ed1-f44.google.com [209.85.208.44])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 84AB22264A9
+	for <linux-fsdevel@vger.kernel.org>; Fri, 24 Apr 2026 06:20:16 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=pass smtp.client-ip=209.85.208.44
+ARC-Seal:i=2; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1777011617; cv=pass; b=J0g7Z2iWDyzMtQdigYk8Jl9k2I4FV7TAhvEQweOoPosaIkCowZQSGlTEgRhljUDVff5A0GblWV7TRMldERIigo2UJHSM4x6MmIUowpTD4Jj3OcipGIhZ0xhwkX+O71dB4buKFeFLNk/FI8a3WePS/fRGPSvkpFWkghUQy+9dVMg=
+ARC-Message-Signature:i=2; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1777011617; c=relaxed/simple;
+	bh=PaFyE7ndfL0ohzdx/jY8C7iuc7OPf9ZY/aOGta7YR0E=;
+	h=MIME-Version:References:In-Reply-To:From:Date:Message-ID:Subject:
+	 To:Cc:Content-Type; b=TkEEfFB0sn+48vKShgumEUvilXtW5sFx0QHFsJCusB6OzOsd9HDHrrLVB4RglHg6qK4S/UZifeA3NgN+bNL4Y7wvEJ7t5UMwmRA7/quv1a4b4BsXvjTzC7h+/4mizMP0KINBwUE8b5ltJUbgk06D7EKhLEF0efz+cN7tlNjKH9U=
+ARC-Authentication-Results:i=2; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com; spf=pass smtp.mailfrom=gmail.com; dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b=WY6Y7Jih; arc=pass smtp.client-ip=209.85.208.44
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=gmail.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b="WY6Y7Jih"
+Received: by mail-ed1-f44.google.com with SMTP id 4fb4d7f45d1cf-676e62faf2bso5186011a12.1
+        for <linux-fsdevel@vger.kernel.org>; Thu, 23 Apr 2026 23:20:16 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1777011615; cv=none;
+        d=google.com; s=arc-20240605;
+        b=OqGruIUioi+htkahFxgzEAvXmJm7tFuIXlxONwVQf8RrzJVtPAhCpM8v241oJKcRKF
+         6M9E3aekc4KbYH6OETPZFbfMGYch+o12npBBzXL/NFNt4nmAzsBFk7f3ZUpxtx9HbJoW
+         voR6G0sZAUBFdB/gXng8HC4Xo0IqeI7JL++MUh8Ie7ADhSxQ67JXfAKfU82Am7+yMTcU
+         /PxualafNzX/A00QnA04xI1jLkOo/hHq9YhOrtc4t1QQ/fYC/bLkQJookTvcEmXJ+FuY
+         mjxELsdnCMhvLDDesscneXm3eHFkKSI98OxByvlaabD4cnR/6Z69dENxVFO8zawTf9Nx
+         YxXw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:dkim-signature;
+        bh=NHT+ZbrFQ1d6JCVRomWC8t8Safh9vXTXuXoPxJbXGH0=;
+        fh=p8uMagBhg4f++PSb7UUhj5aRK1xrNbdU+q3nHOS3BZ8=;
+        b=ksp7ol7qMkQ+g2JB4PdN89HnSm486xDBGgBjdUAje1bZbXcYaeE5rOHzcnqeIFA2zK
+         9+C7dNluHGdH8ACu0F1A5sxROoquwalE9eS+Fguon7YdxB+6bfEAoEewE7mGpbH9+4W5
+         V/Sz4+9aR75H5y7C7NlgHkLD9KgvSDeOvWeQoZy2mngLze7jvMdFRZTreHXfUn7ZzMKK
+         tXeYFzAAENhwNU1EJNPeZB6y+rULQYh7qLDenxRu9NrSVzQ12y4zGM6PDAJtoabOVeR9
+         s+PJUNjXufeK2AYo/1PSQtVoR+d1/xt7p6spztd7v8PBi9KC8dy+cl3J649T31eXOUx2
+         Fahg==;
+        darn=vger.kernel.org
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1777011615; x=1777616415; darn=vger.kernel.org;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=NHT+ZbrFQ1d6JCVRomWC8t8Safh9vXTXuXoPxJbXGH0=;
+        b=WY6Y7JihzvL4kLoIIfcwPV0CYQnnzBDcYRo61v8Wf9XPhC8y6vWoHOrYF0XI7l0Laq
+         vif8mtRadsGMuYXHcMP8XbKW6ri4glYPzR854snW84eDVPbU6jJ4sd7R7vSqf+mrZN6q
+         jToGH4PPGVOY8lp4s2nXpxRbOMKTbTXQT7ENFgCtmpdltT+S+e9GuEoQKvIet3N0iLzZ
+         Tu2PuD6wKfEao3IwzV3S5etUDDr9qArcaBwDm5e9+WjodfnjfZBwgGesd6raNRFJNefs
+         XKcL9zVdk6opc6YD+jB/m/AYtWX9C+F7N9pyicLl04Jzmj//ZlH4Ar15Un9XeXhCSS2d
+         m1XA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1777011615; x=1777616415;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:x-gm-gg:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to;
+        bh=NHT+ZbrFQ1d6JCVRomWC8t8Safh9vXTXuXoPxJbXGH0=;
+        b=OOPEgdLGXTPCGAY45q6JZedZLaF0GpuN8zIJEPGXPutZdm9yDEOVWAtflhVe/2uWE2
+         681GbR4RLnLZbTIof1WZQAMgW562ksjWa/ajwnaHmZA5LYEP7bMFGsOV5r3pPCv4sOl+
+         m4ZxZAeKA9Il9Vu/SKvzstVXtLynrS3bHpukql8Fe8Y+22xYPr3TXhkqEBnLt50e1Uum
+         DdEDeOyNdbZLzAhMmxIt/KxGSALOgUx/9WVQCWPnrLWtgvyXv1JLhopg/4hAlM8GQhCA
+         IXenPsnQfoM+NsGklLiQgvbtQ1NAVYlvay4DM+zAJItv/X98MJaL2ITZBaG4FLRYDPfD
+         GBiw==
+X-Forwarded-Encrypted: i=1; AFNElJ9krC4J/Z5AbINDIfJl3R/33AlmdnT+8k4Z6JPd0QKF/WxHzCzOsUpvl2Lssfpeb6bn1CUSE/Q3ujwUaNxI@vger.kernel.org
+X-Gm-Message-State: AOJu0YwGFfoPuaJmRXgDiKFeVOLHxd5TzuAbL2HA/XRlfyiX7hawimMQ
+	Vege2fIA6KT0AKpXS8BGZoLKP4bWMWrMpw8KgsxUd7YSBybsNoY5Jjrrh8z7/tYhwGWC1o1bRym
+	WdwpHe6CPLvUhJMkgPryggeGk3wChdRM=
+X-Gm-Gg: AeBDievRkQwZISVZXo+gxA3xo3IBvq+iAD8pcjgvOqE5ESwZtQOU2MFR2z/LrYV/YqR
+	q+3YuM0CcqjhRZp3KKrbxiTd3QMe2TXvgtyoV2Hzb9ZYeDWuNNreCw9/jWzCmHSKMX3g7ZCDLTG
+	TmGXzV+n4pbwBmed0cbT1+YTsPecE3WfuNtEaGEZqqtnBvN6TxAGqj04WHMkTnClLPQY3ajFZr3
+	V3UlpS3pmMqQ9Gs9BBdgTkqGpIf2h4i2RclWmoim5iUi1i9HqCbj648cDyf345OGTzSzIObxNue
+	pvj9jUlwa0Oi08/kzxoo5UD4K3cNdJbk/TD6nTBb2Gw++9SGgw==
+X-Received: by 2002:a05:6402:28c8:b0:677:270f:6f4b with SMTP id
+ 4fb4d7f45d1cf-677270f7f6cmr3673799a12.1.1777011614631; Thu, 23 Apr 2026
+ 23:20:14 -0700 (PDT)
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+References: <20260421020932.3212532-1-liuyibin@hygon.cn> <aeikm2e5Gh5reJ30@lucifer>
+ <bc514883d6154420b3cfde4ab25a20c7@hygon.cn> <aejzSsiXZBK1emv7@lucifer>
+ <a96c20b74b874248bc0cdc2b926a43fe@hygon.cn> <aerhh_tzSs5XapUz@casper.infradead.org>
+In-Reply-To: <aerhh_tzSs5XapUz@casper.infradead.org>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Fri, 24 Apr 2026 08:20:01 +0200
+X-Gm-Features: AQROBzCMZgHVIUyd2eInZGYwOMcnSg29XnDK8mRT8aosN_mcUyOqAAyW9pt2pWQ
+Message-ID: <CAGudoHGnOMj7O0P0pttdgdhGnJq8+Nv3_91x8kEAT5wR_xDmgQ@mail.gmail.com>
+Subject: =?UTF-8?B?UmU6IOetlOWkjTog562U5aSNOiBbUEFUQ0hdIG1tOiBBZGQgUldIX1JNQVBfRVhDTFVERQ==?=
+	=?UTF-8?B?IGZsYWcgdG8gZXhjbHVkZSBmaWxlcyBmcm9tIHJtYXAgc2hhcmluZw==?=
+To: Matthew Wilcox <willy@infradead.org>
+Cc: Yibin Liu <liuyibin@hygon.cn>, Lorenzo Stoakes <ljs@kernel.org>, 
+	"linux-mm@kvack.org" <linux-mm@kvack.org>, 
+	"akpm@linux-foundation.org" <akpm@linux-foundation.org>, 
+	"Liam.Howlett@oracle.com" <Liam.Howlett@oracle.com>, 
+	"viro@zeniv.linux.org.uk" <viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>, 
+	Jianyong Wu <wujianyong@hygon.cn>, Huangsj <huangsj@hygon.cn>, Yuan Zhong <zhongyuan@hygon.cn>, 
+	"jack@suse.cz" <jack@suse.cz>, "jlayton@kernel.org" <jlayton@kernel.org>, 
+	"chuck.lever@oracle.com" <chuck.lever@oracle.com>, "alex.aring@gmail.com" <alex.aring@gmail.com>, 
+	"vbabka@kernel.org" <vbabka@kernel.org>, "jannh@google.com" <jannh@google.com>, 
+	"pfalcato@suse.de" <pfalcato@suse.de>, 
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>, 
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+On Fri, Apr 24, 2026 at 5:20=E2=80=AFAM Matthew Wilcox <willy@infradead.org=
+> wrote:
+>
+> On Fri, Apr 24, 2026 at 01:08:35AM +0000, Yibin Liu wrote:
+> > On an Intel Emerald Rapids server (112 cores), run the execl benchmark =
+from
+> > UnixBench with the command: ./Run -c 220 execl
+> > Then perf top shows:
+> >
+> >   91.53%  [kernel]                    [k] osq_lock
+> >    0.50%  [kernel]                    [k] rwsem_spin_on_owner
+>
+> OK, but does this represent a realistic workload?  It's pretty easy to
+> construct workloads that hammer on particular locks; the question is
+> whether it's a relevant performance bottleneck that customers care about.
+
+This is a genuine problem when doing large-scale package building.
+I'll say upfront I have extensive experience with this crap on
+FreeBSD, I did not run it on Linux myself, but bear with me here --
+while FreeBSD is in doubt a less scalable kernel, Linux demonstrated
+to be suffering from the same problems.
+
+Say you have a box with a core count of 100 and get it to work
+building up to 100 packages at a time. Further, even if you use some
+form of separation from file-system standpoint on userspace level, you
+still want to share the common binaries to reduce memory + cache
+footprint so you at least --bind them. Then you are susceptible to
+contention issues at least on paper.
+
+Granted, building a pig like chromium scales great because it is
+written in c++ and almost all of the time is spent in userspace, with
+forks and execs of the compiler highly spread out in time, in turn
+putting very little pressure on the locks.
+
+However, vast majority of packages is very tiny in comparison
+(literally a few .c files) and this is where things go south as they
+engage in exec frenzy, looking like a borderline microbenchmark. The
+primary culprit is configure scripts, issuing an idiotic number of
+back-to-back execs of short-lived processes (notably sed, but also
+grep, rm and others). There is a lot of evil in makefiles as well.
+
+I don't have numbers handy, but in case of the FreeBSD ports tree we
+are talking about over 10 000 ports which on their own take few
+seconds to build. Since these are largely single-threaded, if you have
+package-building machinery which can saturate the box, you easily end
+up with parallel builds matching your core count. And when they engage
+in exec-frenzy for the duration, you may as well be microbenchmarking
+it.
+
+A sufficiently pessimized workload is indistinguishable from a
+microbenchmark and this here is an example of one.
+
+iow this is a real problem, but I don't have specific numbers for Linux.
+
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from mail-qv1-f52.google.com (mail-qv1-f52.google.com [209.85.219.52])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES128-GCM-SHA256 (128/128 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id 45A4F35DA64
+	for <linux-fsdevel@vger.kernel.org>; Fri, 24 Apr 2026 06:54:30 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=pass smtp.client-ip=209.85.219.52
+ARC-Seal:i=2; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1777013671; cv=pass; b=irANYX3+z2/rBGuKi8LYfdTW5lyr9RsJVAdT36xu6mhUHKWZJ90t9oEdT1KB8UT7Hb62HCnHyUMKMhnEEQKFoFVwHYBxRRcOHEVNmbFcai9m5fUoDRBGlJniaQZIbAzbnVOt34Amc1PPt/TEN2V0AilcXHnxLVSgEpiSr66oaqg=
+ARC-Message-Signature:i=2; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1777013671; c=relaxed/simple;
+	bh=dABL+RclHHEvo6AenqS1yr8ZCqinVWuEF12WIMeMDrk=;
+	h=MIME-Version:References:In-Reply-To:From:Date:Message-ID:Subject:
+	 To:Cc:Content-Type; b=FbzBQGzxA9EnXyyYw7GaBYwuyI+uPU12SW/7jPAKIbrYxSEUMLOeixXyupI+zeIkzgAUygt6H8+Abo3y688qQnBALM2TEbVqqL5umjfwD7R1c6ZJzg3HnZ7nK9Mh660o1vC9L1j5YHFYaQkg1Dh8bb+fhXbmRx5Weh95Ij8EGco=
+ARC-Authentication-Results:i=2; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com; spf=pass smtp.mailfrom=gmail.com; dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b=o2mLMoKd; arc=pass smtp.client-ip=209.85.219.52
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=gmail.com
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=gmail.com
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (2048-bit key) header.d=gmail.com header.i=@gmail.com header.b="o2mLMoKd"
+Received: by mail-qv1-f52.google.com with SMTP id 6a1803df08f44-8a48deebe95so57216636d6.0
+        for <linux-fsdevel@vger.kernel.org>; Thu, 23 Apr 2026 23:54:30 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1777013669; cv=none;
+        d=google.com; s=arc-20240605;
+        b=hWEYyDnGKcXh1GamwonMFaWD59Ojs2ULn4+cZGo0+1LyxccFxdXp5hje0UElspcAlc
+         /lravHfuTtpPkc3MFh52v+/sDT6I0ve+BxNPE5P57J17en0CP23i6WfTN/oqQFRgjgZW
+         NAYAs2yUDB3/5A7DQLAYlQ+7VGZtNszP4yWzUmTa5cNgyxf5+M6UgMQmKSKiPzTv8Gga
+         oz1QsDl5sZqJ/KDn1hW1GKKsDzZkVmue1fk4fweYzfsAMEodCtVYFKYezsO1mQkkWvA3
+         9RTziOuGJh0boZ3A2enJpooaaOagLcwGk61TxhFXhkqYC/OqzSkfUNHqOPOCA2p4puLf
+         Tjrg==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:dkim-signature;
+        bh=PY6x0drsie9DTFRy/FzyM357y9cc2vXO6VzIJJ4fYUA=;
+        fh=3I2/VEa5R8nvqk3xtY+l5/4iiAHe7DgWE+eq11wtIq4=;
+        b=OKYTp1uia++1CHpA1yE8UCSpzNHuY3gIXlVm689nDxriMS+wufbsdUJOZqq9knaxjG
+         NEJDZAc/Ilxz2FxRElXi1oYifKZPpWAqiCr3bEfJq4c230R9mftL/r+H0i/NnXPNEUI1
+         RpzZf8lRzbspGIkDAPpqnCah2N0uI5p1YBYdEE6f1QJ9KfuwoP3W//hVWN4eYVBdYz3q
+         DE998KK6MhzU09B+H/vmCJY5d2nHJlrcv0LqiSsqXGLBwV4iSOwRez6xeTAddgjq8uRG
+         lXbl56sgkCjPCOm1U8wzBMn0YZI2Nmvdh0dABTd8ruvYl9JdZMiaOuGx+6710rolXtvi
+         Qmpw==;
+        darn=vger.kernel.org
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20251104; t=1777013669; x=1777618469; darn=vger.kernel.org;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:from:to:cc:subject:date
+         :message-id:reply-to;
+        bh=PY6x0drsie9DTFRy/FzyM357y9cc2vXO6VzIJJ4fYUA=;
+        b=o2mLMoKdONolvwpELVe42lkoZJgdQF9BDyoyeesxKfKGt9Ab5BhQjKIf0JzckU6nNR
+         KG/YdqH/z3JVyyYPPSH+rwBEMKYo82RCkYcxjB8QN2Vk9hhNVDUl/KOy1I6qumJJTuuf
+         QyECPVWvQA+rG5Xsbb8KcYtZBNy5vdYwoP34LqEjdce69g3lXiWBUckwZEYEdWdFKfkG
+         E1yeSkYdKSqXo4p7d6OCsxAFQvmvRh06tO16W6k/5W7tpGeNZyAhWPLA/rzFjaVeqbIy
+         6hD9y1CqEnzruT+Ux7cfeIjrr5B3Y8deFlD+ePIbPDCGevCQfZsykReg/B6whCNxTGfR
+         Ss6Q==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20251104; t=1777013669; x=1777618469;
+        h=content-transfer-encoding:cc:to:subject:message-id:date:from
+         :in-reply-to:references:mime-version:x-gm-gg:x-gm-message-state:from
+         :to:cc:subject:date:message-id:reply-to;
+        bh=PY6x0drsie9DTFRy/FzyM357y9cc2vXO6VzIJJ4fYUA=;
+        b=b6M4XLmTEYSKttCPVmJLXk2gIWoWKS31sk7PmOhHT0z5xzwgKHU+BZFJW1nuszxtRA
+         ZPT8pDtgS9cnj0Db8KASsGktjqmdHwwhgODWMPbgO2QV6vSz7UEJ7/zB3t1R0AFZ68+T
+         0URUucqIHyflScscqiNH/pROL5BWbbQ0ORYIXGhmq4360j93Gs7JK1dPVhDW2ntpobfC
+         YP11ZlvyMA/rKS2hLE7T9d35ppichuKqtuIK1D/vI9Mwp7vdgxLwg/jHd0B+uKaJHPp4
+         wIFXgL0yWwZRlqh4VSGhxHTd3dqjkG8EBkzrtQq8zsWHVI3QKAChUS/+GHrIT7gakYMu
+         wfTg==
+X-Forwarded-Encrypted: i=1; AFNElJ8UkKNgjO2fHo7tH7saA4NQHmWWUSzdGOZRmqO7XAVnbjiXqr4qgHDlO8T5+4UkPW2ZW3m/fI8CrOR13h2b@vger.kernel.org
+X-Gm-Message-State: AOJu0YxlIxBEj/eK07yM6+9scXkEIz0v0QeVXX8vd/lRLzOdu1phPYJ5
+	9be1Hr9FMFeuPOxDIPz6w6ax+V1GblOzCgfM+CZWN6+Dw6mVYsM0DhlsIJc+BzW7ZJy5/TAvPlS
+	rWD/XgWOhUz9ssqSEAMevlXi/ZtBNW2XTBKLHYPk=
+X-Gm-Gg: AeBDietCveRAUa3bItt9uTRMWTKpqrcw1t+H1mmB7uEq8fvfCNYLnqV051occyP1nfu
+	rDEnMRtufVzzxesFn7sm7xpSCZ+FR14tQpg4jVOLSe+eQ3JbjhhmHM7ctnNX1jjlA9J4A7NnB0m
+	LWGhb6Cmak2jRs3U/FlsSJLswuuN417Pw1TvqOkUgzGICKFxrgM6ivxCrvQPAFcl+oQi7XE4VGm
+	jjjASMNFsdHA6M2Seih0mPEgoPY2894xZjZQy2YNSMRSEZd/SaBRr1FsFtDH+1aHZrFmdRKFDP0
+	3MOpRpvhC8ERPyOc7g6T1Taii2xs55IxHtUZh4NgKaebU1+gXw==
+X-Received: by 2002:a05:6214:20a8:b0:89c:5f6e:451a with SMTP id
+ 6a1803df08f44-8b028080052mr492516496d6.21.1777013669182; Thu, 23 Apr 2026
+ 23:54:29 -0700 (PDT)
+Precedence: bulk
+X-Mailing-List: linux-fsdevel@vger.kernel.org
+List-Id: <linux-fsdevel.vger.kernel.org>
+List-Subscribe: <mailto:linux-fsdevel+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:linux-fsdevel+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+References: <20260421020932.3212532-1-liuyibin@hygon.cn> <aeikm2e5Gh5reJ30@lucifer>
+ <bc514883d6154420b3cfde4ab25a20c7@hygon.cn> <aejzSsiXZBK1emv7@lucifer>
+ <a96c20b74b874248bc0cdc2b926a43fe@hygon.cn> <aerhh_tzSs5XapUz@casper.infradead.org>
+ <CAGudoHGnOMj7O0P0pttdgdhGnJq8+Nv3_91x8kEAT5wR_xDmgQ@mail.gmail.com>
+In-Reply-To: <CAGudoHGnOMj7O0P0pttdgdhGnJq8+Nv3_91x8kEAT5wR_xDmgQ@mail.gmail.com>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Fri, 24 Apr 2026 08:54:14 +0200
+X-Gm-Features: AQROBzA2h81VNcq2jOAQe_t2FwlCVNTmWCUZPO4gDdP4xuiwSERS1JEXtZu_oiw
+Message-ID: <CAGudoHHC0wy9YrkTF4OZanjNPA2HKnzZQDv-Cv6_NnUChb_p8A@mail.gmail.com>
+Subject: =?UTF-8?B?UmU6IOetlOWkjTog562U5aSNOiBbUEFUQ0hdIG1tOiBBZGQgUldIX1JNQVBfRVhDTFVERQ==?=
+	=?UTF-8?B?IGZsYWcgdG8gZXhjbHVkZSBmaWxlcyBmcm9tIHJtYXAgc2hhcmluZw==?=
+To: Matthew Wilcox <willy@infradead.org>
+Cc: Yibin Liu <liuyibin@hygon.cn>, Lorenzo Stoakes <ljs@kernel.org>, 
+	"linux-mm@kvack.org" <linux-mm@kvack.org>, 
+	"akpm@linux-foundation.org" <akpm@linux-foundation.org>, 
+	"Liam.Howlett@oracle.com" <Liam.Howlett@oracle.com>, 
+	"viro@zeniv.linux.org.uk" <viro@zeniv.linux.org.uk>, "brauner@kernel.org" <brauner@kernel.org>, 
+	Jianyong Wu <wujianyong@hygon.cn>, Huangsj <huangsj@hygon.cn>, Yuan Zhong <zhongyuan@hygon.cn>, 
+	"jack@suse.cz" <jack@suse.cz>, "jlayton@kernel.org" <jlayton@kernel.org>, 
+	"chuck.lever@oracle.com" <chuck.lever@oracle.com>, "alex.aring@gmail.com" <alex.aring@gmail.com>, 
+	"vbabka@kernel.org" <vbabka@kernel.org>, "jannh@google.com" <jannh@google.com>, 
+	"pfalcato@suse.de" <pfalcato@suse.de>, 
+	"linux-fsdevel@vger.kernel.org" <linux-fsdevel@vger.kernel.org>, 
+	"linux-kernel@vger.kernel.org" <linux-kernel@vger.kernel.org>
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+On Fri, Apr 24, 2026 at 8:20=E2=80=AFAM Mateusz Guzik <mjguzik@gmail.com> w=
+rote:
+>
+> On Fri, Apr 24, 2026 at 5:20=E2=80=AFAM Matthew Wilcox <willy@infradead.o=
+rg> wrote:
+> >
+> > On Fri, Apr 24, 2026 at 01:08:35AM +0000, Yibin Liu wrote:
+> > > On an Intel Emerald Rapids server (112 cores), run the execl benchmar=
+k from
+> > > UnixBench with the command: ./Run -c 220 execl
+> > > Then perf top shows:
+> > >
+> > >   91.53%  [kernel]                    [k] osq_lock
+> > >    0.50%  [kernel]                    [k] rwsem_spin_on_owner
+> >
+> > OK, but does this represent a realistic workload?  It's pretty easy to
+> > construct workloads that hammer on particular locks; the question is
+> > whether it's a relevant performance bottleneck that customers care abou=
+t.
+>
+> This is a genuine problem when doing large-scale package building.
+> I'll say upfront I have extensive experience with this crap on
+> FreeBSD, I did not run it on Linux myself, but bear with me here --
+> while FreeBSD is in doubt a less scalable kernel, Linux demonstrated
+> to be suffering from the same problems.
+>
+> Say you have a box with a core count of 100 and get it to work
+> building up to 100 packages at a time. Further, even if you use some
+> form of separation from file-system standpoint on userspace level, you
+> still want to share the common binaries to reduce memory + cache
+> footprint so you at least --bind them. Then you are susceptible to
+> contention issues at least on paper.
+>
+> Granted, building a pig like chromium scales great because it is
+> written in c++ and almost all of the time is spent in userspace, with
+> forks and execs of the compiler highly spread out in time, in turn
+> putting very little pressure on the locks.
+>
+> However, vast majority of packages is very tiny in comparison
+> (literally a few .c files) and this is where things go south as they
+> engage in exec frenzy, looking like a borderline microbenchmark. The
+> primary culprit is configure scripts, issuing an idiotic number of
+> back-to-back execs of short-lived processes (notably sed, but also
+> grep, rm and others). There is a lot of evil in makefiles as well.
+>
+> I don't have numbers handy, but in case of the FreeBSD ports tree we
+> are talking about over 10 000 ports which on their own take few
+> seconds to build. Since these are largely single-threaded, if you have
+> package-building machinery which can saturate the box, you easily end
+> up with parallel builds matching your core count. And when they engage
+> in exec-frenzy for the duration, you may as well be microbenchmarking
+> it.
+>
+> A sufficiently pessimized workload is indistinguishable from a
+> microbenchmark and this here is an example of one.
+>
+> iow this is a real problem, but I don't have specific numbers for Linux.
+
+I had gcc handy on Linux, so I ran configure on it by hand. This is
+all autotools generated, so general theme matches the small programs
+as well.
+
+I ended up with the following execs:
+    285 /usr/bin/sed
+     95 /usr/bin/rm
+     88 /usr/bin/grep
+     77 /usr/bin/cat
+     30 /usr/bin/gcc
+     27 /usr/bin/expr
+     23 /usr/libexec/gcc/x86_64-linux-gnu/15/cc1
+     21 /usr/bin/as
+     10 /usr/bin/uname
+      8 /usr/libexec/gcc/x86_64-linux-gnu/15/collect2
+      8 /usr/bin/ld
+      8 /bin/bash
+      7 /usr/bin/mv
+      7 /usr/bin/c++
+      6 /usr/bin/mkdir
+      6 /usr/bin/basename
+      5 /usr/bin/ln
+      5 /usr/bin/cmp
+      4 /usr/bin/sort
+      4 /usr/bin/dirname
+      3 /usr/bin/rmdir
+      3 /usr/bin/hostname
+      3 /usr/bin/gawk
+      3 /usr/bin/cc
+      2 /usr/bin/strip
+      2 /usr/bin/mktemp
+      2 /usr/bin/ls
+      2 /usr/bin/egrep
+      2 /usr/bin/cp
+      2 /usr/bin/ar
+      2 /bin/sh
+      1 /usr/lib/llvm-20/bin/clang
+      1 /usr/bin/tr
+      1 /usr/bin/touch
+      1 /usr/bin/ranlib
+      1 /usr/bin/install
+      1 /usr/bin/diff
+      1 /usr/bin/chmod
+      1 /usr/bin/arch
+      1 /home/mjg/repos/gcc/missing
+      1 /bin/uname
+      1 /bin/arch
+      1 ./contrib/compare-debug
+      1 ./conftest
+      1 ./configure
+
+It spent almost half of the runtime in the kernel, all while there was
+no contention.
+
+So imagine all that to compile a few .c files & rinse & repeat
+thousands of times in parallel on 100+ cores.
+
+

@@ -1,7 +1,7 @@
 From ece3cc7e397d4fa7cecab94b3b49c40d2633713c Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 14:36:10 +0800
-Subject: [PATCH 1/5] mm: batch vma insertions in dup_mmap
+Subject: [PATCH 1/7] mm: batch vma insertions in dup_mmap
 
 dup_mmap acquires and releases i_mmap_lock_write for each file-backed
 VMA individually during fork, even when consecutive VMAs share the same

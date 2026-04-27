@@ -1,7 +1,7 @@
 From 0c6a325618c7ce72ed3d8084676f65498a18630d Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 11:25:13 +0800
-Subject: [PATCH 5/5] mm: fix self-deadlock in vma_prepare() with i_mmap lock
+Subject: [PATCH 5/7] mm: fix self-deadlock in vma_prepare() with i_mmap lock
  batching
 
 When execve batching is enabled (i_mmap_batching), vma_link_file()

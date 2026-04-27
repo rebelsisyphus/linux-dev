@@ -1,0 +1,168 @@
+From 85d58b1f3f4f6d236dd7567142712fa4e8ad9995 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 19:23:30 +0800
+Subject: [PATCH 7/7] mm: fix lock type mismatch and lock ordering in i_mmap
+ batching/sharding
+
+Fix two potential issues in the i_mmap sharding and batching code:
+
+1. Lock type mismatch in vma_link_file_flush():
+   When CONFIG_MM_IMMAP_SHARD is enabled, i_mmap_lock_write() acquires
+   a read lock on the top-level rwsem for sharded mappings, but
+   i_mmap_unlock_write() releases based on the runtime sharded state.
+   If a mapping is promoted between cache and flush, the wrong unlock
+   type is used, causing either a leaked lock (down_write + up_read) or
+   a crash (down_read + up_write).
+
+   Fix by recording the lock type at cache time in a new
+   mm_struct->i_mmap_cached_lock_is_write bit, and using it during
+   flush to call the correct unlock primitive.
+
+2. Lock ordering inconsistency in dup_mmap_file_batch_flush():
+   __vma_link_file() takes locks in the order:
+       shard_lock -> flush_dcache_lock -> insert -> ... -> unlock
+   But dup_mmap_file_batch_flush() used:
+       top_lock -> flush_dcache_lock -> shard_lock -> insert -> ...
+   This creates a lock ordering inversion on architectures where
+   flush_dcache_mmap_lock is a real spinlock (ARM, parisc).
+
+   Fix by moving flush_dcache_mmap_lock/unlock inside the per-iteration
+   shard_lock region, matching the order in __vma_link_file().
+
+Fixes: fdbf18d326f2 ("mm: defer i_mmap insertion to batch across consecutive mmap calls")
+Fixes: 05d91dd375ab ("mm: shard i_mmap interval tree with per-shard locks")
+Signed-off-by: OpenCode Agent <agent@opencodex.ai>
+---
+ include/linux/mm_types.h |  1 +
+ kernel/fork.c            |  1 +
+ mm/mmap.c                |  6 ++++--
+ mm/vma.c                 | 29 +++++++++++++++++++++--------
+ 4 files changed, 27 insertions(+), 10 deletions(-)
+
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 002c1fd25a03..abb81df3041d 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1280,6 +1280,7 @@ struct mm_struct {
+ 		 */
+ 		struct address_space *i_mmap_cached_mapping;
+ 		unsigned int i_mmap_batching :1;
++		unsigned int i_mmap_cached_lock_is_write :1;
+ 		mm_flags_t flags; /* Must use mm_flags_* hlpers to access */
+ 
+ #ifdef CONFIG_AIO
+diff --git a/kernel/fork.c b/kernel/fork.c
+index d0e7b936da74..7694e81a3e46 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1083,6 +1083,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	mm->map_count = 0;
+ 	mm->i_mmap_cached_mapping = NULL;
+ 	mm->i_mmap_batching = 0;
++	mm->i_mmap_cached_lock_is_write = 0;
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
+diff --git a/mm/mmap.c b/mm/mmap.c
+index abcf9367481d..5d655110c895 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1750,7 +1750,6 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *db)
+ 
+ 	mapping = db->mapping;
+ 	i_mmap_lock_write_promote(mapping);
+-	flush_dcache_mmap_lock(mapping);
+ 	for (i = 0; i < db->count; i++) {
+ 		struct vm_area_struct *tmp = db->vmas[i].tmp;
+ 
+@@ -1772,18 +1771,21 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *db)
+ 				I_MMAP_NR_SHARDS;
+ 			shard = tmp->i_mmap_shard_idx;
+ 			i_mmap_shard_lock_write(mapping, shard);
++			flush_dcache_mmap_lock(mapping);
+ 			root = i_mmap_shard_tree(mapping, shard);
+ 			vma_interval_tree_insert_after(tmp, db->vmas[i].mpnt,
+ 						       root);
++			flush_dcache_mmap_unlock(mapping);
+ 			i_mmap_shard_unlock_write(mapping, shard);
+ 		} else
+ #endif
+ 		{
++			flush_dcache_mmap_lock(mapping);
+ 			vma_interval_tree_insert_after(tmp, db->vmas[i].mpnt,
+ 						       &mapping->i_mmap);
++			flush_dcache_mmap_unlock(mapping);
+ 		}
+ 	}
+-	flush_dcache_mmap_unlock(mapping);
+ 	i_mmap_unlock_write(mapping);
+ 
+ 	db->count = 0;
+diff --git a/mm/vma.c b/mm/vma.c
+index ee53abeb94ae..ed2413497ca3 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -1955,10 +1955,12 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 			if (mm->i_mmap_batching && mm->i_mmap_cached_mapping)
+ 				vma_link_file_flush(mm);
+ 			__vma_link_file(vma, mapping);
+-			if (mm->i_mmap_batching)
++			if (mm->i_mmap_batching) {
+ 				mm->i_mmap_cached_mapping = mapping;
+-			else
++				mm->i_mmap_cached_lock_is_write = !i_mmap_is_sharded(mapping);
++			} else {
+ 				up_write(&mapping->i_mmap_rwsem);
++			}
+ 			return;
+ 		}
+ 
+@@ -1976,10 +1978,12 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 				vma_link_file_flush(mm);
+ 			down_write(&mapping->i_mmap_rwsem);
+ 			__vma_link_file(vma, mapping);
+-			if (mm->i_mmap_batching)
++			if (mm->i_mmap_batching) {
+ 				mm->i_mmap_cached_mapping = mapping;
+-			else
++				mm->i_mmap_cached_lock_is_write = !i_mmap_is_sharded(mapping);
++			} else {
+ 				up_write(&mapping->i_mmap_rwsem);
++			}
+ 			return;
+ 		}
+ 	}
+@@ -2016,6 +2020,7 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 		i_mmap_lock_write(mapping);
+ 		__vma_link_file(vma, mapping);
+ 		mm->i_mmap_cached_mapping = mapping;
++		mm->i_mmap_cached_lock_is_write = !i_mmap_is_sharded(mapping);
+ 		return;
+ 	}
+ 
+@@ -2034,10 +2039,18 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+  */
+ void vma_link_file_flush(struct mm_struct *mm)
+ {
+-	if (mm->i_mmap_cached_mapping) {
+-		i_mmap_unlock_write(mm->i_mmap_cached_mapping);
+-		mm->i_mmap_cached_mapping = NULL;
+-	}
++	struct address_space *mapping = mm->i_mmap_cached_mapping;
++
++	if (!mapping)
++		return;
++
++	if (mm->i_mmap_cached_lock_is_write)
++		up_write(&mapping->i_mmap_rwsem);
++	else
++		up_read(&mapping->i_mmap_rwsem);
++
++	mm->i_mmap_cached_mapping = NULL;
++	mm->i_mmap_cached_lock_is_write = 0;
+ }
+ 
+ #ifdef CONFIG_MM_IMMAP_SHARD
+-- 
+2.43.0
+

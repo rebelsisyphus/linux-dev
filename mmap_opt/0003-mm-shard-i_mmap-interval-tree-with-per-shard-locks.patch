@@ -1,7 +1,7 @@
 From 05d91dd375ab6c88fcfecb65ecec9f1d1f095311 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 15:49:56 +0800
-Subject: [PATCH 3/5] mm: shard i_mmap interval tree with per-shard locks
+Subject: [PATCH 3/7] mm: shard i_mmap interval tree with per-shard locks
 
 The per-mapping i_mmap_rwsem is a central contention point on high-core
 machines running execve-intensive workloads. Replace it with a sharded

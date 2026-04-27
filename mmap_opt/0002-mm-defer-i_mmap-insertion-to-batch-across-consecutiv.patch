@@ -1,7 +1,7 @@
 From fdbf18d326f241d33b34a21ddde13fa57b8a2e13 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 14:36:26 +0800
-Subject: [PATCH 2/5] mm: defer i_mmap insertion to batch across consecutive
+Subject: [PATCH 2/7] mm: defer i_mmap insertion to batch across consecutive
  mmap calls
 
 During execve, the ELF loader maps multiple PT_LOAD segments of the

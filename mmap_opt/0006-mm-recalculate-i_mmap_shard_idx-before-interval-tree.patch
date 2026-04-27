@@ -1,0 +1,153 @@
+From e52f8977b54ab74ca47696daba22bfc3944eea0e Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 17:25:34 +0800
+Subject: [PATCH 6/7] mm: recalculate i_mmap_shard_idx before interval tree
+ operations
+
+When CONFIG_MM_IMMAP_SHARD is enabled, each VMA stores an
+i_mmap_shard_idx derived from vm_pgoff to determine which per-shard
+interval tree and lock it belongs to.
+
+However, vma_merge_new_range(), vma_shrink(), and other operations
+that alter vm_pgoff do not update i_mmap_shard_idx. This causes
+subsequent interval tree remove/insert operations to target the wrong
+shard tree -- the VMA may not exist in that tree, leading to
+__rb_erase_color() NULL pointer dereferences, or it may be inserted
+into a tree where it does not belong, corrupting the RB tree.
+
+This manifests on physical machines as systemctl/ps hangs (deadlock
+from tree corruption) and sporadic kernel oops in __rb_erase_color
+during process exit.
+
+Fix by recalculating i_mmap_shard_idx from the current vm_pgoff
+immediately before every sharded interval tree operation:
+- __vma_link_file()      (insert)
+- __remove_shared_vm_struct() (remove)
+- vma_prepare()          (remove for vp->vma and vp->adj_next)
+- vma_complete()         (insert for vp->vma and vp->adj_next)
+- dup_mmap_file_batch_flush() (insert_after for fork path)
+
+Fixes: 05d91dd375ab ("mm: shard i_mmap interval tree with per-shard locks")
+Signed-off-by: OpenCode Agent <agent@opencodex.ai>
+---
+ mm/mmap.c | 11 ++++++++++-
+ mm/vma.c  | 43 ++++++++++++++++++++++++++++++++++++++++---
+ 2 files changed, 50 insertions(+), 4 deletions(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 93eb613f9241..abcf9367481d 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1759,9 +1759,18 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *db)
+ 
+ #ifdef CONFIG_MM_IMMAP_SHARD
+ 		if (i_mmap_is_sharded(mapping)) {
+-			unsigned int shard = tmp->i_mmap_shard_idx;
++			unsigned int shard;
+ 			struct rb_root_cached *root;
+ 
++			/*
++			 * Recalculate from current vm_pgoff: tmp may have been
++			 * copied from a parent VMA whose i_mmap_shard_idx was
++			 * stale after merge/shrink.
++			 */
++			tmp->i_mmap_shard_idx =
++				(tmp->vm_pgoff ^ (tmp->vm_pgoff >> PAGE_SHIFT)) %
++				I_MMAP_NR_SHARDS;
++			shard = tmp->i_mmap_shard_idx;
+ 			i_mmap_shard_lock_write(mapping, shard);
+ 			root = i_mmap_shard_tree(mapping, shard);
+ 			vma_interval_tree_insert_after(tmp, db->vmas[i].mpnt,
+diff --git a/mm/vma.c b/mm/vma.c
+index 6ceb7cd7dba3..ee53abeb94ae 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -231,8 +231,16 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 
+ #ifdef CONFIG_MM_IMMAP_SHARD
+ 	if (i_mmap_is_sharded(mapping)) {
+-		unsigned int shard = vma->i_mmap_shard_idx;
++		unsigned int shard;
+ 
++		/*
++		 * Recalculate in case vm_pgoff changed since last insert
++		 * (e.g. vma merge/shrink).
++		 */
++		vma->i_mmap_shard_idx =
++			(vma->vm_pgoff ^ (vma->vm_pgoff >> PAGE_SHIFT)) %
++			I_MMAP_NR_SHARDS;
++		shard = vma->i_mmap_shard_idx;
+ 		i_mmap_shard_lock_write(mapping, shard);
+ 		root = &mapping->i_mmap_shards[shard].tree;
+ 	}
+@@ -259,8 +267,16 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 
+ #ifdef CONFIG_MM_IMMAP_SHARD
+ 	if (i_mmap_is_sharded(mapping)) {
+-		unsigned int shard = vma->i_mmap_shard_idx;
++		unsigned int shard;
+ 
++		/*
++		 * Recalculate in case vm_pgoff changed since last insert
++		 * (e.g. vma merge/shrink).
++		 */
++		vma->i_mmap_shard_idx =
++			(vma->vm_pgoff ^ (vma->vm_pgoff >> PAGE_SHIFT)) %
++			I_MMAP_NR_SHARDS;
++		shard = vma->i_mmap_shard_idx;
+ 		i_mmap_shard_lock_write(mapping, shard);
+ 		root = &mapping->i_mmap_shards[shard].tree;
+ 	}
+@@ -353,13 +369,24 @@ static void vma_prepare(struct vma_prepare *vp)
+ 		flush_dcache_mmap_lock(vp->mapping);
+ #ifdef CONFIG_MM_IMMAP_SHARD
+ 		if (i_mmap_is_sharded(vp->mapping)) {
+-			unsigned int shard = vp->vma->i_mmap_shard_idx;
++			unsigned int shard;
+ 
++			/*
++			 * Recalculate in case vm_pgoff changed since last
++			 * insert (e.g. vma merge/shrink).
++			 */
++			vp->vma->i_mmap_shard_idx =
++				(vp->vma->vm_pgoff ^ (vp->vma->vm_pgoff >> PAGE_SHIFT)) %
++				I_MMAP_NR_SHARDS;
++			shard = vp->vma->i_mmap_shard_idx;
+ 			i_mmap_shard_lock_write(vp->mapping, shard);
+ 			vma_interval_tree_remove(vp->vma,
+ 				i_mmap_shard_tree(vp->mapping, shard));
+ 			i_mmap_shard_unlock_write(vp->mapping, shard);
+ 			if (vp->adj_next) {
++				vp->adj_next->i_mmap_shard_idx =
++					(vp->adj_next->vm_pgoff ^ (vp->adj_next->vm_pgoff >> PAGE_SHIFT)) %
++					I_MMAP_NR_SHARDS;
+ 				shard = vp->adj_next->i_mmap_shard_idx;
+ 				i_mmap_shard_lock_write(vp->mapping, shard);
+ 				vma_interval_tree_remove(vp->adj_next,
+@@ -395,13 +422,23 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 		if (i_mmap_is_sharded(vp->mapping)) {
+ 			unsigned int shard;
+ 
++			/*
++			 * Recalculate in case vm_pgoff changed during the
++			 * operation (e.g. vma merge/shrink).
++			 */
+ 			if (vp->adj_next) {
++				vp->adj_next->i_mmap_shard_idx =
++					(vp->adj_next->vm_pgoff ^ (vp->adj_next->vm_pgoff >> PAGE_SHIFT)) %
++					I_MMAP_NR_SHARDS;
+ 				shard = vp->adj_next->i_mmap_shard_idx;
+ 				i_mmap_shard_lock_write(vp->mapping, shard);
+ 				vma_interval_tree_insert(vp->adj_next,
+ 					i_mmap_shard_tree(vp->mapping, shard));
+ 				i_mmap_shard_unlock_write(vp->mapping, shard);
+ 			}
++			vp->vma->i_mmap_shard_idx =
++				(vp->vma->vm_pgoff ^ (vp->vma->vm_pgoff >> PAGE_SHIFT)) %
++				I_MMAP_NR_SHARDS;
+ 			shard = vp->vma->i_mmap_shard_idx;
+ 			i_mmap_shard_lock_write(vp->mapping, shard);
+ 			vma_interval_tree_insert(vp->vma,
+-- 
+2.43.0
+

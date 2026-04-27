@@ -1,7 +1,7 @@
 From 1755119dbc1d8425a252b8ba5584f91f42c74647 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 18:59:11 +0800
-Subject: [PATCH 4/5] mm: fix i_mmap lock leak when switching files during exec
+Subject: [PATCH 4/7] mm: fix i_mmap lock leak when switching files during exec
  batching
 
 vma_link_file's trylock path, when i_mmap_batching was active, cached a

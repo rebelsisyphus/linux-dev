@@ -1,0 +1,44 @@
+From cc2034c8f732a70f9c6c98506a0e01b51558b8c5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 25 Apr 2026 18:59:11 +0800
+Subject: [PATCH 4/4] mm: fix i_mmap lock leak when switching files during exec
+ batching
+
+vma_link_file's trylock path, when i_mmap_batching was active, cached a
+new mapping's lock without first releasing the previously-cached lock.
+This leaked the i_mmap_rwsem lock when exec loaded the binary followed
+by the interpreter (ld-linux.so), since they have different file
+mappings. Over many exec cycles, all leaked locks caused the system to
+hang.
+
+Fix by flushing the old cached lock before caching the new one, both in
+the trylock success path and the below-threshold wait path.
+---
+ mm/vma.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mm/vma.c b/mm/vma.c
+index 7de1192f500e..79aa56705bc6 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -1908,6 +1908,8 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 
+ 		if (i_mmap_trylock_write(mapping)) {
+ 			/* Fast path: centralized lock acquired */
++			if (mm->i_mmap_batching && mm->i_mmap_cached_mapping)
++				vma_link_file_flush(mm);
+ 			__vma_link_file(vma, mapping);
+ 			if (mm->i_mmap_batching)
+ 				mm->i_mmap_cached_mapping = mapping;
+@@ -1926,6 +1928,8 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 			/* Fall through: mapping is now sharded */
+ 		} else {
+ 			/* Below threshold: wait for centralized lock */
++			if (mm->i_mmap_batching && mm->i_mmap_cached_mapping)
++				vma_link_file_flush(mm);
+ 			down_write(&mapping->i_mmap_rwsem);
+ 			__vma_link_file(vma, mapping);
+ 			if (mm->i_mmap_batching)
+-- 
+2.43.0
+

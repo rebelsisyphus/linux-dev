@@ -1,0 +1,47 @@
+From 0c6a325618c7ce72ed3d8084676f65498a18630d Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 11:25:13 +0800
+Subject: [PATCH 5/5] mm: fix self-deadlock in vma_prepare() with i_mmap lock
+ batching
+
+When execve batching is enabled (i_mmap_batching), vma_link_file()
+caches the i_mmap_rwsem write lock across consecutive mmap calls
+to avoid repeated lock acquire/release for the same mapping.
+
+However, vma_prepare() calls i_mmap_lock_write_promote() which
+tries to acquire i_mmap_rwsem for write. If the same mm already
+holds a cached write lock on the same mapping (from the batching
+path), this results in a recursive rwsem acquisition attempt,
+causing a self-deadlock. This manifests as init hanging during
+boot when mapping file-backed VMAs.
+
+Fix by flushing any cached i_mmap lock before calling
+i_mmap_lock_write_promote() in vma_prepare().
+
+Fixes: fdbf18d326f2 ("mm: defer i_mmap insertion to batch across consecutive mmap calls")
+Signed-off-by: OpenCode Agent <agent@opencodex.ai>
+---
+ mm/vma.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/mm/vma.c b/mm/vma.c
+index 79aa56705bc6..6ceb7cd7dba3 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -322,6 +322,13 @@ static void vma_prepare(struct vma_prepare *vp)
+ 			uprobe_munmap(vp->adj_next, vp->adj_next->vm_start,
+ 				      vp->adj_next->vm_end);
+ 
++		/*
++		 * If a previous vma_link_file() cached the i_mmap lock (e.g.
++		 * during exec batching), flush it now to avoid recursively
++		 * acquiring the same i_mmap_rwsem write lock.
++		 */
++		if (vp->vma->vm_mm->i_mmap_cached_mapping)
++			vma_link_file_flush(vp->vma->vm_mm);
+ 		i_mmap_lock_write_promote(vp->mapping);
+ 		if (vp->insert && vp->insert->vm_file) {
+ 			/*
+-- 
+2.43.0
+

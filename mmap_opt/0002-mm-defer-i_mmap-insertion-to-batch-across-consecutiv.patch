@@ -1,7 +1,7 @@
-From 65c2bf3cc505d3f8a7f09b7dec8e3fd6f5f416e5 Mon Sep 17 00:00:00 2001
+From fdbf18d326f241d33b34a21ddde13fa57b8a2e13 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 14:36:26 +0800
-Subject: [PATCH 2/4] mm: defer i_mmap insertion to batch across consecutive
+Subject: [PATCH 2/5] mm: defer i_mmap insertion to batch across consecutive
  mmap calls
 
 During execve, the ELF loader maps multiple PT_LOAD segments of the
@@ -88,10 +88,10 @@ index abb4963c1f06..fe15d6d042fa 100644
  			      struct rb_root_cached *root);
  struct vm_area_struct *vma_interval_tree_subtree_search(struct vm_area_struct *node,
 diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
-index 547afc9f63b6..58df516393ca 100644
+index 3cc8ae722886..719b7c2a774f 100644
 --- a/include/linux/mm_types.h
 +++ b/include/linux/mm_types.h
-@@ -1280,6 +1280,13 @@ struct mm_struct {
+@@ -1270,6 +1270,13 @@ struct mm_struct {
  		/* Architecture-specific MM context */
  		mm_context_t context;
  
@@ -106,10 +106,10 @@ index 547afc9f63b6..58df516393ca 100644
  
  #ifdef CONFIG_AIO
 diff --git a/kernel/fork.c b/kernel/fork.c
-index c5de8aa5ed12..716e5ca62053 100644
+index bc2bf58b93b6..d0e7b936da74 100644
 --- a/kernel/fork.c
 +++ b/kernel/fork.c
-@@ -1481,6 +1481,8 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+@@ -1081,6 +1081,8 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
  	INIT_LIST_HEAD(&mm->mmlist);
  	mm_pgtables_bytes_init(mm);
  	mm->map_count = 0;

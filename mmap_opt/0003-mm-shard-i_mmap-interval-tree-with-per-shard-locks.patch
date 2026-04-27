@@ -1,7 +1,7 @@
-From 49bf2811508128f377fe421fcd17dd49a038045a Mon Sep 17 00:00:00 2001
+From 05d91dd375ab6c88fcfecb65ecec9f1d1f095311 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Apr 2026 15:49:56 +0800
-Subject: [PATCH 3/4] mm: shard i_mmap interval tree with per-shard locks
+Subject: [PATCH 3/5] mm: shard i_mmap interval tree with per-shard locks
 
 The per-mapping i_mmap_rwsem is a central contention point on high-core
 machines running execve-intensive workloads. Replace it with a sharded
@@ -386,7 +386,7 @@ index 8b3dd145b25e..1c16692fe1a4 100644
  /*
   * Might pages of this file be mapped into userspace?
 diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
-index 58df516393ca..36fac5d187bc 100644
+index 719b7c2a774f..002c1fd25a03 100644
 --- a/include/linux/mm_types.h
 +++ b/include/linux/mm_types.h
 @@ -1053,6 +1053,9 @@ struct vm_area_struct {

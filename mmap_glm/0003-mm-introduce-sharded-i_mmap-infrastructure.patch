@@ -1,7 +1,7 @@
 From 93f2035d734ebeae0480fe552c4b1867808b4edb Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 21:33:06 +0800
-Subject: [PATCH 3/9] mm: introduce sharded i_mmap infrastructure
+Subject: [PATCH 03/10] mm: introduce sharded i_mmap infrastructure
 
 Add data structures and helpers for sharding the i_mmap interval tree
 and its rwsem across multiple shards. Each shard has its own interval

@@ -1,7 +1,7 @@
 From f090a5398778309b47eb00499a636fa78b62c84d Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Tue, 28 Apr 2026 15:13:18 +0800
-Subject: [PATCH 8/9] mm: use atomic_t for trylock_fails to fix concurrency
+Subject: [PATCH 08/10] mm: use atomic_t for trylock_fails to fix concurrency
  race
 
 The trylock_fails counter in i_mmap_shards was a plain unsigned int,

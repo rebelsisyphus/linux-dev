@@ -1,0 +1,58 @@
+From d1e47378c056408b1cfcb5f19bba4b0e664574f4 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 28 Apr 2026 19:10:59 +0800
+Subject: [PATCH 10/10] mm: fix use-after-free in inode lifecycle for sharded
+ i_mmap
+
+Two bugs in the address_space lifecycle caused a physical machine Oops
+in rcu_do_batch -> kfree -> refill_obj_stock -> percpu_ref_get_many:
+
+1. __destroy_inode() called kfree() on i_mmap_shards_ptr but did not
+   NULL the pointer or reset i_mmap_sharded. When the SLUB allocator
+   reuses the freed memory for an obj_cgroup, the stale pointer causes
+   percpu_ref_get_many() to dereference garbage. Fix by NULLing
+   i_mmap_shards_ptr and resetting i_mmap_sharded after kfree, and
+   using i_mmap_shards_free() for its WARN_ON(vma_count) safety check.
+
+2. inode_init_always_gfp() did not reset i_mmap, i_mmap_shards_ptr,
+   or i_mmap_sharded when reinitializing a recycled inode slab object.
+   __address_space_init_once() only runs once per slab construction,
+   not on each reuse. A reused inode that had sharded i_mmap in its
+   previous lifetime would have i_mmap_sharded=true and a dangling
+   i_mmap_shards_ptr. Fix by resetting all three fields in
+   inode_init_always_gfp().
+---
+ fs/inode.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ae7f150cdf9c..b7143ac7515b 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -283,6 +283,9 @@ int inode_init_always_gfp(struct super_block *sb, struct inode *inode, gfp_t gfp
+ #ifdef CONFIG_READ_ONLY_THP_FOR_FS
+ 	atomic_set(&mapping->nr_thps, 0);
+ #endif
++	mapping->i_mmap = RB_ROOT_CACHED;
++	mapping->i_mmap_shards_ptr = NULL;
++	mapping->i_mmap_sharded = false;
+ 	mapping_set_gfp_mask(mapping, GFP_HIGHUSER_MOVABLE);
+ 	mapping->i_private_data = NULL;
+ 	mapping->writeback_index = 0;
+@@ -379,8 +382,11 @@ void __destroy_inode(struct inode *inode)
+ 		atomic_long_dec(&inode->i_sb->s_remove_count);
+ 	}
+ 
+-	if (mapping->i_mmap_shards_ptr)
+-		kfree(mapping->i_mmap_shards_ptr);
++	if (mapping->i_mmap_shards_ptr) {
++		i_mmap_shards_free(mapping->i_mmap_shards_ptr);
++		mapping->i_mmap_shards_ptr = NULL;
++	}
++	mapping->i_mmap_sharded = false;
+ 
+ #ifdef CONFIG_FS_POSIX_ACL
+ 	if (inode->i_acl && !is_uncached_acl(inode->i_acl))
+-- 
+2.43.0
+

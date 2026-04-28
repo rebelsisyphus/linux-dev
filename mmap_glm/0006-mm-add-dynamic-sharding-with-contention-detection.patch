@@ -1,7 +1,7 @@
 From 1a54e3055e03d55c3d03ef8215a7bf65469b918c Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 22:33:24 +0800
-Subject: [PATCH 6/9] mm: add dynamic sharding with contention detection
+Subject: [PATCH 06/10] mm: add dynamic sharding with contention detection
 
 When concurrent VMA insertions cause contention on i_mmap_rwsem
 (trylock failures), automatically convert the mapping from centralized

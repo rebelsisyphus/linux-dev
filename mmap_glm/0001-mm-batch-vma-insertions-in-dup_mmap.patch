@@ -1,7 +1,7 @@
 From 76132fdd930c3cc2ea0ed6d4e6ad11c349452187 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 21:04:16 +0800
-Subject: [PATCH 01/10] mm: batch vma insertions in dup_mmap
+Subject: [PATCH 01/11] mm: batch vma insertions in dup_mmap
 
 In the fork path, dup_mmap() acquires and releases i_mmap_rwsem for each
 VMA that has a file mapping. When a process maps many segments from the

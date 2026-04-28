@@ -1,7 +1,7 @@
 From 391af59ff74dff9bb5348a204dcb46284bd8359c Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 21:56:36 +0800
-Subject: [PATCH 04/10] mm: convert VMA insert/remove to use per-shard locks
+Subject: [PATCH 04/11] mm: convert VMA insert/remove to use per-shard locks
 
 In sharded mode (i_mmap_shards_ptr != NULL), VMA insert and remove
 operations use per-shard rw_semaphore locks instead of the global

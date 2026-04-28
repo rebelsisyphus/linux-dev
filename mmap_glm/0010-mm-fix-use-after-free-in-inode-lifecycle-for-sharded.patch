@@ -1,7 +1,7 @@
 From d1e47378c056408b1cfcb5f19bba4b0e664574f4 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Tue, 28 Apr 2026 19:10:59 +0800
-Subject: [PATCH 10/10] mm: fix use-after-free in inode lifecycle for sharded
+Subject: [PATCH 10/11] mm: fix use-after-free in inode lifecycle for sharded
  i_mmap
 
 Two bugs in the address_space lifecycle caused a physical machine Oops

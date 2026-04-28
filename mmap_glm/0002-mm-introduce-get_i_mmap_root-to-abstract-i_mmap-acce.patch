@@ -1,7 +1,7 @@
 From afc01cabfaade18c8e43ec625d51c01dd5993f55 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 21:25:06 +0800
-Subject: [PATCH 02/10] mm: introduce get_i_mmap_root() to abstract i_mmap
+Subject: [PATCH 02/11] mm: introduce get_i_mmap_root() to abstract i_mmap
  access
 
 Introduce get_i_mmap_root() helper function that returns the address of

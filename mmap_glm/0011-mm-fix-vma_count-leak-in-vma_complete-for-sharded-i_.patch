@@ -1,0 +1,49 @@
+From 90a0a42b1be8a54459c0a0df68a4432fec10106d Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 28 Apr 2026 20:15:47 +0800
+Subject: [PATCH 11/11] mm: fix vma_count leak in vma_complete() for sharded
+ i_mmap
+
+When a VMA is modified (merge/split/mprotect), vma_prepare() removes it
+from the shard tree (vma_count--) and vma_complete() re-inserts it.
+However, vma_complete() was missing the atomic_inc(&vma_count) for each
+re-insertion into the shard tree, causing a net -1 leak per modification.
+
+Over time this causes vma_count to drift increasingly negative, triggering
+the WARN_ON(vma_count != 0) in i_mmap_shards_free() during inode
+destruction.
+
+Fix by adding atomic_add(vma_inc, &vma_count) in vma_complete() for each
+VMA re-inserted into a shard tree.
+
+Observed on physical machine as:
+  WARNING: mm/i_mmap_shards.c:91 at i_mmap_shards_free+0x34/0x48
+  Call trace: evict -> __destroy_inode -> i_mmap_shards_free
+---
+ mm/vma.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/mm/vma.c b/mm/vma.c
+index 8ea02921c1f4..2b9b7c2a2de7 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -385,13 +385,16 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 	if (vp->file) {
+ 		if (mapping_sharded(vp->mapping)) {
+ 			struct i_mmap_shard *shard;
++			int vma_inc = 1;
+ 
+ 			if (vp->adj_next) {
+ 				shard = vma_i_mmap_shard(vp->adj_next, vp->mapping);
+ 				vma_interval_tree_insert(vp->adj_next, &shard->tree);
++				vma_inc++;
+ 			}
+ 			shard = vma_i_mmap_shard(vp->vma, vp->mapping);
+ 			vma_interval_tree_insert(vp->vma, &shard->tree);
++			atomic_add(vma_inc, &vp->mapping->i_mmap_shards_ptr->vma_count);
+ 		} else {
+ 			if (vp->adj_next)
+ 				vma_interval_tree_insert(vp->adj_next,
+-- 
+2.43.0
+

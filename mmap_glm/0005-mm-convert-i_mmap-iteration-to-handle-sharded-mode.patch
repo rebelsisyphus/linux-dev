@@ -1,7 +1,7 @@
 From 559b5aa2bf6245fceb7b4e814ec6b401c2af987b Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 27 Apr 2026 22:27:28 +0800
-Subject: [PATCH 5/8] mm: convert i_mmap iteration to handle sharded mode
+Subject: [PATCH 5/9] mm: convert i_mmap iteration to handle sharded mode
 
 Convert all read-side and write-side iteration over the i_mmap interval
 tree to handle sharded mode where the tree is distributed across

@@ -1,0 +1,395 @@
+From afc01cabfaade18c8e43ec625d51c01dd5993f55 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 21:25:06 +0800
+Subject: [PATCH 2/8] mm: introduce get_i_mmap_root() to abstract i_mmap access
+
+Introduce get_i_mmap_root() helper function that returns the address of
+the i_mmap interval tree root in a mapping. This allows future patches
+to change the underlying data structure without modifying all callers.
+
+Also replace direct RB_EMPTY_ROOT(&mapping->i_mmap.rb_root) checks with
+mapping_mapped() where appropriate, consolidating the abstraction.
+
+No functional change intended.
+
+Signed-off-by: GLM <glm@linux.dev>
+---
+ arch/arm/mm/fault-armv.c   |  2 +-
+ arch/arm/mm/flush.c        |  2 +-
+ arch/nios2/mm/cacheflush.c |  2 +-
+ arch/parisc/kernel/cache.c |  2 +-
+ fs/dax.c                   |  2 +-
+ fs/hugetlbfs/inode.c       | 10 +++++-----
+ include/linux/fs.h         |  5 +++++
+ kernel/events/uprobes.c    |  2 +-
+ mm/hugetlb.c               |  4 ++--
+ mm/khugepaged.c            |  4 ++--
+ mm/memory-failure.c        |  8 ++++----
+ mm/memory.c                |  8 ++++----
+ mm/mmap.c                  |  2 +-
+ mm/nommu.c                 |  8 ++++----
+ mm/pagewalk.c              |  2 +-
+ mm/rmap.c                  |  2 +-
+ mm/vma.c                   | 12 ++++++------
+ 17 files changed, 41 insertions(+), 36 deletions(-)
+
+diff --git a/arch/arm/mm/fault-armv.c b/arch/arm/mm/fault-armv.c
+index 91e488767783..bc9388a6165a 100644
+--- a/arch/arm/mm/fault-armv.c
++++ b/arch/arm/mm/fault-armv.c
+@@ -140,7 +140,7 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
+ 	 * cache coherency.
+ 	 */
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(mpnt, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(mpnt, get_i_mmap_root(mapping), pgoff, pgoff) {
+ 		/*
+ 		 * If we are using split PTE locks, then we need to take the pte
+ 		 * lock. Otherwise we are using shared mm->page_table_lock which
+diff --git a/arch/arm/mm/flush.c b/arch/arm/mm/flush.c
+index 19470d938b23..4e19ddea2b4f 100644
+--- a/arch/arm/mm/flush.c
++++ b/arch/arm/mm/flush.c
+@@ -251,7 +251,7 @@ static void __flush_dcache_aliases(struct address_space *mapping, struct folio *
+ 	pgoff_end = pgoff + folio_nr_pages(folio) - 1;
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff_end) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff_end) {
+ 		unsigned long start, offset, pfn;
+ 		unsigned int nr;
+ 
+diff --git a/arch/nios2/mm/cacheflush.c b/arch/nios2/mm/cacheflush.c
+index 8321182eb927..94e7d541c4d9 100644
+--- a/arch/nios2/mm/cacheflush.c
++++ b/arch/nios2/mm/cacheflush.c
+@@ -82,7 +82,7 @@ static void flush_aliases(struct address_space *mapping, struct folio *folio)
+ 	pgoff = folio->index;
+ 
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff + nr - 1) {
+ 		unsigned long start;
+ 
+ 		if (vma->vm_mm != mm)
+diff --git a/arch/parisc/kernel/cache.c b/arch/parisc/kernel/cache.c
+index b189265785dc..e93330506c35 100644
+--- a/arch/parisc/kernel/cache.c
++++ b/arch/parisc/kernel/cache.c
+@@ -503,7 +503,7 @@ void flush_dcache_folio(struct folio *folio)
+ 	 * on machines that support equivalent aliasing
+ 	 */
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff + nr - 1) {
+ 		unsigned long offset = pgoff - vma->vm_pgoff;
+ 		unsigned long pfn = folio_pfn(folio);
+ 
+diff --git a/fs/dax.c b/fs/dax.c
+index 289e6254aa30..5c35ce1ed882 100644
+--- a/fs/dax.c
++++ b/fs/dax.c
+@@ -1164,7 +1164,7 @@ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 
+ 	/* Walk all mappings of a given index of a file and writeprotect them */
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, index, end) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), index, end) {
+ 		pfn_mkclean_range(pfn, count, index, vma);
+ 		cond_resched();
+ 	}
+diff --git a/fs/hugetlbfs/inode.c b/fs/hugetlbfs/inode.c
+index 3f70c47981de..9cf82fba6eb6 100644
+--- a/fs/hugetlbfs/inode.c
++++ b/fs/hugetlbfs/inode.c
+@@ -400,7 +400,7 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
+ 					struct address_space *mapping,
+ 					struct folio *folio, pgoff_t index)
+ {
+-	struct rb_root_cached *root = &mapping->i_mmap;
++	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct hugetlb_vma_lock *vma_lock;
+ 	unsigned long pfn = folio_pfn(folio);
+ 	struct vm_area_struct *vma;
+@@ -646,8 +646,8 @@ static void hugetlb_vmtruncate(struct inode *inode, loff_t offset)
+ 
+ 	i_size_write(inode, offset);
+ 	i_mmap_lock_write(mapping);
+-	if (!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root))
+-		hugetlb_vmdelete_list(&mapping->i_mmap, pgoff, 0,
++	if (mapping_mapped(mapping))
++		hugetlb_vmdelete_list(get_i_mmap_root(mapping), pgoff, 0,
+ 				      ZAP_FLAG_DROP_MARKER);
+ 	i_mmap_unlock_write(mapping);
+ 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+@@ -707,8 +707,8 @@ static long hugetlbfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 
+ 	/* Unmap users of full pages in the hole. */
+ 	if (hole_end > hole_start) {
+-		if (!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root))
+-			hugetlb_vmdelete_list(&mapping->i_mmap,
++		if (mapping_mapped(mapping))
++			hugetlb_vmdelete_list(get_i_mmap_root(mapping),
+ 					      hole_start >> PAGE_SHIFT,
+ 					      hole_end >> PAGE_SHIFT, 0);
+ 	}
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 8b3dd145b25e..a6a99e044265 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -555,6 +555,11 @@ static inline int mapping_mapped(const struct address_space *mapping)
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+ }
+ 
++static inline struct rb_root_cached *get_i_mmap_root(struct address_space *mapping)
++{
++	return &mapping->i_mmap;
++}
++
+ /*
+  * Might pages of this file have been modified in userspace?
+  * Note that i_mmap_writable counts all VM_SHARED, VM_MAYWRITE vmas: do_mmap
+diff --git a/kernel/events/uprobes.c b/kernel/events/uprobes.c
+index 923b24b321cc..b731cd5d4f89 100644
+--- a/kernel/events/uprobes.c
++++ b/kernel/events/uprobes.c
+@@ -1210,7 +1210,7 @@ build_map_info(struct address_space *mapping, loff_t offset, bool is_register)
+ 
+  again:
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+ 		if (!valid_vma(vma, is_register))
+ 			continue;
+ 
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index 327eaa4074d3..ee9638571480 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -5413,7 +5413,7 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	 * __unmap_hugepage_range() is called as the lock is already held
+ 	 */
+ 	i_mmap_lock_write(mapping);
+-	vma_interval_tree_foreach(iter_vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(iter_vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+ 		/* Do not unmap the current VMA */
+ 		if (iter_vma == vma)
+ 			continue;
+@@ -6887,7 +6887,7 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	pte_t *pte;
+ 
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(svma, &mapping->i_mmap, idx, idx) {
++	vma_interval_tree_foreach(svma, get_i_mmap_root(mapping), idx, idx) {
+ 		if (svma == vma)
+ 			continue;
+ 
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 1dd3cfca610d..4d334ff8615e 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1743,7 +1743,7 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ 	struct vm_area_struct *vma;
+ 
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+ 		struct mmu_notifier_range range;
+ 		struct mm_struct *mm;
+ 		unsigned long addr;
+@@ -2163,7 +2163,7 @@ static enum scan_result collapse_file(struct mm_struct *mm, unsigned long addr,
+ 		 * not be able to observe any missing pages due to the
+ 		 * previously inserted retry entries.
+ 		 */
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, start, end) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), start, end) {
+ 			if (userfaultfd_missing(vma)) {
+ 				result = SCAN_EXCEED_NONE_PTE;
+ 				goto immap_locked;
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index ee42d4361309..fbe39a04084b 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -598,8 +598,8 @@ static void collect_procs_file(const struct folio *folio,
+ 
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+-				      pgoff) {
++vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff,
++			      pgoff) {
+ 			/*
+ 			 * Send early kill signal to tasks where a vma covers
+ 			 * the page but the corrupted page is not necessarily
+@@ -650,7 +650,7 @@ static void collect_procs_fsdax(const struct page *page,
+ 			t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+ 			if (vma->vm_mm == t->mm)
+ 				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
+ 		}
+@@ -2251,7 +2251,7 @@ static void collect_procs_pfn(struct pfn_address_space *pfn_space,
+ 		t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, 0, ULONG_MAX) {
++		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), 0, ULONG_MAX) {
+ 			pgoff_t pgoff;
+ 
+ 			if (vma->vm_mm == t->mm &&
+diff --git a/mm/memory.c b/mm/memory.c
+index c65e82c86fed..eb653561c632 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4297,8 +4297,8 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+ 	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++	if (unlikely(mapping_mapped(mapping)))
++		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+ }
+@@ -4327,8 +4327,8 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 		last_index = ULONG_MAX;
+ 
+ 	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++	if (unlikely(mapping_mapped(mapping)))
++		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
+ }
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 98a11867e4f2..0e3461d1e76b 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1750,7 +1750,7 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *batch)
+ 		if (vma_is_shared_maywrite(batch->tmp[i]))
+ 			mapping_allow_writable(mapping);
+ 		vma_interval_tree_insert_after(batch->tmp[i], batch->prev[i],
+-					       &mapping->i_mmap);
++					       get_i_mmap_root(mapping));
+ 	}
+ 	flush_dcache_mmap_unlock(mapping);
+ 	batch->count = 0;
+diff --git a/mm/nommu.c b/mm/nommu.c
+index c3a23b082adb..b0c16f57806f 100644
+--- a/mm/nommu.c
++++ b/mm/nommu.c
+@@ -569,7 +569,7 @@ static void setup_vma_to_mm(struct vm_area_struct *vma, struct mm_struct *mm)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_insert(vma, &mapping->i_mmap);
++		vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
+ 		flush_dcache_mmap_unlock(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+@@ -585,7 +585,7 @@ static void cleanup_vma_from_mm(struct vm_area_struct *vma)
+ 
+ 		i_mmap_lock_write(mapping);
+ 		flush_dcache_mmap_lock(mapping);
+-		vma_interval_tree_remove(vma, &mapping->i_mmap);
++		vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
+ 		flush_dcache_mmap_unlock(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 	}
+@@ -1816,7 +1816,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 	i_mmap_lock_read(inode->i_mapping);
+ 
+ 	/* search for VMAs that fall within the dead zone */
+-	vma_interval_tree_foreach(vma, &inode->i_mapping->i_mmap, low, high) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(inode->i_mapping), low, high) {
+ 		/* found one - only interested if it's shared out of the page
+ 		 * cache */
+ 		if (vma->vm_flags & VM_SHARED) {
+@@ -1832,7 +1832,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 	 * we don't check for any regions that start beyond the EOF as there
+ 	 * shouldn't be any
+ 	 */
+-	vma_interval_tree_foreach(vma, &inode->i_mapping->i_mmap, 0, ULONG_MAX) {
++	vma_interval_tree_foreach(vma, get_i_mmap_root(inode->i_mapping), 0, ULONG_MAX) {
+ 		if (!(vma->vm_flags & VM_SHARED))
+ 			continue;
+ 
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index 4e7bcd975c54..34edc1f89808 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -811,7 +811,7 @@ int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+ 		return -EINVAL;
+ 
+ 	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), first_index,
+ 				  first_index + nr - 1) {
+ 		/* Clip to the vma */
+ 		vba = vma->vm_pgoff;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 8f08090d7eb9..613dc62f61ca 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -3043,7 +3043,7 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
+ 		i_mmap_lock_read(mapping);
+ 	}
+ lookup:
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap,
++	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping),
+ 			pgoff_start, pgoff_end) {
+ 		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
+ 
+diff --git a/mm/vma.c b/mm/vma.c
+index c8df5f561ad7..3cf71ad82a3e 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -231,7 +231,7 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	vma_interval_tree_insert(vma, get_i_mmap_root(mapping));
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -245,7 +245,7 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 		mapping_unmap_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_remove(vma, &mapping->i_mmap);
++	vma_interval_tree_remove(vma, get_i_mmap_root(mapping));
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -316,10 +316,10 @@ static void vma_prepare(struct vma_prepare *vp)
+ 
+ 	if (vp->file) {
+ 		flush_dcache_mmap_lock(vp->mapping);
+-		vma_interval_tree_remove(vp->vma, &vp->mapping->i_mmap);
++		vma_interval_tree_remove(vp->vma, get_i_mmap_root(vp->mapping));
+ 		if (vp->adj_next)
+ 			vma_interval_tree_remove(vp->adj_next,
+-						 &vp->mapping->i_mmap);
++						 get_i_mmap_root(vp->mapping));
+ 	}
+ 
+ }
+@@ -338,8 +338,8 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 	if (vp->file) {
+ 		if (vp->adj_next)
+ 			vma_interval_tree_insert(vp->adj_next,
+-						 &vp->mapping->i_mmap);
+-		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
++						 get_i_mmap_root(vp->mapping));
++		vma_interval_tree_insert(vp->vma, get_i_mmap_root(vp->mapping));
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+-- 
+2.43.0
+

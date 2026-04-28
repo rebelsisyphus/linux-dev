@@ -1,0 +1,271 @@
+From 93f2035d734ebeae0480fe552c4b1867808b4edb Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 21:33:06 +0800
+Subject: [PATCH 3/8] mm: introduce sharded i_mmap infrastructure
+
+Add data structures and helpers for sharding the i_mmap interval tree
+and its rwsem across multiple shards. Each shard has its own interval
+tree root and rw_semaphore, allowing concurrent insert/remove operations
+on different shards without contention.
+
+Key additions:
+- struct i_mmap_shard: per-shard tree root + rwsem
+- struct i_mmap_shards: container with nr_shards, vma_count, flexible
+  array of shards
+- address_space.i_mmap_shards_ptr: pointer to sharded structure (NULL
+  means centralized mode)
+- address_space.i_mmap union: i_mmap (centralized) or i_mmap_shards_ptr
+  (sharded)
+- mapping_sharded(): check if sharded mode is active
+- vma_shard_idx(): hash VMA pointer to determine shard index
+- vma_i_mmap_shard(): get the shard for a VMA
+- i_mmap_shard_by_idx(): get shard by index
+- i_mmap_shards_alloc/free(): allocation helpers
+- mapping_convert_to_shards(): convert from centralized to sharded
+- mapping_mapped(): updated to check vma_count in sharded mode
+- get_i_mmap_root(): returns centralized root or first shard root
+
+The centralized mode (default) uses the existing single i_mmap tree and
+i_mmap_rwsem. Sharded mode (activated by mapping_convert_to_shards())
+distributes VMAs across I_MMAP_NR_SHARDS (8) shards based on VMA
+address hash, each protected by its own rwsem.
+
+No functional change yet - sharded mode is not activated.
+
+Signed-off-by: GLM <glm@linux.dev>
+---
+ fs/inode.c         |  5 ++++
+ include/linux/fs.h | 69 +++++++++++++++++++++++++++++++++++++++++--
+ mm/Makefile        |  2 +-
+ mm/i_mmap_shards.c | 73 ++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 145 insertions(+), 4 deletions(-)
+ create mode 100644 mm/i_mmap_shards.c
+
+diff --git a/fs/inode.c b/fs/inode.c
+index cc12b68e021b..ae7f150cdf9c 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -367,6 +367,8 @@ struct inode *alloc_inode(struct super_block *sb)
+ 
+ void __destroy_inode(struct inode *inode)
+ {
++	struct address_space *mapping = &inode->i_data;
++
+ 	BUG_ON(inode_has_buffers(inode));
+ 	inode_detach_wb(inode);
+ 	security_inode_free(inode);
+@@ -377,6 +379,9 @@ void __destroy_inode(struct inode *inode)
+ 		atomic_long_dec(&inode->i_sb->s_remove_count);
+ 	}
+ 
++	if (mapping->i_mmap_shards_ptr)
++		kfree(mapping->i_mmap_shards_ptr);
++
+ #ifdef CONFIG_FS_POSIX_ACL
+ 	if (inode->i_acl && !is_uncached_acl(inode->i_acl))
+ 		posix_acl_release(inode->i_acl);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index a6a99e044265..51146ab1eb07 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -445,6 +445,20 @@ struct address_space_operations {
+ 
+ extern const struct address_space_operations empty_aops;
+ 
++#define I_MMAP_SHARD_SHIFT	3
++#define I_MMAP_NR_SHARDS	(1 << I_MMAP_SHARD_SHIFT)
++
++struct i_mmap_shard {
++	struct rb_root_cached	tree;
++	struct rw_semaphore	rwsem;
++};
++
++struct i_mmap_shards {
++	unsigned int		nr_shards;
++	atomic_t		vma_count;
++	struct i_mmap_shard	shards[];
++};
++
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+  * @host: Owner, either the inode or the block_device.
+@@ -456,8 +470,11 @@ extern const struct address_space_operations empty_aops;
+  * @gfp_mask: Memory allocation flags to use for allocating pages.
+  * @i_mmap_writable: Number of VM_SHARED, VM_MAYWRITE mappings.
+  * @nr_thps: Number of THPs in the pagecache (non-shmem only).
+- * @i_mmap: Tree of private and shared mappings.
++ * @i_mmap: Tree of private and shared mappings (centralized mode).
++ * @i_mmap_shards_ptr: Pointer to sharded i_mmap structure (sharded mode).
+  * @i_mmap_rwsem: Protects @i_mmap and @i_mmap_writable.
++ *	In centralized mode, protects the single i_mmap tree.
++ *	In sharded mode, protects mode transitions and i_mmap_writable.
+  * @nrpages: Number of page entries, protected by the i_pages lock.
+  * @writeback_index: Writeback starts here.
+  * @a_ops: Methods.
+@@ -477,7 +494,10 @@ struct address_space {
+ 	/* number of thp, only for non-shmem files */
+ 	atomic_t		nr_thps;
+ #endif
+-	struct rb_root_cached	i_mmap;
++	union {
++		struct rb_root_cached	i_mmap;
++		struct i_mmap_shards	*i_mmap_shards_ptr;
++	};
+ 	unsigned long		nrpages;
+ 	pgoff_t			writeback_index;
+ 	const struct address_space_operations *a_ops;
+@@ -552,14 +572,57 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+  */
+ static inline int mapping_mapped(const struct address_space *mapping)
+ {
+-	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards_ptr);
++
++	if (shards)
++		return atomic_read(&shards->vma_count) > 0;
++	return !RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
++}
++
++static inline bool mapping_sharded(const struct address_space *mapping)
++{
++	return READ_ONCE(mapping->i_mmap_shards_ptr) != NULL;
+ }
+ 
+ static inline struct rb_root_cached *get_i_mmap_root(struct address_space *mapping)
+ {
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards_ptr);
++
++	if (shards)
++		return &shards->shards[0].tree;
+ 	return &mapping->i_mmap;
+ }
+ 
++static inline unsigned long vma_shard_idx(struct vm_area_struct *vma)
++{
++	return (((unsigned long)vma >> L1_CACHE_SHIFT) * 0x9E370001UL)
++		>> (32 - I_MMAP_SHARD_SHIFT);
++}
++
++static inline struct i_mmap_shard *
++vma_i_mmap_shard(struct vm_area_struct *vma, struct address_space *mapping)
++{
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards_ptr);
++
++	if (!shards)
++		return NULL;
++	return &shards->shards[vma_shard_idx(vma) % shards->nr_shards];
++}
++
++static inline struct i_mmap_shard *
++i_mmap_shard_by_idx(struct address_space *mapping, unsigned int idx)
++{
++	struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++
++	if (!shards || idx >= shards->nr_shards)
++		return NULL;
++	return &shards->shards[idx];
++}
++
++extern struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
++extern void i_mmap_shards_free(struct i_mmap_shards *shards);
++extern int mapping_convert_to_shards(struct address_space *mapping);
++
+ /*
+  * Might pages of this file have been modified in userspace?
+  * Note that i_mmap_writable counts all VM_SHARED, VM_MAYWRITE vmas: do_mmap
+diff --git a/mm/Makefile b/mm/Makefile
+index 8ad2ab08244e..cc58411fb329 100644
+--- a/mm/Makefile
++++ b/mm/Makefile
+@@ -55,7 +55,7 @@ obj-y			:= filemap.o mempool.o oom_kill.o fadvise.o \
+ 			   mm_init.o percpu.o slab_common.o \
+ 			   compaction.o show_mem.o \
+ 			   interval_tree.o list_lru.o workingset.o \
+-			   debug.o gup.o mmap_lock.o vma_init.o $(mmu-y)
++			   debug.o gup.o mmap_lock.o vma_init.o i_mmap_shards.o $(mmu-y)
+ 
+ # Give 'page_alloc' its own module-parameter namespace
+ page-alloc-y := page_alloc.o
+diff --git a/mm/i_mmap_shards.c b/mm/i_mmap_shards.c
+new file mode 100644
+index 000000000000..f5add9003232
+--- /dev/null
++++ b/mm/i_mmap_shards.c
+@@ -0,0 +1,73 @@
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/mm.h>
++#include <linux/rbtree.h>
++#include <linux/rcupdate.h>
++
++struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
++{
++	struct i_mmap_shards *shards;
++	unsigned int i;
++	size_t size;
++
++	size = struct_size(shards, shards, I_MMAP_NR_SHARDS);
++	shards = kzalloc(size, gfp);
++	if (!shards)
++		return NULL;
++
++	shards->nr_shards = I_MMAP_NR_SHARDS;
++	atomic_set(&shards->vma_count, 0);
++
++	for (i = 0; i < shards->nr_shards; i++) {
++		shards->shards[i].tree = RB_ROOT_CACHED;
++		init_rwsem(&shards->shards[i].rwsem);
++	}
++
++	return shards;
++}
++
++void i_mmap_shards_free(struct i_mmap_shards *shards)
++{
++	if (!shards)
++		return;
++	WARN_ON(atomic_read(&shards->vma_count) != 0);
++	kfree(shards);
++}
++
++int mapping_convert_to_shards(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards;
++	struct vm_area_struct *vma;
++	struct rb_root_cached *old_root;
++
++	lockdep_assert_held_write(&mapping->i_mmap_rwsem);
++
++	if (mapping_sharded(mapping))
++		return 0;
++
++	shards = i_mmap_shards_alloc(GFP_KERNEL);
++	if (!shards)
++		return -ENOMEM;
++
++	old_root = &mapping->i_mmap;
++
++	vma = vma_interval_tree_iter_first(old_root, 0, ULONG_MAX);
++	while (vma) {
++		struct vm_area_struct *next;
++		struct i_mmap_shard *shard;
++
++		next = vma_interval_tree_iter_next(vma, 0, ULONG_MAX);
++
++		vma_interval_tree_remove(vma, old_root);
++
++		shard = &shards->shards[vma_shard_idx(vma) % shards->nr_shards];
++		vma_interval_tree_insert(vma, &shard->tree);
++		atomic_inc(&shards->vma_count);
++
++		vma = next;
++	}
++
++	smp_store_release(&mapping->i_mmap_shards_ptr, shards);
++
++	return 0;
++}
+\ No newline at end of file
+-- 
+2.43.0
+

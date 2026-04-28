@@ -1,0 +1,227 @@
+From 1a54e3055e03d55c3d03ef8215a7bf65469b918c Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 22:33:24 +0800
+Subject: [PATCH 6/8] mm: add dynamic sharding with contention detection
+
+When concurrent VMA insertions cause contention on i_mmap_rwsem
+(trylock failures), automatically convert the mapping from centralized
+to sharded mode. This eliminates the global lock bottleneck for hot
+files like libc.so that are mapped by many processes simultaneously.
+
+Contention detection:
+- In vma_link_file(): try i_mmap_trylock_write first; if it fails,
+  take the lock unconditionally and call mapping_maybe_convert_to_shards()
+- In dup_mmap_file_batch_unlock(): after releasing i_mmap_rwsem, call
+  mapping_maybe_convert_to_shards()
+- In vma_complete(): after releasing i_mmap_rwsem, call
+  mapping_maybe_convert_to_shards()
+
+Conversion process (mapping_maybe_convert_to_shards):
+- If already sharded, return immediately
+- If trylock succeeds: acquire i_mmap_rwsem for write, allocate shards,
+  redistribute all VMAs from the single tree to per-shard trees based on
+  vma_shard_idx(), set i_mmap_shards_ptr with smp_store_release
+- The conversion is one-way: once sharded, the mapping stays sharded
+  until all VMAs are removed
+
+The threshold for conversion is I_MMAP_SHARD_THRESHOLD (8 trylock
+failures), which balances between converting too early (for rarely-used
+files) and too late (missing the contention window).
+
+Signed-off-by: GLM <glm@linux.dev>
+---
+ include/linux/fs.h | 11 +++++++
+ mm/i_mmap_shards.c | 75 ++++++++++++++++++++++++++++++++++++++++++++++
+ mm/mmap.c          |  1 +
+ mm/vma.c           | 19 ++++++++----
+ 4 files changed, 101 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 725235d9f48f..7659e4b27840 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -447,6 +447,7 @@ extern const struct address_space_operations empty_aops;
+ 
+ #define I_MMAP_SHARD_SHIFT	3
+ #define I_MMAP_NR_SHARDS	(1 << I_MMAP_SHARD_SHIFT)
++#define I_MMAP_SHARD_THRESHOLD	8
+ 
+ struct i_mmap_shard {
+ 	struct rb_root_cached	tree;
+@@ -456,6 +457,7 @@ struct i_mmap_shard {
+ struct i_mmap_shards {
+ 	unsigned int		nr_shards;
+ 	atomic_t		vma_count;
++	unsigned int		trylock_fails;
+ 	struct i_mmap_shard	shards[];
+ };
+ 
+@@ -622,6 +624,15 @@ i_mmap_shard_by_idx(struct address_space *mapping, unsigned int idx)
+ extern struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
+ extern void i_mmap_shards_free(struct i_mmap_shards *shards);
+ extern int mapping_convert_to_shards(struct address_space *mapping);
++extern void mapping_convert_to_shards_locked(struct address_space *mapping,
++					      struct i_mmap_shards *shards);
++extern void mapping_maybe_convert_to_shards(struct address_space *mapping);
++extern int i_mmap_lock_shards_write(struct address_space *mapping,
++				    struct i_mmap_shard *shards[],
++				    struct vm_area_struct *vmas[],
++				    int nr_vmas);
++extern void i_mmap_unlock_shards_write(struct i_mmap_shard *shards[],
++				       int nr_shards);
+ extern int i_mmap_lock_shards_write(struct address_space *mapping,
+ 				    struct i_mmap_shard *shards[],
+ 				    struct vm_area_struct *vmas[],
+diff --git a/mm/i_mmap_shards.c b/mm/i_mmap_shards.c
+index 4e2bc23a5608..09a9afe3aaa1 100644
+--- a/mm/i_mmap_shards.c
++++ b/mm/i_mmap_shards.c
+@@ -3,6 +3,7 @@
+ #include <linux/mm.h>
+ #include <linux/rbtree.h>
+ #include <linux/rcupdate.h>
++#include <linux/vmalloc.h>
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+ {
+@@ -17,6 +18,7 @@ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+ 
+ 	shards->nr_shards = I_MMAP_NR_SHARDS;
+ 	atomic_set(&shards->vma_count, 0);
++	shards->trylock_fails = 0;
+ 
+ 	for (i = 0; i < shards->nr_shards; i++) {
+ 		shards->shards[i].tree = RB_ROOT_CACHED;
+@@ -72,6 +74,79 @@ int mapping_convert_to_shards(struct address_space *mapping)
+ 	return 0;
+ }
+ 
++void mapping_maybe_convert_to_shards(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards;
++
++	if (mapping_sharded(mapping))
++		return;
++
++	shards = mapping->i_mmap_shards_ptr;
++	if (shards) {
++		shards->trylock_fails++;
++		if (shards->trylock_fails >= I_MMAP_SHARD_THRESHOLD) {
++			if (i_mmap_trylock_write(mapping)) {
++				mapping_convert_to_shards(mapping);
++				i_mmap_unlock_write(mapping);
++			}
++		}
++		return;
++	}
++
++	if (!i_mmap_trylock_write(mapping))
++		return;
++
++	if (mapping_sharded(mapping))
++		goto out_unlock;
++
++	if (!mapping->i_mmap_shards_ptr) {
++		struct i_mmap_shards *new_shards;
++
++		new_shards = i_mmap_shards_alloc(GFP_ATOMIC);
++		if (!new_shards)
++			goto out_unlock;
++
++		mapping_convert_to_shards_locked(mapping, new_shards);
++	}
++
++out_unlock:
++	i_mmap_unlock_write(mapping);
++}
++
++void mapping_convert_to_shards_locked(struct address_space *mapping,
++				       struct i_mmap_shards *shards)
++{
++	struct vm_area_struct *vma;
++	struct rb_root_cached *old_root;
++
++	lockdep_assert_held_write(&mapping->i_mmap_rwsem);
++
++	if (mapping_sharded(mapping)) {
++		i_mmap_shards_free(shards);
++		return;
++	}
++
++	old_root = &mapping->i_mmap;
++
++	vma = vma_interval_tree_iter_first(old_root, 0, ULONG_MAX);
++	while (vma) {
++		struct vm_area_struct *next;
++		struct i_mmap_shard *shard;
++
++		next = vma_interval_tree_iter_next(vma, 0, ULONG_MAX);
++
++		vma_interval_tree_remove(vma, old_root);
++
++		shard = &shards->shards[vma_shard_idx(vma) % shards->nr_shards];
++		vma_interval_tree_insert(vma, &shard->tree);
++		atomic_inc(&shards->vma_count);
++
++		vma = next;
++	}
++
++	smp_store_release(&mapping->i_mmap_shards_ptr, shards);
++}
++
+ int i_mmap_lock_shards_write(struct address_space *mapping,
+ 			     struct i_mmap_shard *shards[],
+ 			     struct vm_area_struct *vmas[],
+diff --git a/mm/mmap.c b/mm/mmap.c
+index e17e770b540e..18ac12a038fd 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1827,6 +1827,7 @@ static void dup_mmap_file_batch_unlock(struct dup_mmap_file_batch *batch)
+ 		batch->nr_locked_shards = 0;
+ 	} else {
+ 		i_mmap_unlock_write(batch->mapping);
++		mapping_maybe_convert_to_shards(batch->mapping);
+ 	}
+ 	batch->locked = false;
+ 	batch->mapping = NULL;
+diff --git a/mm/vma.c b/mm/vma.c
+index ca3cf4ca979d..5f0723a8943b 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -414,8 +414,10 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 		if (mapping_sharded(vp->mapping))
+ 			i_mmap_unlock_shards_write(vp->locked_shards,
+ 						   vp->nr_locked_shards);
+-		else
++		else {
+ 			i_mmap_unlock_write(vp->mapping);
++			mapping_maybe_convert_to_shards(vp->mapping);
++		}
+ 
+ 		if (!vp->skip_vma_uprobe) {
+ 			uprobe_mmap(vp->vma);
+@@ -1889,10 +1891,17 @@ static void vma_link_file(struct vm_area_struct *vma,
+ 			else
+ 				up_write(&shard->rwsem);
+ 		} else {
+-			i_mmap_lock_write(mapping);
+-			__vma_link_file(vma, mapping);
+-			if (!held_shard)
+-				i_mmap_unlock_write(mapping);
++			if (i_mmap_trylock_write(mapping)) {
++				__vma_link_file(vma, mapping);
++				if (!held_shard)
++					i_mmap_unlock_write(mapping);
++			} else {
++				i_mmap_lock_write(mapping);
++				__vma_link_file(vma, mapping);
++				if (!held_shard)
++					i_mmap_unlock_write(mapping);
++				mapping_maybe_convert_to_shards(mapping);
++			}
+ 		}
+ 	}
+ }
+-- 
+2.43.0
+

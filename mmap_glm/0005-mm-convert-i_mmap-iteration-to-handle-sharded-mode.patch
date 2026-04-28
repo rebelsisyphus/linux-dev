@@ -1,0 +1,1562 @@
+From 559b5aa2bf6245fceb7b4e814ec6b401c2af987b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 27 Apr 2026 22:27:28 +0800
+Subject: [PATCH 5/8] mm: convert i_mmap iteration to handle sharded mode
+
+Convert all read-side and write-side iteration over the i_mmap interval
+tree to handle sharded mode where the tree is distributed across
+multiple shards with independent locks.
+
+In sharded mode, iteration walks each shard sequentially, acquiring
+and releasing each shard's rwsem independently. This allows other
+operations on different shards to proceed concurrently during the
+iteration.
+
+Key patterns:
+- Read-side iteration: for each shard, down_read(shard->rwsem),
+  vma_interval_tree_foreach(), up_read(shard->rwsem)
+- Write-side iteration: acquire all relevant shard write locks,
+  then iterate all shards
+
+Modified files:
+- mm/rmap.c: __rmap_walk_file with trylock pattern across shards
+- mm/memory.c: unmap_mapping_folio, unmap_mapping_pages
+- mm/khugepaged.c: retract_page_tables, collapse_file
+- kernel/events/uprobes.c: build_map_info
+- mm/memory-failure.c: collect_procs_file/fsdax/pfn
+- mm/hugetlb.c: huge_pmd_share, unmap_ref_private
+- fs/dax.c: dax_writeback_one
+- mm/pagewalk.c: walk_page_mapping
+- fs/hugetlbfs/inode.c: hugetlb_unmap_file_folio, hugetlb_vmdelete_list
+- mm/nommu.c: nommu_shrink_inode_mappings
+
+Centralized mode behavior is unchanged.
+
+Signed-off-by: GLM <glm@linux.dev>
+---
+ fs/dax.c                |  25 +++-
+ fs/hugetlbfs/inode.c    | 209 +++++++++++++++++----------
+ kernel/events/uprobes.c |  91 ++++++++----
+ mm/hugetlb.c            | 115 +++++++++------
+ mm/khugepaged.c         | 303 ++++++++++++++++++++++++++--------------
+ mm/memory-failure.c     | 179 ++++++++++++++++--------
+ mm/memory.c             |  46 ++++--
+ mm/nommu.c              |  98 +++++++++----
+ mm/pagewalk.c           |  88 ++++++++----
+ mm/rmap.c               |  94 ++++++++++---
+ 10 files changed, 849 insertions(+), 399 deletions(-)
+
+diff --git a/fs/dax.c b/fs/dax.c
+index 5c35ce1ed882..7e8b9a2f091c 100644
+--- a/fs/dax.c
++++ b/fs/dax.c
+@@ -1163,12 +1163,27 @@ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 	end = index + count - 1;
+ 
+ 	/* Walk all mappings of a given index of a file and writeprotect them */
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), index, end) {
+-		pfn_mkclean_range(pfn, count, index, vma);
+-		cond_resched();
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  index, end) {
++				pfn_mkclean_range(pfn, count, index, vma);
++				cond_resched();
++			}
++			up_read(&shards->shards[s].rwsem);
++		}
++	} else {
++		i_mmap_lock_read(mapping);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, index, end) {
++			pfn_mkclean_range(pfn, count, index, vma);
++			cond_resched();
++		}
++		i_mmap_unlock_read(mapping);
+ 	}
+-	i_mmap_unlock_read(mapping);
+ 
+ 	dax_flush(dax_dev, page_address(pfn_to_page(pfn)), count * PAGE_SIZE);
+ 	/*
+diff --git a/fs/hugetlbfs/inode.c b/fs/hugetlbfs/inode.c
+index 9cf82fba6eb6..b3fc10d1bfc2 100644
+--- a/fs/hugetlbfs/inode.c
++++ b/fs/hugetlbfs/inode.c
+@@ -400,7 +400,6 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
+ 					struct address_space *mapping,
+ 					struct folio *folio, pgoff_t index)
+ {
+-	struct rb_root_cached *root = get_i_mmap_root(mapping);
+ 	struct hugetlb_vma_lock *vma_lock;
+ 	unsigned long pfn = folio_pfn(folio);
+ 	struct vm_area_struct *vma;
+@@ -411,103 +410,161 @@ static void hugetlb_unmap_file_folio(struct hstate *h,
+ 	start = index * pages_per_huge_page(h);
+ 	end = (index + 1) * pages_per_huge_page(h);
+ 
+-	i_mmap_lock_write(mapping);
+-retry:
+-	vma_lock = NULL;
+-	vma_interval_tree_foreach(vma, root, start, end - 1) {
+-		v_start = vma_offset_start(vma, start);
+-		v_end = vma_offset_end(vma, end);
+-
+-		if (!hugetlb_vma_maps_pfn(vma, v_start, pfn))
+-			continue;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++)
++			down_write(&shards->shards[s].rwsem);
++retry_sharded:
++		vma_lock = NULL;
++		for (s = 0; s < shards->nr_shards; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  start, end - 1) {
++				v_start = vma_offset_start(vma, start);
++				v_end = vma_offset_end(vma, end);
++
++				if (!hugetlb_vma_maps_pfn(vma, v_start, pfn))
++					continue;
++
++				if (!hugetlb_vma_trylock_write(vma)) {
++					vma_lock = vma->vm_private_data;
++					kref_get(&vma_lock->refs);
++					break;
++				}
+ 
+-		if (!hugetlb_vma_trylock_write(vma)) {
+-			vma_lock = vma->vm_private_data;
+-			/*
+-			 * If we can not get vma lock, we need to drop
+-			 * immap_sema and take locks in order.  First,
+-			 * take a ref on the vma_lock structure so that
+-			 * we can be guaranteed it will not go away when
+-			 * dropping immap_sema.
+-			 */
+-			kref_get(&vma_lock->refs);
+-			break;
++				unmap_hugepage_range(vma, v_start, v_end, NULL,
++						     ZAP_FLAG_DROP_MARKER);
++				hugetlb_vma_unlock_write(vma);
++			}
++			if (vma_lock)
++				break;
+ 		}
+ 
+-		unmap_hugepage_range(vma, v_start, v_end, NULL,
+-				     ZAP_FLAG_DROP_MARKER);
+-		hugetlb_vma_unlock_write(vma);
+-	}
+-
+-	i_mmap_unlock_write(mapping);
++		for (s = 0; s < shards->nr_shards; s++)
++			up_write(&shards->shards[s].rwsem);
++
++		if (vma_lock) {
++			down_write(&vma_lock->rw_sema);
++			for (s = 0; s < shards->nr_shards; s++)
++				down_write(&shards->shards[s].rwsem);
++
++			vma = vma_lock->vma;
++			if (!vma) {
++				for (s = 0; s < shards->nr_shards; s++)
++					up_write(&shards->shards[s].rwsem);
++				up_write(&vma_lock->rw_sema);
++				kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
++				for (s = 0; s < shards->nr_shards; s++)
++					down_write(&shards->shards[s].rwsem);
++				goto retry_sharded;
++			}
+ 
+-	if (vma_lock) {
+-		/*
+-		 * Wait on vma_lock.  We know it is still valid as we have
+-		 * a reference.  We must 'open code' vma locking as we do
+-		 * not know if vma_lock is still attached to vma.
+-		 */
+-		down_write(&vma_lock->rw_sema);
+-		i_mmap_lock_write(mapping);
++			v_start = vma_offset_start(vma, start);
++			v_end = vma_offset_end(vma, end);
++			if (hugetlb_vma_maps_pfn(vma, v_start, pfn))
++				unmap_hugepage_range(vma, v_start, v_end, NULL,
++						     ZAP_FLAG_DROP_MARKER);
+ 
+-		vma = vma_lock->vma;
+-		if (!vma) {
+-			/*
+-			 * If lock is no longer attached to vma, then just
+-			 * unlock, drop our reference and retry looking for
+-			 * other vmas.
+-			 */
+-			up_write(&vma_lock->rw_sema);
+ 			kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
+-			goto retry;
++			hugetlb_vma_unlock_write(vma);
++
++			for (s = 0; s < shards->nr_shards; s++)
++				up_write(&shards->shards[s].rwsem);
++			for (s = 0; s < shards->nr_shards; s++)
++				down_write(&shards->shards[s].rwsem);
++			goto retry_sharded;
+ 		}
++	} else {
++		i_mmap_lock_write(mapping);
++retry:
++		vma_lock = NULL;
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, start, end - 1) {
++			v_start = vma_offset_start(vma, start);
++			v_end = vma_offset_end(vma, end);
++
++			if (!hugetlb_vma_maps_pfn(vma, v_start, pfn))
++				continue;
++
++			if (!hugetlb_vma_trylock_write(vma)) {
++				vma_lock = vma->vm_private_data;
++				kref_get(&vma_lock->refs);
++				break;
++			}
+ 
+-		/*
+-		 * vma_lock is still attached to vma.  Check to see if vma
+-		 * still maps page and if so, unmap.
+-		 */
+-		v_start = vma_offset_start(vma, start);
+-		v_end = vma_offset_end(vma, end);
+-		if (hugetlb_vma_maps_pfn(vma, v_start, pfn))
+ 			unmap_hugepage_range(vma, v_start, v_end, NULL,
+ 					     ZAP_FLAG_DROP_MARKER);
++			hugetlb_vma_unlock_write(vma);
++		}
++
++		i_mmap_unlock_write(mapping);
+ 
+-		kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
+-		hugetlb_vma_unlock_write(vma);
++		if (vma_lock) {
++			down_write(&vma_lock->rw_sema);
++			i_mmap_lock_write(mapping);
+ 
+-		goto retry;
++			vma = vma_lock->vma;
++			if (!vma) {
++				up_write(&vma_lock->rw_sema);
++				kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
++				goto retry;
++			}
++
++			v_start = vma_offset_start(vma, start);
++			v_end = vma_offset_end(vma, end);
++			if (hugetlb_vma_maps_pfn(vma, v_start, pfn))
++				unmap_hugepage_range(vma, v_start, v_end, NULL,
++						     ZAP_FLAG_DROP_MARKER);
++
++			kref_put(&vma_lock->refs, hugetlb_vma_lock_release);
++			hugetlb_vma_unlock_write(vma);
++
++			goto retry;
++		}
+ 	}
+ }
+ 
+ static void
+-hugetlb_vmdelete_list(struct rb_root_cached *root, pgoff_t start, pgoff_t end,
++hugetlb_vmdelete_list(struct address_space *mapping, pgoff_t start, pgoff_t end,
+ 		      zap_flags_t zap_flags)
+ {
+ 	struct vm_area_struct *vma;
+ 
+-	/*
+-	 * end == 0 indicates that the entire range after start should be
+-	 * unmapped.  Note, end is exclusive, whereas the interval tree takes
+-	 * an inclusive "last".
+-	 */
+-	vma_interval_tree_foreach(vma, root, start, end ? end - 1 : ULONG_MAX) {
+-		unsigned long v_start;
+-		unsigned long v_end;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
+ 
+-		if (!hugetlb_vma_trylock_write(vma))
+-			continue;
++		for (s = 0; s < shards->nr_shards; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  start, end ? end - 1 : ULONG_MAX) {
++				unsigned long v_start;
++				unsigned long v_end;
+ 
+-		v_start = vma_offset_start(vma, start);
+-		v_end = vma_offset_end(vma, end);
++				if (!hugetlb_vma_trylock_write(vma))
++					continue;
+ 
+-		unmap_hugepage_range(vma, v_start, v_end, NULL, zap_flags);
++				v_start = vma_offset_start(vma, start);
++				v_end = vma_offset_end(vma, end);
+ 
+-		/*
+-		 * Note that vma lock only exists for shared/non-private
+-		 * vmas.  Therefore, lock is not held when calling
+-		 * unmap_hugepage_range for private vmas.
+-		 */
+-		hugetlb_vma_unlock_write(vma);
++				unmap_hugepage_range(vma, v_start, v_end, NULL, zap_flags);
++				hugetlb_vma_unlock_write(vma);
++			}
++		}
++	} else {
++		vma_interval_tree_foreach(vma, &mapping->i_mmap,
++					  start, end ? end - 1 : ULONG_MAX) {
++			unsigned long v_start;
++			unsigned long v_end;
++
++			if (!hugetlb_vma_trylock_write(vma))
++				continue;
++
++			v_start = vma_offset_start(vma, start);
++			v_end = vma_offset_end(vma, end);
++
++			unmap_hugepage_range(vma, v_start, v_end, NULL, zap_flags);
++			hugetlb_vma_unlock_write(vma);
++		}
+ 	}
+ }
+ 
+@@ -647,7 +704,7 @@ static void hugetlb_vmtruncate(struct inode *inode, loff_t offset)
+ 	i_size_write(inode, offset);
+ 	i_mmap_lock_write(mapping);
+ 	if (mapping_mapped(mapping))
+-		hugetlb_vmdelete_list(get_i_mmap_root(mapping), pgoff, 0,
++		hugetlb_vmdelete_list(mapping, pgoff, 0,
+ 				      ZAP_FLAG_DROP_MARKER);
+ 	i_mmap_unlock_write(mapping);
+ 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+@@ -708,7 +765,7 @@ static long hugetlbfs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
+ 	/* Unmap users of full pages in the hole. */
+ 	if (hole_end > hole_start) {
+ 		if (mapping_mapped(mapping))
+-			hugetlb_vmdelete_list(get_i_mmap_root(mapping),
++			hugetlb_vmdelete_list(mapping,
+ 					      hole_start >> PAGE_SHIFT,
+ 					      hole_end >> PAGE_SHIFT, 0);
+ 	}
+diff --git a/kernel/events/uprobes.c b/kernel/events/uprobes.c
+index b731cd5d4f89..3be8c20f3456 100644
+--- a/kernel/events/uprobes.c
++++ b/kernel/events/uprobes.c
+@@ -1209,38 +1209,71 @@ build_map_info(struct address_space *mapping, loff_t offset, bool is_register)
+ 	int more = 0;
+ 
+  again:
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+-		if (!valid_vma(vma, is_register))
+-			continue;
+-
+-		if (!prev && !more) {
+-			/*
+-			 * Needs GFP_NOWAIT to avoid i_mmap_rwsem recursion through
+-			 * reclaim. This is optimistic, no harm done if it fails.
+-			 */
+-			prev = kmalloc_obj(struct map_info,
+-					   GFP_NOWAIT | __GFP_NOMEMALLOC);
+-			if (prev)
+-				prev->next = NULL;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  pgoff, pgoff) {
++				if (!valid_vma(vma, is_register))
++					continue;
++
++				if (!prev && !more) {
++					prev = kmalloc_obj(struct map_info,
++							   GFP_NOWAIT | __GFP_NOMEMALLOC);
++					if (prev)
++						prev->next = NULL;
++				}
++				if (!prev) {
++					more++;
++					continue;
++				}
++
++				if (!mmget_not_zero(vma->vm_mm))
++					continue;
++
++				info = prev;
++				prev = prev->next;
++				info->next = curr;
++				curr = info;
++
++				info->mm = vma->vm_mm;
++				info->vaddr = offset_to_vaddr(vma, offset);
++			}
++			up_read(&shards->shards[s].rwsem);
+ 		}
+-		if (!prev) {
+-			more++;
+-			continue;
++	} else {
++		i_mmap_lock_read(mapping);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++			if (!valid_vma(vma, is_register))
++				continue;
++
++			if (!prev && !more) {
++				prev = kmalloc_obj(struct map_info,
++						   GFP_NOWAIT | __GFP_NOMEMALLOC);
++				if (prev)
++					prev->next = NULL;
++			}
++			if (!prev) {
++				more++;
++				continue;
++			}
++
++			if (!mmget_not_zero(vma->vm_mm))
++				continue;
++
++			info = prev;
++			prev = prev->next;
++			info->next = curr;
++			curr = info;
++
++			info->mm = vma->vm_mm;
++			info->vaddr = offset_to_vaddr(vma, offset);
+ 		}
+-
+-		if (!mmget_not_zero(vma->vm_mm))
+-			continue;
+-
+-		info = prev;
+-		prev = prev->next;
+-		info->next = curr;
+-		curr = info;
+-
+-		info->mm = vma->vm_mm;
+-		info->vaddr = offset_to_vaddr(vma, offset);
++		i_mmap_unlock_read(mapping);
+ 	}
+-	i_mmap_unlock_read(mapping);
+ 
+ 	if (!more)
+ 		goto out;
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index ee9638571480..e4c0b20c9ffe 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -5407,38 +5407,45 @@ static void unmap_ref_private(struct mm_struct *mm, struct vm_area_struct *vma,
+ 			vma->vm_pgoff;
+ 	mapping = vma->vm_file->f_mapping;
+ 
+-	/*
+-	 * Take the mapping lock for the duration of the table walk. As
+-	 * this mapping should be shared between all the VMAs,
+-	 * __unmap_hugepage_range() is called as the lock is already held
+-	 */
+-	i_mmap_lock_write(mapping);
+-	vma_interval_tree_foreach(iter_vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+-		/* Do not unmap the current VMA */
+-		if (iter_vma == vma)
+-			continue;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++)
++			down_write(&shards->shards[s].rwsem);
++		for (s = 0; s < shards->nr_shards; s++) {
++			vma_interval_tree_foreach(iter_vma, &shards->shards[s].tree,
++						  pgoff, pgoff) {
++				if (iter_vma == vma)
++					continue;
++
++				if (iter_vma->vm_flags & VM_MAYSHARE)
++					continue;
++
++				if (!is_vma_resv_set(iter_vma, HPAGE_RESV_OWNER))
++					unmap_hugepage_range(iter_vma, address,
++							     address + huge_page_size(h),
++							     folio, 0);
++			}
++		}
++		for (s = 0; s < shards->nr_shards; s++)
++			up_write(&shards->shards[s].rwsem);
++	} else {
++		i_mmap_lock_write(mapping);
++		vma_interval_tree_foreach(iter_vma, &mapping->i_mmap, pgoff, pgoff) {
++			if (iter_vma == vma)
++				continue;
+ 
+-		/*
+-		 * Shared VMAs have their own reserves and do not affect
+-		 * MAP_PRIVATE accounting but it is possible that a shared
+-		 * VMA is using the same page so check and skip such VMAs.
+-		 */
+-		if (iter_vma->vm_flags & VM_MAYSHARE)
+-			continue;
++			if (iter_vma->vm_flags & VM_MAYSHARE)
++				continue;
+ 
+-		/*
+-		 * Unmap the page from other VMAs without their own reserves.
+-		 * They get marked to be SIGKILLed if they fault in these
+-		 * areas. This is because a future no-page fault on this VMA
+-		 * could insert a zeroed page instead of the data existing
+-		 * from the time of fork. This would look like data corruption
+-		 */
+-		if (!is_vma_resv_set(iter_vma, HPAGE_RESV_OWNER))
+-			unmap_hugepage_range(iter_vma, address,
+-					     address + huge_page_size(h),
+-					     folio, 0);
++			if (!is_vma_resv_set(iter_vma, HPAGE_RESV_OWNER))
++				unmap_hugepage_range(iter_vma, address,
++						     address + huge_page_size(h),
++						     folio, 0);
++		}
++		i_mmap_unlock_write(mapping);
+ 	}
+-	i_mmap_unlock_write(mapping);
+ }
+ 
+ /*
+@@ -6886,20 +6893,47 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	pte_t *spte = NULL;
+ 	pte_t *pte;
+ 
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(svma, get_i_mmap_root(mapping), idx, idx) {
+-		if (svma == vma)
+-			continue;
+-
+-		saddr = page_table_shareable(svma, vma, addr, idx);
+-		if (saddr) {
+-			spte = hugetlb_walk(svma, saddr,
+-					    vma_mmu_pagesize(svma));
+-			if (spte) {
+-				ptdesc_pmd_pts_inc(virt_to_ptdesc(spte));
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			vma_interval_tree_foreach(svma, &shards->shards[s].tree, idx, idx) {
++				if (svma == vma)
++					continue;
++
++				saddr = page_table_shareable(svma, vma, addr, idx);
++				if (saddr) {
++					spte = hugetlb_walk(svma, saddr,
++							    vma_mmu_pagesize(svma));
++					if (spte) {
++						ptdesc_pmd_pts_inc(virt_to_ptdesc(spte));
++						break;
++					}
++				}
++			}
++			up_read(&shards->shards[s].rwsem);
++			if (spte)
+ 				break;
++		}
++	} else {
++		i_mmap_lock_read(mapping);
++		vma_interval_tree_foreach(svma, &mapping->i_mmap, idx, idx) {
++			if (svma == vma)
++				continue;
++
++			saddr = page_table_shareable(svma, vma, addr, idx);
++			if (saddr) {
++				spte = hugetlb_walk(svma, saddr,
++						    vma_mmu_pagesize(svma));
++				if (spte) {
++					ptdesc_pmd_pts_inc(virt_to_ptdesc(spte));
++					break;
++				}
+ 			}
+ 		}
++		i_mmap_unlock_read(mapping);
+ 	}
+ 
+ 	if (!spte)
+@@ -6916,7 +6950,6 @@ pte_t *huge_pmd_share(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	spin_unlock(&mm->page_table_lock);
+ out:
+ 	pte = (pte_t *)pmd_alloc(mm, pud, addr);
+-	i_mmap_unlock_read(mapping);
+ 	return pte;
+ }
+ 
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 4d334ff8615e..af082f81e276 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1742,83 +1742,127 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ {
+ 	struct vm_area_struct *vma;
+ 
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+-		struct mmu_notifier_range range;
+-		struct mm_struct *mm;
+-		unsigned long addr;
+-		pmd_t *pmd, pgt_pmd;
+-		spinlock_t *pml;
+-		spinlock_t *ptl;
+-		bool success = false;
+-
+-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+-		if (addr & ~HPAGE_PMD_MASK ||
+-		    vma->vm_end < addr + HPAGE_PMD_SIZE)
+-			continue;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  pgoff, pgoff) {
++				struct mmu_notifier_range range;
++				struct mm_struct *mm;
++				unsigned long addr;
++				pmd_t *pmd, pgt_pmd;
++				spinlock_t *pml;
++				spinlock_t *ptl;
++				bool success = false;
++
++				addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++				if (addr & ~HPAGE_PMD_MASK ||
++				    vma->vm_end < addr + HPAGE_PMD_SIZE)
++					continue;
++
++				mm = vma->vm_mm;
++				if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
++					continue;
++
++				if (hpage_collapse_test_exit(mm))
++					continue;
++
++				if (!file_backed_vma_is_retractable(vma))
++					continue;
++
++				mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
++							addr, addr + HPAGE_PMD_SIZE);
++				mmu_notifier_invalidate_range_start(&range);
++
++				pml = pmd_lock(mm, pmd);
++				if (check_pmd_state(pmd) != SCAN_SUCCEED)
++					goto drop_pml_sharded;
++				ptl = pte_lockptr(mm, pmd);
++				if (ptl != pml)
++					spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++
++				if (likely(file_backed_vma_is_retractable(vma))) {
++					pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
++					pmdp_get_lockless_sync();
++					success = true;
++				}
+ 
+-		mm = vma->vm_mm;
+-		if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
+-			continue;
++				if (ptl != pml)
++					spin_unlock(ptl);
++drop_pml_sharded:
++				spin_unlock(pml);
+ 
+-		if (hpage_collapse_test_exit(mm))
+-			continue;
++				mmu_notifier_invalidate_range_end(&range);
+ 
+-		if (!file_backed_vma_is_retractable(vma))
+-			continue;
++				if (success) {
++					mm_dec_nr_ptes(mm);
++					page_table_check_pte_clear_range(mm, addr, pgt_pmd);
++					pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++				}
++			}
++			up_read(&shards->shards[s].rwsem);
++		}
++	} else {
++		i_mmap_lock_read(mapping);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++			struct mmu_notifier_range range;
++			struct mm_struct *mm;
++			unsigned long addr;
++			pmd_t *pmd, pgt_pmd;
++			spinlock_t *pml;
++			spinlock_t *ptl;
++			bool success = false;
++
++			addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++			if (addr & ~HPAGE_PMD_MASK ||
++			    vma->vm_end < addr + HPAGE_PMD_SIZE)
++				continue;
+ 
+-		/* PTEs were notified when unmapped; but now for the PMD? */
+-		mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
+-					addr, addr + HPAGE_PMD_SIZE);
+-		mmu_notifier_invalidate_range_start(&range);
++			mm = vma->vm_mm;
++			if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
++				continue;
+ 
+-		pml = pmd_lock(mm, pmd);
+-		/*
+-		 * The lock of new_folio is still held, we will be blocked in
+-		 * the page fault path, which prevents the pte entries from
+-		 * being set again. So even though the old empty PTE page may be
+-		 * concurrently freed and a new PTE page is filled into the pmd
+-		 * entry, it is still empty and can be removed.
+-		 *
+-		 * So here we only need to recheck if the state of pmd entry
+-		 * still meets our requirements, rather than checking pmd_same()
+-		 * like elsewhere.
+-		 */
+-		if (check_pmd_state(pmd) != SCAN_SUCCEED)
+-			goto drop_pml;
+-		ptl = pte_lockptr(mm, pmd);
+-		if (ptl != pml)
+-			spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++			if (hpage_collapse_test_exit(mm))
++				continue;
+ 
+-		/*
+-		 * Huge page lock is still held, so normally the page table must
+-		 * remain empty; and we have already skipped anon_vma and
+-		 * userfaultfd_wp() vmas.  But since the mmap_lock is not held,
+-		 * it is still possible for a racing userfaultfd_ioctl() or
+-		 * madvise() to have inserted ptes or markers.  Now that we hold
+-		 * ptlock, repeating the retractable checks protects us from
+-		 * races against the prior checks.
+-		 */
+-		if (likely(file_backed_vma_is_retractable(vma))) {
+-			pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
+-			pmdp_get_lockless_sync();
+-			success = true;
+-		}
++			if (!file_backed_vma_is_retractable(vma))
++				continue;
+ 
+-		if (ptl != pml)
+-			spin_unlock(ptl);
++			mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
++						addr, addr + HPAGE_PMD_SIZE);
++			mmu_notifier_invalidate_range_start(&range);
++
++			pml = pmd_lock(mm, pmd);
++			if (check_pmd_state(pmd) != SCAN_SUCCEED)
++				goto drop_pml;
++			ptl = pte_lockptr(mm, pmd);
++			if (ptl != pml)
++				spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++
++			if (likely(file_backed_vma_is_retractable(vma))) {
++				pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
++				pmdp_get_lockless_sync();
++				success = true;
++			}
++
++			if (ptl != pml)
++				spin_unlock(ptl);
+ drop_pml:
+-		spin_unlock(pml);
++			spin_unlock(pml);
+ 
+-		mmu_notifier_invalidate_range_end(&range);
++			mmu_notifier_invalidate_range_end(&range);
+ 
+-		if (success) {
+-			mm_dec_nr_ptes(mm);
+-			page_table_check_pte_clear_range(mm, addr, pgt_pmd);
+-			pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++			if (success) {
++				mm_dec_nr_ptes(mm);
++				page_table_check_pte_clear_range(mm, addr, pgt_pmd);
++				pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++			}
+ 		}
++		i_mmap_unlock_read(mapping);
+ 	}
+-	i_mmap_unlock_read(mapping);
+ }
+ 
+ /**
+@@ -2130,57 +2174,106 @@ static enum scan_result collapse_file(struct mm_struct *mm, unsigned long addr,
+ 		struct vm_area_struct *vma;
+ 		int nr_none_check = 0;
+ 
+-		i_mmap_lock_read(mapping);
+-		xas_lock_irq(&xas);
++		if (mapping_sharded(mapping)) {
++			struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++			unsigned int s;
+ 
+-		xas_set(&xas, start);
+-		for (index = start; index < end; index++) {
+-			if (!xas_next(&xas)) {
+-				xas_store(&xas, XA_RETRY_ENTRY);
+-				if (xas_error(&xas)) {
+-					result = SCAN_STORE_FAILED;
+-					goto immap_locked;
++			for (s = 0; s < shards->nr_shards; s++)
++				down_read(&shards->shards[s].rwsem);
++			xas_lock_irq(&xas);
++
++			xas_set(&xas, start);
++			for (index = start; index < end; index++) {
++				if (!xas_next(&xas)) {
++					xas_store(&xas, XA_RETRY_ENTRY);
++					if (xas_error(&xas)) {
++						result = SCAN_STORE_FAILED;
++						goto immap_locked_sharded;
++					}
++					nr_none_check++;
+ 				}
+-				nr_none_check++;
+ 			}
+-		}
+ 
+-		if (nr_none != nr_none_check) {
+-			result = SCAN_PAGE_FILLED;
+-			goto immap_locked;
+-		}
++			if (nr_none != nr_none_check) {
++				result = SCAN_PAGE_FILLED;
++				goto immap_locked_sharded;
++			}
+ 
+-		/*
+-		 * If userspace observed a missing page in a VMA with
+-		 * a MODE_MISSING userfaultfd, then it might expect a
+-		 * UFFD_EVENT_PAGEFAULT for that page. If so, we need to
+-		 * roll back to avoid suppressing such an event. Since
+-		 * wp/minor userfaultfds don't give userspace any
+-		 * guarantees that the kernel doesn't fill a missing
+-		 * page with a zero page, so they don't matter here.
+-		 *
+-		 * Any userfaultfds registered after this point will
+-		 * not be able to observe any missing pages due to the
+-		 * previously inserted retry entries.
+-		 */
+-		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), start, end) {
+-			if (userfaultfd_missing(vma)) {
+-				result = SCAN_EXCEED_NONE_PTE;
+-				goto immap_locked;
++			for (s = 0; s < shards->nr_shards; s++) {
++				vma_interval_tree_foreach(vma, &shards->shards[s].tree, start, end) {
++					if (userfaultfd_missing(vma)) {
++						result = SCAN_EXCEED_NONE_PTE;
++						goto immap_locked_sharded;
++					}
++				}
+ 			}
+-		}
+ 
+-immap_locked:
+-		i_mmap_unlock_read(mapping);
+-		if (result != SCAN_SUCCEED) {
++immap_locked_sharded:
++			for (s = 0; s < shards->nr_shards; s++)
++				up_read(&shards->shards[s].rwsem);
++			if (result != SCAN_SUCCEED) {
++				xas_set(&xas, start);
++				for (index = start; index < end; index++) {
++					if (xas_next(&xas) == XA_RETRY_ENTRY)
++						xas_store(&xas, NULL);
++				}
++
++				xas_unlock_irq(&xas);
++				goto rollback;
++			}
++		} else {
++			i_mmap_lock_read(mapping);
++			xas_lock_irq(&xas);
++
+ 			xas_set(&xas, start);
+ 			for (index = start; index < end; index++) {
+-				if (xas_next(&xas) == XA_RETRY_ENTRY)
+-					xas_store(&xas, NULL);
++				if (!xas_next(&xas)) {
++					xas_store(&xas, XA_RETRY_ENTRY);
++					if (xas_error(&xas)) {
++						result = SCAN_STORE_FAILED;
++						goto immap_locked;
++					}
++					nr_none_check++;
++				}
+ 			}
+ 
+-			xas_unlock_irq(&xas);
+-			goto rollback;
++			if (nr_none != nr_none_check) {
++				result = SCAN_PAGE_FILLED;
++				goto immap_locked;
++			}
++
++			/*
++			 * If userspace observed a missing page in a VMA with
++			 * a MODE_MISSING userfaultfd, then it might expect a
++			 * UFFD_EVENT_PAGEFAULT for that page. If so, we need to
++			 * roll back to avoid suppressing such an event. Since
++			 * wp/minor userfaultfds don't give userspace any
++			 * guarantees that the kernel doesn't fill a missing
++			 * page with a zero page, so they don't matter here.
++			 *
++			 * Any userfaultfds registered after this point will
++			 * not be able to observe any missing pages due to the
++			 * previously inserted retry entries.
++			 */
++			vma_interval_tree_foreach(vma, &mapping->i_mmap, start, end) {
++				if (userfaultfd_missing(vma)) {
++					result = SCAN_EXCEED_NONE_PTE;
++					goto immap_locked;
++				}
++			}
++
++immap_locked:
++			i_mmap_unlock_read(mapping);
++			if (result != SCAN_SUCCEED) {
++				xas_set(&xas, start);
++				for (index = start; index < end; index++) {
++					if (xas_next(&xas) == XA_RETRY_ENTRY)
++						xas_store(&xas, NULL);
++				}
++
++				xas_unlock_irq(&xas);
++				goto rollback;
++			}
+ 		}
+ 	} else {
+ 		xas_lock_irq(&xas);
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index fbe39a04084b..a03631d3e0ed 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -589,32 +589,52 @@ static void collect_procs_file(const struct folio *folio,
+ 	struct address_space *mapping = folio->mapping;
+ 	pgoff_t pgoff;
+ 
+-	i_mmap_lock_read(mapping);
+-	rcu_read_lock();
+-	pgoff = page_pgoff(folio, page);
+-	for_each_process(tsk) {
+-		struct task_struct *t = task_early_kill(tsk, force_early);
+-		unsigned long addr;
+-
+-		if (!t)
+-			continue;
+-vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff,
+-			      pgoff) {
+-			/*
+-			 * Send early kill signal to tasks where a vma covers
+-			 * the page but the corrupted page is not necessarily
+-			 * mapped in its pte.
+-			 * Assume applications who requested early kill want
+-			 * to be informed of all such data corruptions.
+-			 */
+-			if (vma->vm_mm != t->mm)
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		rcu_read_lock();
++		pgoff = page_pgoff(folio, page);
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			for_each_process(tsk) {
++				struct task_struct *t = task_early_kill(tsk, force_early);
++				unsigned long addr;
++
++				if (!t)
++					continue;
++				vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++							  pgoff, pgoff) {
++					if (vma->vm_mm != t->mm)
++						continue;
++					addr = page_address_in_vma(folio, page, vma);
++					add_to_kill_anon_file(t, page, vma, to_kill, addr);
++				}
++			}
++			up_read(&shards->shards[s].rwsem);
++		}
++		rcu_read_unlock();
++	} else {
++		i_mmap_lock_read(mapping);
++		rcu_read_lock();
++		pgoff = page_pgoff(folio, page);
++		for_each_process(tsk) {
++			struct task_struct *t = task_early_kill(tsk, force_early);
++			unsigned long addr;
++
++			if (!t)
+ 				continue;
+-			addr = page_address_in_vma(folio, page, vma);
+-			add_to_kill_anon_file(t, page, vma, to_kill, addr);
++			vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
++					      pgoff) {
++				if (vma->vm_mm != t->mm)
++					continue;
++				addr = page_address_in_vma(folio, page, vma);
++				add_to_kill_anon_file(t, page, vma, to_kill, addr);
++			}
+ 		}
++		rcu_read_unlock();
++		i_mmap_unlock_read(mapping);
+ 	}
+-	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
+ }
+ 
+ #ifdef CONFIG_FS_DAX
+@@ -636,27 +656,47 @@ static void collect_procs_fsdax(const struct page *page,
+ 	struct vm_area_struct *vma;
+ 	struct task_struct *tsk;
+ 
+-	i_mmap_lock_read(mapping);
+-	rcu_read_lock();
+-	for_each_process(tsk) {
+-		struct task_struct *t = tsk;
+-
+-		/*
+-		 * Search for all tasks while MF_MEM_PRE_REMOVE is set, because
+-		 * the current may not be the one accessing the fsdax page.
+-		 * Otherwise, search for the current task.
+-		 */
+-		if (!pre_remove)
+-			t = task_early_kill(tsk, true);
+-		if (!t)
+-			continue;
+-		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), pgoff, pgoff) {
+-			if (vma->vm_mm == t->mm)
+-				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		rcu_read_lock();
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			for_each_process(tsk) {
++				struct task_struct *t = tsk;
++
++				if (!pre_remove)
++					t = task_early_kill(tsk, true);
++				if (!t)
++					continue;
++				vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++							  pgoff, pgoff) {
++					if (vma->vm_mm == t->mm)
++						add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
++				}
++			}
++			up_read(&shards->shards[s].rwsem);
+ 		}
++		rcu_read_unlock();
++	} else {
++		i_mmap_lock_read(mapping);
++		rcu_read_lock();
++		for_each_process(tsk) {
++			struct task_struct *t = tsk;
++
++			if (!pre_remove)
++				t = task_early_kill(tsk, true);
++			if (!t)
++				continue;
++			vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
++				if (vma->vm_mm == t->mm)
++					add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
++			}
++		}
++		rcu_read_unlock();
++		i_mmap_unlock_read(mapping);
+ 	}
+-	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
+ }
+ #endif /* CONFIG_FS_DAX */
+ 
+@@ -2243,24 +2283,51 @@ static void collect_procs_pfn(struct pfn_address_space *pfn_space,
+ 	struct task_struct *tsk;
+ 	struct address_space *mapping = pfn_space->mapping;
+ 
+-	i_mmap_lock_read(mapping);
+-	rcu_read_lock();
+-	for_each_process(tsk) {
+-		struct task_struct *t = tsk;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		rcu_read_lock();
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			for_each_process(tsk) {
++				struct task_struct *t = tsk;
++
++				t = task_early_kill(tsk, true);
++				if (!t)
++					continue;
++				vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++							  0, ULONG_MAX) {
++					pgoff_t pgoff;
++
++					if (vma->vm_mm == t->mm &&
++					    !pfn_space->pfn_to_vma_pgoff(vma, pfn, &pgoff))
++						add_to_kill_pgoff(t, vma, to_kill, pgoff);
++				}
++			}
++			up_read(&shards->shards[s].rwsem);
++		}
++		rcu_read_unlock();
++	} else {
++		i_mmap_lock_read(mapping);
++		rcu_read_lock();
++		for_each_process(tsk) {
++			struct task_struct *t = tsk;
+ 
+-		t = task_early_kill(tsk, true);
+-		if (!t)
+-			continue;
+-		vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), 0, ULONG_MAX) {
+-			pgoff_t pgoff;
++			t = task_early_kill(tsk, true);
++			if (!t)
++				continue;
++			vma_interval_tree_foreach(vma, &mapping->i_mmap, 0, ULONG_MAX) {
++				pgoff_t pgoff;
+ 
+-			if (vma->vm_mm == t->mm &&
+-			    !pfn_space->pfn_to_vma_pgoff(vma, pfn, &pgoff))
+-				add_to_kill_pgoff(t, vma, to_kill, pgoff);
++				if (vma->vm_mm == t->mm &&
++				    !pfn_space->pfn_to_vma_pgoff(vma, pfn, &pgoff))
++					add_to_kill_pgoff(t, vma, to_kill, pgoff);
++			}
+ 		}
++		rcu_read_unlock();
++		i_mmap_unlock_read(mapping);
+ 	}
+-	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
+ }
+ 
+ /**
+diff --git a/mm/memory.c b/mm/memory.c
+index eb653561c632..26efacb6ad6d 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4296,11 +4296,24 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.single_folio = folio;
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(mapping_mapped(mapping)))
+-		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			unmap_mapping_range_tree(&shards->shards[s].tree,
++						 first_index, last_index,
++						 &details);
++			up_read(&shards->shards[s].rwsem);
++		}
++	} else {
++		i_mmap_lock_read(mapping);
++		if (unlikely(mapping_mapped(mapping)))
++			unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++						 last_index, &details);
++		i_mmap_unlock_read(mapping);
++	}
+ }
+ 
+ /**
+@@ -4326,11 +4339,24 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 	if (last_index < first_index)
+ 		last_index = ULONG_MAX;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(mapping_mapped(mapping)))
+-		unmap_mapping_range_tree(get_i_mmap_root(mapping), first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards; s++) {
++			down_read(&shards->shards[s].rwsem);
++			unmap_mapping_range_tree(&shards->shards[s].tree,
++						 first_index, last_index,
++						 &details);
++			up_read(&shards->shards[s].rwsem);
++		}
++	} else {
++		i_mmap_lock_read(mapping);
++		if (unlikely(mapping_mapped(mapping)))
++			unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++						 last_index, &details);
++		i_mmap_unlock_read(mapping);
++	}
+ }
+ EXPORT_SYMBOL_GPL(unmap_mapping_pages);
+ 
+diff --git a/mm/nommu.c b/mm/nommu.c
+index b0c16f57806f..01e900e09801 100644
+--- a/mm/nommu.c
++++ b/mm/nommu.c
+@@ -1806,6 +1806,7 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ {
+ 	struct vm_area_struct *vma;
+ 	struct vm_region *region;
++	struct address_space *mapping = inode->i_mapping;
+ 	pgoff_t low, high;
+ 	size_t r_size, r_top;
+ 
+@@ -1813,41 +1814,80 @@ int nommu_shrink_inode_mappings(struct inode *inode, size_t size,
+ 	high = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
+ 
+ 	down_write(&nommu_region_sem);
+-	i_mmap_lock_read(inode->i_mapping);
+-
+-	/* search for VMAs that fall within the dead zone */
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(inode->i_mapping), low, high) {
+-		/* found one - only interested if it's shared out of the page
+-		 * cache */
+-		if (vma->vm_flags & VM_SHARED) {
+-			i_mmap_unlock_read(inode->i_mapping);
++
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s, found_shared = 0;
++
++		for (s = 0; s < shards->nr_shards; s++)
++			down_read(&shards->shards[s].rwsem);
++
++		for (s = 0; s < shards->nr_shards && !found_shared; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  low, high) {
++				if (vma->vm_flags & VM_SHARED) {
++					found_shared = 1;
++					break;
++				}
++			}
++		}
++
++		if (found_shared) {
++			for (s = 0; s < shards->nr_shards; s++)
++				up_read(&shards->shards[s].rwsem);
+ 			up_write(&nommu_region_sem);
+-			return -ETXTBSY; /* not quite true, but near enough */
++			return -ETXTBSY;
+ 		}
+-	}
+ 
+-	/* reduce any regions that overlap the dead zone - if in existence,
+-	 * these will be pointed to by VMAs that don't overlap the dead zone
+-	 *
+-	 * we don't check for any regions that start beyond the EOF as there
+-	 * shouldn't be any
+-	 */
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(inode->i_mapping), 0, ULONG_MAX) {
+-		if (!(vma->vm_flags & VM_SHARED))
+-			continue;
+-
+-		region = vma->vm_region;
+-		r_size = region->vm_top - region->vm_start;
+-		r_top = (region->vm_pgoff << PAGE_SHIFT) + r_size;
+-
+-		if (r_top > newsize) {
+-			region->vm_top -= r_top - newsize;
+-			if (region->vm_end > region->vm_top)
+-				region->vm_end = region->vm_top;
++		for (s = 0; s < shards->nr_shards; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  0, ULONG_MAX) {
++				if (!(vma->vm_flags & VM_SHARED))
++					continue;
++
++				region = vma->vm_region;
++				r_size = region->vm_top - region->vm_start;
++				r_top = (region->vm_pgoff << PAGE_SHIFT) + r_size;
++
++				if (r_top > newsize) {
++					region->vm_top -= r_top - newsize;
++					if (region->vm_end > region->vm_top)
++						region->vm_end = region->vm_top;
++				}
++			}
+ 		}
++
++		for (s = 0; s < shards->nr_shards; s++)
++			up_read(&shards->shards[s].rwsem);
++	} else {
++		i_mmap_lock_read(mapping);
++
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, low, high) {
++			if (vma->vm_flags & VM_SHARED) {
++				i_mmap_unlock_read(mapping);
++				up_write(&nommu_region_sem);
++				return -ETXTBSY;
++			}
++		}
++
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, 0, ULONG_MAX) {
++			if (!(vma->vm_flags & VM_SHARED))
++				continue;
++
++			region = vma->vm_region;
++			r_size = region->vm_top - region->vm_start;
++			r_top = (region->vm_pgoff << PAGE_SHIFT) + r_size;
++
++			if (r_top > newsize) {
++				region->vm_top -= r_top - newsize;
++				if (region->vm_end > region->vm_top)
++					region->vm_end = region->vm_top;
++			}
++		}
++
++		i_mmap_unlock_read(mapping);
+ 	}
+ 
+-	i_mmap_unlock_read(inode->i_mapping);
+ 	up_write(&nommu_region_sem);
+ 	return 0;
+ }
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index 34edc1f89808..88deeda694fe 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -810,35 +810,71 @@ int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+ 	if (!check_ops_safe(ops))
+ 		return -EINVAL;
+ 
+-	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping), first_index,
+-				  first_index + nr - 1) {
+-		/* Clip to the vma */
+-		vba = vma->vm_pgoff;
+-		vea = vba + vma_pages(vma);
+-		cba = first_index;
+-		cba = max(cba, vba);
+-		cea = first_index + nr;
+-		cea = min(cea, vea);
+-
+-		start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
+-		end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
+-		if (start_addr >= end_addr)
+-			continue;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++
++		for (s = 0; s < shards->nr_shards && !err; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++						  first_index,
++						  first_index + nr - 1) {
++				vba = vma->vm_pgoff;
++				vea = vba + vma_pages(vma);
++				cba = first_index;
++				cba = max(cba, vba);
++				cea = first_index + nr;
++				cea = min(cea, vea);
++
++				start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
++				end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++				if (start_addr >= end_addr)
++					continue;
++
++				walk.vma = vma;
++				walk.mm = vma->vm_mm;
++
++				err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
++				if (err > 0) {
++					err = 0;
++					break;
++				} else if (err < 0)
++					break;
++
++				err = __walk_page_range(start_addr, end_addr, &walk);
++				if (err)
++					break;
++			}
++		}
++	} else {
++		lockdep_assert_held(&mapping->i_mmap_rwsem);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
++					  first_index + nr - 1) {
++			vba = vma->vm_pgoff;
++			vea = vba + vma_pages(vma);
++			cba = first_index;
++			cba = max(cba, vba);
++			cea = first_index + nr;
++			cea = min(cea, vea);
++
++			start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
++			end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++			if (start_addr >= end_addr)
++				continue;
+ 
+-		walk.vma = vma;
+-		walk.mm = vma->vm_mm;
++			walk.vma = vma;
++			walk.mm = vma->vm_mm;
+ 
+-		err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
+-		if (err > 0) {
+-			err = 0;
+-			break;
+-		} else if (err < 0)
+-			break;
++			err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
++			if (err > 0) {
++				err = 0;
++				break;
++			} else if (err < 0)
++				break;
+ 
+-		err = __walk_page_range(start_addr, end_addr, &walk);
+-		if (err)
+-			break;
++			err = __walk_page_range(start_addr, end_addr, &walk);
++			if (err)
++				break;
++		}
+ 	}
+ 
+ 	return err;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 613dc62f61ca..806353f9e1fc 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -3031,36 +3031,86 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
+ 	VM_WARN_ON_FOLIO(folio && pgoff_start != folio_pgoff(folio), folio);
+ 	VM_WARN_ON_FOLIO(folio && nr_pages != folio_nr_pages(folio), folio);
+ 
+-	if (!locked) {
+-		if (i_mmap_trylock_read(mapping))
+-			goto lookup;
++	if (mapping_sharded(mapping)) {
++		struct i_mmap_shards *shards = mapping->i_mmap_shards_ptr;
++		unsigned int s;
++		bool done = false;
++
++		if (!locked) {
++			if (rwc->try_lock) {
++				for (s = 0; s < shards->nr_shards; s++) {
++					if (!down_read_trylock(&shards->shards[s].rwsem)) {
++						rwc->contended = true;
++						while (s-- > 0)
++							up_read(&shards->shards[s].rwsem);
++						return;
++					}
++				}
++			} else {
++				for (s = 0; s < shards->nr_shards; s++)
++					down_read(&shards->shards[s].rwsem);
++			}
++		}
++
++		for (s = 0; s < shards->nr_shards && !done; s++) {
++			vma_interval_tree_foreach(vma, &shards->shards[s].tree,
++					pgoff_start, pgoff_end) {
++				unsigned long address = vma_address(vma,
++						pgoff_start, nr_pages);
++
++				VM_BUG_ON_VMA(address == -EFAULT, vma);
++				cond_resched();
++
++				if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++					continue;
++
++				if (!rwc->rmap_one(folio, vma, address, rwc->arg)) {
++					done = true;
++					break;
++				}
++				if (rwc->done && rwc->done(folio)) {
++					done = true;
++					break;
++				}
++			}
++		}
+ 
+-		if (rwc->try_lock) {
+-			rwc->contended = true;
+-			return;
++		if (!locked) {
++			for (s = 0; s < shards->nr_shards; s++)
++				up_read(&shards->shards[s].rwsem);
+ 		}
++	} else {
++		if (!locked) {
++			if (i_mmap_trylock_read(mapping))
++				goto lookup;
+ 
+-		i_mmap_lock_read(mapping);
+-	}
++			if (rwc->try_lock) {
++				rwc->contended = true;
++				return;
++			}
++
++			i_mmap_lock_read(mapping);
++		}
+ lookup:
+-	vma_interval_tree_foreach(vma, get_i_mmap_root(mapping),
+-			pgoff_start, pgoff_end) {
+-		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap,
++				pgoff_start, pgoff_end) {
++			unsigned long address = vma_address(vma, pgoff_start, nr_pages);
+ 
+-		VM_BUG_ON_VMA(address == -EFAULT, vma);
+-		cond_resched();
++			VM_BUG_ON_VMA(address == -EFAULT, vma);
++			cond_resched();
+ 
+-		if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
+-			continue;
++			if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++				continue;
+ 
+-		if (!rwc->rmap_one(folio, vma, address, rwc->arg))
+-			goto done;
+-		if (rwc->done && rwc->done(folio))
+-			goto done;
+-	}
++			if (!rwc->rmap_one(folio, vma, address, rwc->arg))
++				goto done;
++			if (rwc->done && rwc->done(folio))
++				goto done;
++		}
+ done:
+-	if (!locked)
+-		i_mmap_unlock_read(mapping);
++		if (!locked)
++			i_mmap_unlock_read(mapping);
++	}
+ }
+ 
+ /*
+-- 
+2.43.0
+

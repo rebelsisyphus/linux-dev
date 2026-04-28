@@ -1,0 +1,54 @@
+From f090a5398778309b47eb00499a636fa78b62c84d Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 28 Apr 2026 15:13:18 +0800
+Subject: [PATCH 8/8] mm: use atomic_t for trylock_fails to fix concurrency
+ race
+
+The trylock_fails counter in i_mmap_shards was a plain unsigned int,
+allowing concurrent increments from multiple CPUs to lose counts under
+racing. Use atomic_inc_return() to ensure every trylock failure is
+counted, guaranteeing sharding triggers at the correct threshold.
+---
+ include/linux/fs.h | 2 +-
+ mm/i_mmap_shards.c | 5 ++---
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index efb8e7d313ec..50ac1888866b 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -457,7 +457,7 @@ struct i_mmap_shard {
+ struct i_mmap_shards {
+ 	unsigned int		nr_shards;
+ 	atomic_t		vma_count;
+-	unsigned int		trylock_fails;
++	atomic_t		trylock_fails;
+ 	struct i_mmap_shard	shards[];
+ };
+ 
+diff --git a/mm/i_mmap_shards.c b/mm/i_mmap_shards.c
+index 62681c98ca23..43edaf25628a 100644
+--- a/mm/i_mmap_shards.c
++++ b/mm/i_mmap_shards.c
+@@ -19,7 +19,7 @@ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+ 
+ 	shards->nr_shards = I_MMAP_NR_SHARDS;
+ 	atomic_set(&shards->vma_count, 0);
+-	shards->trylock_fails = 0;
++	atomic_set(&shards->trylock_fails, 0);
+ 
+ 	for (i = 0; i < shards->nr_shards; i++) {
+ 		shards->shards[i].tree = RB_ROOT_CACHED;
+@@ -119,8 +119,7 @@ void mapping_maybe_convert_to_shards(struct address_space *mapping)
+ 
+ 	shards = mapping->i_mmap_shards_ptr;
+ 	if (shards) {
+-		shards->trylock_fails++;
+-		if (shards->trylock_fails >= I_MMAP_SHARD_THRESHOLD) {
++		if (atomic_inc_return(&shards->trylock_fails) >= I_MMAP_SHARD_THRESHOLD) {
+ 			if (i_mmap_trylock_write(mapping)) {
+ 				mapping_convert_to_shards(mapping);
+ 				i_mmap_unlock_write(mapping);
+-- 
+2.43.0
+

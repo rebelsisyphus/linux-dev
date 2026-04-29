@@ -1,0 +1,31 @@
+From c57f677a888e263fc38e738d6db14492698cf18d Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Thu, 23 Apr 2026 20:14:15 +0800
+Subject: [PATCH 03/29] sched: guard task_domain_nid against NUMA_NO_NODE
+
+---
+ kernel/fork.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index acecebd03dde..2e6632e1ccf3 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2488,7 +2488,13 @@ __latent_entropy struct task_struct *copy_process(
+ 			 * a subsequent commit will use it to link p into the
+ 			 * per-shard task list instead of init_task.tasks.
+ 			 */
+-			p->task_domain_nid = cpu_to_node(task_cpu(p));
++			{
++				int nid = cpu_to_node(task_cpu(p));
++
++				if (unlikely(nid == NUMA_NO_NODE || nid >= nr_node_ids))
++					nid = 0;
++				p->task_domain_nid = nid;
++			}
+ 			list_add_tail_rcu(&p->tasks, &init_task.tasks);
+ 			attach_pid(p, PIDTYPE_TGID);
+ 			attach_pid(p, PIDTYPE_PGID);
+-- 
+2.43.0
+

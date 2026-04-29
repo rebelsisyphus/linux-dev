@@ -1,0 +1,190 @@
+From 77ba617fc83831a4fb148eeb518d38a111b23f16 Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Tue, 28 Apr 2026 11:22:50 +0800
+Subject: [PATCH 27/29] fork: return rss_stat backing to original NUMA cache
+
+---
+ include/linux/mm_types.h |  3 ++
+ kernel/fork.c            | 70 +++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 65 insertions(+), 8 deletions(-)
+
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 3cc8ae722886..6a8525c3deca 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1264,6 +1264,9 @@ struct mm_struct {
+ #endif
+ 
+ 		struct percpu_counter rss_stat[NR_MM_COUNTERS];
++#ifdef CONFIG_SMP
++		int rss_stat_backing_nid;
++#endif
+ 
+ 		struct linux_binfmt *binfmt;
+ 
+diff --git a/kernel/fork.c b/kernel/fork.c
+index f65cac32c9fe..0ad0bfac6512 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -184,6 +184,11 @@ EXPORT_SYMBOL_GPL(task_domains);
+ struct mm_rss_stat_backing_cache {
+ 	spinlock_t lock;
+ 	unsigned int nr;
++	unsigned long hits;
++	unsigned long misses;
++	unsigned long pushes;
++	unsigned long full;
++	unsigned long frees;
+ 	void __percpu *entries[MM_RSS_STAT_BACKING_CACHE_DEPTH];
+ };
+ 
+@@ -198,6 +203,12 @@ static int mm_rss_stat_backing_cache_nid(void)
+ 	return nid;
+ }
+ 
++static bool mm_rss_stat_backing_cache_valid_nid(int nid)
++{
++	return mm_rss_stat_backing_caches && nid >= 0 &&
++		nid < nr_node_ids;
++}
++
+ static void __init init_mm_rss_stat_backing_cache(void)
+ {
+ 	int nid;
+@@ -214,7 +225,7 @@ static void __init init_mm_rss_stat_backing_cache(void)
+ 		spin_lock_init(&mm_rss_stat_backing_caches[nid].lock);
+ }
+ 
+-static void __percpu *mm_rss_stat_backing_cache_pop(void)
++static void __percpu *mm_rss_stat_backing_cache_pop(int *nidp)
+ {
+ 	struct mm_rss_stat_backing_cache *cache;
+ 	void __percpu *backing = NULL;
+@@ -224,50 +235,59 @@ static void __percpu *mm_rss_stat_backing_cache_pop(void)
+ 	nid = mm_rss_stat_backing_cache_nid();
+ 	if (nid == NUMA_NO_NODE)
+ 		return NULL;
++	*nidp = nid;
+ 
+ 	cache = &mm_rss_stat_backing_caches[nid];
+ 	spin_lock_irqsave(&cache->lock, flags);
+ 	if (cache->nr) {
+ 		backing = cache->entries[--cache->nr];
+ 		cache->entries[cache->nr] = NULL;
++		cache->hits++;
++	} else {
++		cache->misses++;
+ 	}
+ 	spin_unlock_irqrestore(&cache->lock, flags);
+ 
+ 	return backing;
+ }
+ 
+-static void mm_rss_stat_backing_cache_push(void __percpu *backing)
++static void mm_rss_stat_backing_cache_push(void __percpu *backing, int nid)
+ {
+ 	struct mm_rss_stat_backing_cache *cache;
+ 	unsigned long flags;
+-	int nid;
+ 
+ 	if (!backing)
+ 		return;
+ 
+-	nid = mm_rss_stat_backing_cache_nid();
+-	if (nid == NUMA_NO_NODE) {
++	if (!mm_rss_stat_backing_cache_valid_nid(nid)) {
+ 		percpu_counter_free_many_backing(backing);
+ 		return;
+ 	}
+ 
+ 	cache = &mm_rss_stat_backing_caches[nid];
+ 	spin_lock_irqsave(&cache->lock, flags);
++	cache->pushes++;
+ 	if (cache->nr < MM_RSS_STAT_BACKING_CACHE_DEPTH) {
+ 		cache->entries[cache->nr++] = backing;
+ 		backing = NULL;
++	} else {
++		cache->full++;
++		cache->frees++;
+ 	}
+ 	spin_unlock_irqrestore(&cache->lock, flags);
+ 
+-	percpu_counter_free_many_backing(backing);
++	if (backing)
++		percpu_counter_free_many_backing(backing);
+ }
+ 
+ static int mm_rss_stat_init(struct mm_struct *mm)
+ {
+ 	void __percpu *backing;
++	int nid = NUMA_NO_NODE;
+ 	int ret;
+ 
+-	backing = mm_rss_stat_backing_cache_pop();
++	mm->rss_stat_backing_nid = NUMA_NO_NODE;
++	backing = mm_rss_stat_backing_cache_pop(&nid);
+ 	if (!backing) {
+ 		backing = percpu_counter_alloc_many_backing(NR_MM_COUNTERS,
+ 							     GFP_KERNEL_ACCOUNT);
+@@ -282,16 +302,45 @@ static int mm_rss_stat_init(struct mm_struct *mm)
+ 		return ret;
+ 	}
+ 
++	mm->rss_stat_backing_nid = nid;
+ 	return 0;
+ }
+ 
+ static void mm_rss_stat_destroy(struct mm_struct *mm)
+ {
+ 	void __percpu *backing;
++	int nid = mm->rss_stat_backing_nid;
+ 
++	mm->rss_stat_backing_nid = NUMA_NO_NODE;
+ 	backing = percpu_counter_detach_many(mm->rss_stat, NR_MM_COUNTERS);
+-	mm_rss_stat_backing_cache_push(backing);
++	mm_rss_stat_backing_cache_push(backing, nid);
++}
++#ifdef CONFIG_DEBUG_FS
++static int mm_rss_stat_backing_cache_show(struct seq_file *m, void *v)
++{
++	int nid;
++
++	seq_puts(m, "nid nr hits misses pushes full frees\n");
++	if (!mm_rss_stat_backing_caches)
++		return 0;
++
++	for (nid = 0; nid < nr_node_ids; nid++) {
++		struct mm_rss_stat_backing_cache *cache;
++
++		cache = &mm_rss_stat_backing_caches[nid];
++		seq_printf(m, "%d %u %lu %lu %lu %lu %lu\n",
++			   nid,
++			   READ_ONCE(cache->nr),
++			   READ_ONCE(cache->hits),
++			   READ_ONCE(cache->misses),
++			   READ_ONCE(cache->pushes),
++			   READ_ONCE(cache->full),
++			   READ_ONCE(cache->frees));
++	}
++	return 0;
+ }
++DEFINE_SHOW_ATTRIBUTE(mm_rss_stat_backing_cache);
++#endif
+ #else
+ static void __init init_mm_rss_stat_backing_cache(void) { }
+ 
+@@ -401,6 +450,11 @@ static int __init task_domains_debugfs_init(void)
+ 				    &task_domain_addr_fops);
+ 	}
+ 
++#ifdef CONFIG_SMP
++	debugfs_create_file("mm_rss_stat_backing_cache", 0444, NULL, NULL,
++			    &mm_rss_stat_backing_cache_fops);
++#endif
++
+ 	return 0;
+ }
+ late_initcall(task_domains_debugfs_init);
+-- 
+2.43.0
+

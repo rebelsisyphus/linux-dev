@@ -1,0 +1,79 @@
+From 20b32d084b5910fae6fc286eee0efa12364c677c Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Fri, 24 Apr 2026 09:37:23 +0800
+Subject: [PATCH 20/29] sched: update task_domain iteration comments
+
+next_task() now walks per-NUMA-domain task list shards.
+
+It no longer walks the historic init_task.tasks list.
+
+Update the task_domains and iteration-helper comments.
+
+Describe the current implementation, not the Phase 1 transition state.
+
+Keep init_task.tasks initialized.
+
+Early cgroup setup still asserts that the list is empty.
+
+init_task remains the external iteration sentinel.
+
+It is not linked into any domain shard.
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ include/linux/sched/signal.h |  7 +++----
+ kernel/fork.c                | 13 +++++--------
+ 2 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
+index 2c415912d6be..b4f9fe044863 100644
+--- a/include/linux/sched/signal.h
++++ b/include/linux/sched/signal.h
+@@ -647,10 +647,9 @@ extern void flush_itimer_signals(void);
+  * Return the next process leader in iteration order, or &init_task to
+  * signal end-of-list.  Iteration starts by passing &init_task in.
+  *
+- * Phase 1 NOTE: still walks the single init_task.tasks list; a
+- * subsequent commit will switch this to walk task_domains[] shards
+- * and use task_struct::task_domain_nid to advance across them.
+- * Out-of-line so the cross-shard advance logic stays in one place
++ * Process leaders are stored in per-NUMA-domain shards.  init_task is
++ * used only as the external start/end sentinel and is never linked into
++ * a shard.  Out-of-line so the cross-shard advance logic stays in one place
+  * and so stateful iterators (e.g. bpf_iter_task) keep working
+  * unchanged across syscall boundaries.
+  */
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 35aabe07671e..5327bc46b767 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -170,9 +170,9 @@ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+  * NUMA node masks are up.  Each slot is allocated on its owning node's
+  * local memory via kzalloc_node().
+  *
+- * Phase 1 NOTE: defined and initialised here but not yet wired into
+- * copy_process()/release_task().  Subsequent commits will migrate the
+- * fast path; iteration macros and cold-path callers are migrated last.
++ * Process leaders are linked into these shards from copy_process() and
++ * unlinked from release_task().  Cross-process iterators advance across
++ * task_domains[] via next_task().
+  */
+ struct task_domain **task_domains __read_mostly;
+ EXPORT_SYMBOL_GPL(task_domains);
+@@ -182,11 +182,8 @@ EXPORT_SYMBOL_GPL(task_domains);
+  * for the contract: pass &init_task to start, &init_task is returned
+  * to signal end-of-list.
+  *
+- * Phase 1 NOTE: this implementation still walks the single
+- * init_task.tasks list and is therefore behaviourally identical to
+- * the old `list_entry_rcu((p)->tasks.next, ...)` macro.  A subsequent
+- * commit will switch it to walk task_domains[] shards using
+- * task_struct::task_domain_nid to advance across shard boundaries.
++ * The process list is sharded by NUMA domain.  init_task is not linked
++ * into any shard; it is used only as the external start/end sentinel.
+  *
+  * Caller must already be inside an RCU read-side critical section
+  * (or hold tasklist_lock), as before.
+-- 
+2.43.0
+

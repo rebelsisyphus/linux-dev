@@ -1,0 +1,60 @@
+From 34800f5c5707f0878eb573040bcda65bc3bc3e57 Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Fri, 24 Apr 2026 10:24:03 +0800
+Subject: [PATCH 21/29] fork: allow init_task sentinel when publishing
+ child_reaper
+
+init_pid_ns starts with child_reaper pointing at init_task.
+
+That value is a boot-time sentinel, not a real failure.
+
+Use an atomic exchange to publish the real child reaper.
+
+Accept NULL for new pid namespaces.
+
+Accept init_task for init_pid_ns.
+
+Keep warning if another task was already published.
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ kernel/fork.c | 20 +++++++++-----------
+ 1 file changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 5327bc46b767..c54ad8a57fcb 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2599,20 +2599,18 @@ __latent_entropy struct task_struct *copy_process(
+ 			init_task_pid(p, PIDTYPE_SID, task_session(current));
+ 
+ 			if (is_child_reaper(pid)) {
++				struct task_struct *prev;
++
+ 				/*
+ 				 * Publish @p as the new pid namespace's child
+-				 * reaper with a single atomic store that also
+-				 * acts as a release barrier for the
+-				 * task_struct fields initialized above.  This
+-				 * branch can only fire once per pid namespace
+-				 * (PID 1 is allocated exactly once), so the
+-				 * cmpxchg is a publication primitive, not
+-				 * contention resolution.  Removing the plain
+-				 * store lets fork() drop its dependency on
+-				 * tasklist_lock for this particular write.
++				 * reaper with a single atomic exchange that also acts
++				 * as a release barrier for the task_struct fields
++				 * initialized above.  New pid namespaces publish from
++				 * NULL; init_pid_ns replaces the boot-time init_task
++				 * sentinel.
+ 				 */
+-				WARN_ON_ONCE(cmpxchg(&ns_of_pid(pid)->child_reaper,
+-						     NULL, p) != NULL);
++				prev = xchg(&ns_of_pid(pid)->child_reaper, p);
++				WARN_ON_ONCE(prev && prev != &init_task);
+ 				p->signal->flags |= SIGNAL_UNKILLABLE;
+ 			}
+ 			p->signal->shared_pending.signal = delayed.signal;
+-- 
+2.43.0
+

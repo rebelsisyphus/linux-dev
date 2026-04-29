@@ -1,0 +1,46 @@
+From bea63cc519be6039f9ec21a33f67aac1d3c1e328 Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Tue, 28 Apr 2026 20:05:59 +0800
+Subject: [PATCH 29/29] exit: arbitrate reparented zombie autoreap
+
+---
+ kernel/exit.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index f333ab19b8db..d0df1f1ea824 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -711,19 +711,23 @@ static struct task_struct *find_new_reaper(struct task_struct *father,
+ static void reparent_leader(struct task_struct *father, struct task_struct *p,
+ 				struct list_head *dead)
+ {
+-	if (unlikely(p->exit_state == EXIT_DEAD))
++	if (unlikely(READ_ONCE(p->exit_state) == EXIT_DEAD))
+ 		return;
+ 
+ 	/* We don't want people slaying init. */
+ 	p->exit_signal = SIGCHLD;
+ 
+-	/* If it has exited notify the new parent about this child's death. */
++	/*
++	 * If it has exited, notify the new parent about this child's death.
++	 * tasklist_lock no longer serializes this path against wait_task_zombie(),
++	 * so arbitrate the ZOMBIE -> DEAD transition the same way as exit_notify().
++	 */
+ 	if (!p->ptrace &&
+-	    p->exit_state == EXIT_ZOMBIE && thread_group_empty(p)) {
+-		if (do_notify_parent(p, p->exit_signal)) {
+-			p->exit_state = EXIT_DEAD;
++	    READ_ONCE(p->exit_state) == EXIT_ZOMBIE && thread_group_empty(p)) {
++		if (do_notify_parent(p, p->exit_signal) &&
++		    cmpxchg(&p->exit_state, EXIT_ZOMBIE, EXIT_DEAD) ==
++			    EXIT_ZOMBIE)
+ 			list_add(&p->ptrace_entry, dead);
+-		}
+ 	}
+ 
+ 	kill_orphaned_pgrp(p, father);
+-- 
+2.43.0
+

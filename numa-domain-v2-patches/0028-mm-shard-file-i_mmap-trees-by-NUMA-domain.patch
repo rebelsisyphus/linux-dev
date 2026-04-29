@@ -1,0 +1,1520 @@
+From 08b0107f9b7e88c2e56096644d59d9a038bc5f96 Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Tue, 28 Apr 2026 19:28:35 +0800
+Subject: [PATCH 28/29] mm: shard file i_mmap trees by NUMA domain
+
+Add an experimental CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS mode that lazily migrates ordinary file mappings from the legacy address_space i_mmap tree to per-NUMA-domain interval trees protected by per-shard rwsems.
+
+Preserve fork-side file VMA batching and exit-side unlink batching by grouping operations by mapping and stable mm i_mmap domain nid. Keep DAX and hugetlb mappings on the legacy tree, and teach rmap, unmap, pagewalk, khugepaged, memory-failure, and mm_take_all_locks to handle sharded roots.
+
+The option defaults off.
+---
+ fs/inode.c               |   8 +
+ include/linux/fs.h       |  28 ++-
+ include/linux/mm_types.h |   3 +
+ kernel/fork.c            |  17 +-
+ mm/Kconfig               |  10 +
+ mm/khugepaged.c          | 170 ++++++++------
+ mm/memory-failure.c      |  68 ++++--
+ mm/memory.c              |  53 ++++-
+ mm/mmap.c                |  16 +-
+ mm/pagewalk.c            |  59 +++--
+ mm/rmap.c                |  59 +++--
+ mm/vma.c                 | 494 +++++++++++++++++++++++++++++++++++++--
+ mm/vma.h                 |  87 +++++++
+ 13 files changed, 896 insertions(+), 176 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index cc12b68e021b..874354b74ca5 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -487,6 +487,10 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	INIT_LIST_HEAD(&mapping->i_private_list);
+ 	spin_lock_init(&mapping->i_private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++	mapping->i_mmap_shards = NULL;
++	atomic_long_set(&mapping->i_mmap_count, 0);
++#endif
+ }
+ 
+ void address_space_init_once(struct address_space *mapping)
+@@ -798,6 +802,10 @@ void clear_inode(struct inode *inode)
+ 	 * nor even WARN_ON(!mapping_empty).
+ 	 */
+ 	xa_unlock_irq(&inode->i_data.i_pages);
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++	kfree(inode->i_data.i_mmap_shards);
++	inode->i_data.i_mmap_shards = NULL;
++#endif
+ 	BUG_ON(!list_empty(&inode->i_data.i_private_list));
+ 	BUG_ON(!(inode_state_read_once(inode) & I_FREEING));
+ 	BUG_ON(inode_state_read_once(inode) & I_CLEAR);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 8b3dd145b25e..23dc942ff419 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -456,8 +456,10 @@ extern const struct address_space_operations empty_aops;
+  * @gfp_mask: Memory allocation flags to use for allocating pages.
+  * @i_mmap_writable: Number of VM_SHARED, VM_MAYWRITE mappings.
+  * @nr_thps: Number of THPs in the pagecache (non-shmem only).
+- * @i_mmap: Tree of private and shared mappings.
+- * @i_mmap_rwsem: Protects @i_mmap and @i_mmap_writable.
++ * @i_mmap: Legacy tree of private and shared mappings.
++ * @i_mmap_shards: Optional per-NUMA trees for ordinary file mappings.
++ * @i_mmap_count: Number of mapped VMAs when sharding is enabled.
++ * @i_mmap_rwsem: Protects @i_mmap and shard publication/migration.
+  * @nrpages: Number of page entries, protected by the i_pages lock.
+  * @writeback_index: Writeback starts here.
+  * @a_ops: Methods.
+@@ -467,6 +469,20 @@ extern const struct address_space_operations empty_aops;
+  * @i_private_list: For use by the owner of the address_space.
+  * @i_private_data: For use by the owner of the address_space.
+  */
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++#define I_MMAP_DOMAIN_MAX_SHARDS	8
++
++struct i_mmap_shard {
++	struct rb_root_cached	root;
++	struct rw_semaphore	rwsem;
++};
++
++struct i_mmap_shards {
++	unsigned int		nr;
++	struct i_mmap_shard	shard[];
++};
++#endif
++
+ struct address_space {
+ 	struct inode		*host;
+ 	struct xarray		i_pages;
+@@ -478,6 +494,10 @@ struct address_space {
+ 	atomic_t		nr_thps;
+ #endif
+ 	struct rb_root_cached	i_mmap;
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++	struct i_mmap_shards	*i_mmap_shards;
++	atomic_long_t		i_mmap_count;
++#endif
+ 	unsigned long		nrpages;
+ 	pgoff_t			writeback_index;
+ 	const struct address_space_operations *a_ops;
+@@ -552,6 +572,10 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+  */
+ static inline int mapping_mapped(const struct address_space *mapping)
+ {
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++	if (atomic_long_read(&mapping->i_mmap_count) > 0)
++		return true;
++#endif
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+ }
+ 
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 6a8525c3deca..89c36595331c 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1268,6 +1268,9 @@ struct mm_struct {
+ 		int rss_stat_backing_nid;
+ #endif
+ 
++		/* Stable NUMA domain used for file i_mmap sharding. */
++		int i_mmap_domain_nid;
++
+ 		struct linux_binfmt *binfmt;
+ 
+ 		/* Architecture-specific MM context */
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 0ad0bfac6512..b472388769ad 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -407,6 +407,16 @@ struct task_struct *next_task(struct task_struct *p)
+ }
+ EXPORT_SYMBOL_GPL(next_task);
+ 
++
++static int task_domain_select_nid(struct task_struct *p)
++{
++	int nid = cpu_to_node(task_cpu(p));
++
++	if (unlikely(nid == NUMA_NO_NODE || nid >= nr_node_ids))
++		nid = 0;
++	return nid;
++}
++
+ #ifdef CONFIG_DEBUG_FS
+ static int task_domain_nr_tasks_show(struct seq_file *m, void *v)
+ {
+@@ -1422,6 +1432,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
++	mm->i_mmap_domain_nid = p ? READ_ONCE(p->task_domain_nid) : 0;
+ 	spin_lock_init(&mm->page_table_lock);
+ 	spin_lock_init(&mm->arg_lock);
+ 	mm_init_cpumask(mm);
+@@ -2532,6 +2543,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	retval = sched_fork(clone_flags, p);
+ 	if (retval)
+ 		goto bad_fork_cleanup_policy;
++	p->task_domain_nid = task_domain_select_nid(p);
+ 
+ 	retval = perf_event_init_task(p, clone_flags);
+ 	if (retval)
+@@ -2722,10 +2734,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	 * Lock order: shard -> {pid->lock, task_lock(parent/tracer)}
+ 	 * -> sighand->siglock.  IRQs are disabled by the shard lock.
+ 	 */
+-	nid = cpu_to_node(task_cpu(p));
+-	if (unlikely(nid == NUMA_NO_NODE || nid >= nr_node_ids))
+-		nid = 0;
+-	p->task_domain_nid = nid;
++	nid = READ_ONCE(p->task_domain_nid);
+ 	write_lock_irq_task_domain(nid);
+ 
+ 	/* CLONE_PARENT re-uses the old parent */
+diff --git a/mm/Kconfig b/mm/Kconfig
+index ebd8ea353687..c8b13dc50161 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -2,6 +2,16 @@
+ 
+ menu "Memory Management options"
+ 
++config NUMA_DOMAIN_I_MMAP_SHARDS
++	bool "Experimental per-NUMA i_mmap shards"
++	depends on MMU && SMP && NUMA && EXPERT
++	default n
++	help
++	  Split ordinary file reverse mapping interval trees across NUMA
++	  domains to reduce i_mmap_rwsem contention in high-concurrency
++	  fork/exit workloads. This is experimental and disabled by default.
++
++
+ #
+ # For some reason microblaze and nios2 hard code SWAP=n.  Hopefully we can
+ # add proper SWAP support to them, in which case this can be remove.
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 1dd3cfca610d..0134a615a3e5 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -27,6 +27,7 @@
+ #include <asm/tlb.h>
+ #include "internal.h"
+ #include "mm_slot.h"
++#include "vma.h"
+ 
+ enum scan_result {
+ 	SCAN_FAIL,
+@@ -1740,83 +1741,96 @@ static bool file_backed_vma_is_retractable(struct vm_area_struct *vma)
+ 
+ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ {
+-	struct vm_area_struct *vma;
++	unsigned int root, nr_roots;
++	bool sharded;
+ 
+ 	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-		struct mmu_notifier_range range;
+-		struct mm_struct *mm;
+-		unsigned long addr;
+-		pmd_t *pmd, pgt_pmd;
+-		spinlock_t *pml;
+-		spinlock_t *ptl;
+-		bool success = false;
+-
+-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+-		if (addr & ~HPAGE_PMD_MASK ||
+-		    vma->vm_end < addr + HPAGE_PMD_SIZE)
+-			continue;
++	sharded = i_mmap_mapping_sharded(mapping);
++	nr_roots = i_mmap_nr_roots(mapping);
++	for (root = 0; root < nr_roots; root++) {
++		struct rb_root_cached *tree;
++		struct vm_area_struct *vma;
+ 
+-		mm = vma->vm_mm;
+-		if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
+-			continue;
++		if (sharded)
++			i_mmap_lock_read_root(mapping, root);
++		tree = i_mmap_root(mapping, root);
++		vma_interval_tree_foreach(vma, tree, pgoff, pgoff) {
++			struct mmu_notifier_range range;
++			struct mm_struct *mm;
++			unsigned long addr;
++			pmd_t *pmd, pgt_pmd;
++			spinlock_t *pml;
++			spinlock_t *ptl;
++			bool success = false;
++
++			addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++			if (addr & ~HPAGE_PMD_MASK ||
++			    vma->vm_end < addr + HPAGE_PMD_SIZE)
++				continue;
+ 
+-		if (hpage_collapse_test_exit(mm))
+-			continue;
++			mm = vma->vm_mm;
++			if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
++				continue;
+ 
+-		if (!file_backed_vma_is_retractable(vma))
+-			continue;
++			if (hpage_collapse_test_exit(mm))
++				continue;
+ 
+-		/* PTEs were notified when unmapped; but now for the PMD? */
+-		mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
+-					addr, addr + HPAGE_PMD_SIZE);
+-		mmu_notifier_invalidate_range_start(&range);
++			if (!file_backed_vma_is_retractable(vma))
++				continue;
+ 
+-		pml = pmd_lock(mm, pmd);
+-		/*
+-		 * The lock of new_folio is still held, we will be blocked in
+-		 * the page fault path, which prevents the pte entries from
+-		 * being set again. So even though the old empty PTE page may be
+-		 * concurrently freed and a new PTE page is filled into the pmd
+-		 * entry, it is still empty and can be removed.
+-		 *
+-		 * So here we only need to recheck if the state of pmd entry
+-		 * still meets our requirements, rather than checking pmd_same()
+-		 * like elsewhere.
+-		 */
+-		if (check_pmd_state(pmd) != SCAN_SUCCEED)
+-			goto drop_pml;
+-		ptl = pte_lockptr(mm, pmd);
+-		if (ptl != pml)
+-			spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++			/* PTEs were notified when unmapped; but now for the PMD? */
++			mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
++							addr, addr + HPAGE_PMD_SIZE);
++			mmu_notifier_invalidate_range_start(&range);
+ 
+-		/*
+-		 * Huge page lock is still held, so normally the page table must
+-		 * remain empty; and we have already skipped anon_vma and
+-		 * userfaultfd_wp() vmas.  But since the mmap_lock is not held,
+-		 * it is still possible for a racing userfaultfd_ioctl() or
+-		 * madvise() to have inserted ptes or markers.  Now that we hold
+-		 * ptlock, repeating the retractable checks protects us from
+-		 * races against the prior checks.
+-		 */
+-		if (likely(file_backed_vma_is_retractable(vma))) {
+-			pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
+-			pmdp_get_lockless_sync();
+-			success = true;
+-		}
++			pml = pmd_lock(mm, pmd);
++			/*
++			 * The lock of new_folio is still held, we will be blocked in
++			 * the page fault path, which prevents the pte entries from
++			 * being set again. So even though the old empty PTE page may be
++			 * concurrently freed and a new PTE page is filled into the pmd
++			 * entry, it is still empty and can be removed.
++			 *
++			 * So here we only need to recheck if the state of pmd entry
++			 * still meets our requirements, rather than checking pmd_same()
++			 * like elsewhere.
++			 */
++			if (check_pmd_state(pmd) != SCAN_SUCCEED)
++				goto drop_pml;
++			ptl = pte_lockptr(mm, pmd);
++			if (ptl != pml)
++				spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
+ 
+-		if (ptl != pml)
+-			spin_unlock(ptl);
++			/*
++			 * Huge page lock is still held, so normally the page table must
++			 * remain empty; and we have already skipped anon_vma and
++			 * userfaultfd_wp() vmas.  But since the mmap_lock is not held,
++			 * it is still possible for a racing userfaultfd_ioctl() or
++			 * madvise() to have inserted ptes or markers.  Now that we hold
++			 * ptlock, repeating the retractable checks protects us from
++			 * races against the prior checks.
++			 */
++			if (likely(file_backed_vma_is_retractable(vma))) {
++				pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
++				pmdp_get_lockless_sync();
++				success = true;
++			}
++
++			if (ptl != pml)
++				spin_unlock(ptl);
+ drop_pml:
+-		spin_unlock(pml);
++			spin_unlock(pml);
+ 
+-		mmu_notifier_invalidate_range_end(&range);
++			mmu_notifier_invalidate_range_end(&range);
+ 
+-		if (success) {
+-			mm_dec_nr_ptes(mm);
+-			page_table_check_pte_clear_range(mm, addr, pgt_pmd);
+-			pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++			if (success) {
++				mm_dec_nr_ptes(mm);
++				page_table_check_pte_clear_range(mm, addr, pgt_pmd);
++				pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++			}
+ 		}
++		if (sharded)
++			i_mmap_unlock_read_root(mapping, root);
+ 	}
+ 	i_mmap_unlock_read(mapping);
+ }
+@@ -2163,11 +2177,31 @@ static enum scan_result collapse_file(struct mm_struct *mm, unsigned long addr,
+ 		 * not be able to observe any missing pages due to the
+ 		 * previously inserted retry entries.
+ 		 */
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, start, end) {
+-			if (userfaultfd_missing(vma)) {
+-				result = SCAN_EXCEED_NONE_PTE;
+-				goto immap_locked;
++		{
++			unsigned int root, locked_roots = 0, nr_roots;
++			bool sharded;
++
++			sharded = i_mmap_mapping_sharded(mapping);
++			nr_roots = i_mmap_nr_roots(mapping);
++			if (sharded) {
++				for (root = 0; root < nr_roots; root++) {
++					i_mmap_lock_read_root(mapping, root);
++					locked_roots++;
++				}
++			}
++			for (root = 0; root < nr_roots; root++) {
++				struct rb_root_cached *tree = i_mmap_root(mapping, root);
++
++				vma_interval_tree_foreach(vma, tree, start, end) {
++					if (userfaultfd_missing(vma)) {
++						result = SCAN_EXCEED_NONE_PTE;
++						goto immap_roots_locked;
++					}
++				}
+ 			}
++immap_roots_locked:
++			while (locked_roots)
++				i_mmap_unlock_read_root(mapping, --locked_roots);
+ 		}
+ 
+ immap_locked:
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index ee42d4361309..cb94719a4f70 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -67,6 +67,7 @@
+ 
+ #include "swap.h"
+ #include "internal.h"
++#include "vma.h"
+ 
+ static int sysctl_memory_failure_early_kill __read_mostly;
+ 
+@@ -584,12 +585,21 @@ static void collect_procs_file(const struct folio *folio,
+ 		const struct page *page, struct list_head *to_kill,
+ 		int force_early)
+ {
+-	struct vm_area_struct *vma;
+ 	struct task_struct *tsk;
+ 	struct address_space *mapping = folio->mapping;
+ 	pgoff_t pgoff;
++	unsigned int root, nr_roots, locked_roots = 0;
++	bool sharded;
+ 
+ 	i_mmap_lock_read(mapping);
++	sharded = i_mmap_mapping_sharded(mapping);
++	nr_roots = i_mmap_nr_roots(mapping);
++	if (sharded) {
++		for (root = 0; root < nr_roots; root++) {
++			i_mmap_lock_read_root(mapping, root);
++			locked_roots++;
++		}
++	}
+ 	rcu_read_lock();
+ 	pgoff = page_pgoff(folio, page);
+ 	for_each_process(tsk) {
+@@ -598,22 +608,28 @@ static void collect_procs_file(const struct folio *folio,
+ 
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+-				      pgoff) {
+-			/*
+-			 * Send early kill signal to tasks where a vma covers
+-			 * the page but the corrupted page is not necessarily
+-			 * mapped in its pte.
+-			 * Assume applications who requested early kill want
+-			 * to be informed of all such data corruptions.
+-			 */
+-			if (vma->vm_mm != t->mm)
+-				continue;
+-			addr = page_address_in_vma(folio, page, vma);
+-			add_to_kill_anon_file(t, page, vma, to_kill, addr);
++		for (root = 0; root < nr_roots; root++) {
++			struct rb_root_cached *tree = i_mmap_root(mapping, root);
++			struct vm_area_struct *vma;
++
++			vma_interval_tree_foreach(vma, tree, pgoff, pgoff) {
++				/*
++				 * Send early kill signal to tasks where a vma covers
++				 * the page but the corrupted page is not necessarily
++				 * mapped in its pte.
++				 * Assume applications who requested early kill want
++				 * to be informed of all such data corruptions.
++				 */
++				if (vma->vm_mm != t->mm)
++					continue;
++				addr = page_address_in_vma(folio, page, vma);
++				add_to_kill_anon_file(t, page, vma, to_kill, addr);
++			}
+ 		}
+ 	}
+ 	rcu_read_unlock();
++	while (locked_roots)
++		i_mmap_unlock_read_root(mapping, --locked_roots);
+ 	i_mmap_unlock_read(mapping);
+ }
+ 
+@@ -650,9 +666,13 @@ static void collect_procs_fsdax(const struct page *page,
+ 			t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-			if (vma->vm_mm == t->mm)
+-				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
++		for (unsigned int root = 0; root < i_mmap_nr_roots(mapping); root++) {
++			struct rb_root_cached *tree = i_mmap_root(mapping, root);
++
++			vma_interval_tree_foreach(vma, tree, pgoff, pgoff) {
++				if (vma->vm_mm == t->mm)
++					add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
++			}
+ 		}
+ 	}
+ 	rcu_read_unlock();
+@@ -2251,12 +2271,16 @@ static void collect_procs_pfn(struct pfn_address_space *pfn_space,
+ 		t = task_early_kill(tsk, true);
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, 0, ULONG_MAX) {
+-			pgoff_t pgoff;
++		for (unsigned int root = 0; root < i_mmap_nr_roots(mapping); root++) {
++			struct rb_root_cached *tree = i_mmap_root(mapping, root);
++
++			vma_interval_tree_foreach(vma, tree, 0, ULONG_MAX) {
++				pgoff_t pgoff;
+ 
+-			if (vma->vm_mm == t->mm &&
+-			    !pfn_space->pfn_to_vma_pgoff(vma, pfn, &pgoff))
+-				add_to_kill_pgoff(t, vma, to_kill, pgoff);
++				if (vma->vm_mm == t->mm &&
++				    !pfn_space->pfn_to_vma_pgoff(vma, pfn, &pgoff))
++					add_to_kill_pgoff(t, vma, to_kill, pgoff);
++			}
+ 		}
+ 	}
+ 	rcu_read_unlock();
+diff --git a/mm/memory.c b/mm/memory.c
+index 2f815a34d924..62b4a1c6cb4e 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -88,6 +88,7 @@
+ 
+ #include "pgalloc-track.h"
+ #include "internal.h"
++#include "vma.h"
+ #include "swap.h"
+ 
+ #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
+@@ -4296,11 +4297,27 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.single_folio = folio;
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	{
++		unsigned int root, nr_roots;
++		bool sharded;
++
++		i_mmap_lock_read(mapping);
++		sharded = i_mmap_mapping_sharded(mapping);
++		nr_roots = i_mmap_nr_roots(mapping);
++		for (root = 0; root < nr_roots; root++) {
++			struct rb_root_cached *tree;
++
++			if (sharded)
++				i_mmap_lock_read_root(mapping, root);
++			tree = i_mmap_root(mapping, root);
++			if (unlikely(!RB_EMPTY_ROOT(&tree->rb_root)))
++				unmap_mapping_range_tree(tree, first_index,
++							 last_index, &details);
++			if (sharded)
++				i_mmap_unlock_read_root(mapping, root);
++		}
++		i_mmap_unlock_read(mapping);
++	}
+ }
+ 
+ /**
+@@ -4326,11 +4343,27 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 	if (last_index < first_index)
+ 		last_index = ULONG_MAX;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	{
++		unsigned int root, nr_roots;
++		bool sharded;
++
++		i_mmap_lock_read(mapping);
++		sharded = i_mmap_mapping_sharded(mapping);
++		nr_roots = i_mmap_nr_roots(mapping);
++		for (root = 0; root < nr_roots; root++) {
++			struct rb_root_cached *tree;
++
++			if (sharded)
++				i_mmap_lock_read_root(mapping, root);
++			tree = i_mmap_root(mapping, root);
++			if (unlikely(!RB_EMPTY_ROOT(&tree->rb_root)))
++				unmap_mapping_range_tree(tree, first_index,
++							 last_index, &details);
++			if (sharded)
++				i_mmap_unlock_read_root(mapping, root);
++		}
++		i_mmap_unlock_read(mapping);
++	}
+ }
+ EXPORT_SYMBOL_GPL(unmap_mapping_pages);
+ 
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 7fed5a57e859..543a61c0691c 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1750,19 +1750,25 @@ static void file_vma_link_batch_flush(struct file_vma_link_batch *fb)
+ 	if (!fb->count)
+ 		return;
+ 
+-	i_mmap_lock_write(mapping);
++	i_mmap_try_shard_mapping(mapping, fb->children[0]);
++	i_mmap_lock_write_vma(mapping, fb->children[0]);
+ 	for (i = 0; i < fb->count; i++) {
+ 		if (vma_is_shared_maywrite(fb->children[i]))
+ 			mapping_allow_writable(mapping);
+ 	}
+ 	flush_dcache_mmap_lock(mapping);
+ 	for (i = 0; i < fb->count; i++) {
+-		/* insert child into the share list, just after parent */
+-		vma_interval_tree_insert_after(fb->children[i], fb->parents[i],
+-					       &mapping->i_mmap);
++		if (i_mmap_mapping_sharded(mapping)) {
++			i_mmap_insert_vma_after(mapping, fb->children[i], fb->parents[i]);
++		} else {
++			/* insert child into the share list, just after parent */
++			vma_interval_tree_insert_after(fb->children[i], fb->parents[i],
++						       &mapping->i_mmap);
++			i_mmap_insert_vma_account(mapping, fb->children[i]);
++		}
+ 	}
+ 	flush_dcache_mmap_unlock(mapping);
+-	i_mmap_unlock_write(mapping);
++	i_mmap_unlock_write_vma(mapping, fb->children[0]);
+ 
+ 	file_vma_link_batch_init(fb);
+ }
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index a94c401ab2cf..3806adee66f0 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -10,6 +10,7 @@
+ #include <asm/tlbflush.h>
+ 
+ #include "internal.h"
++#include "vma.h"
+ 
+ /*
+  * We want to know the real level where a entry is located ignoring any
+@@ -792,36 +793,48 @@ int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+ 		return -EINVAL;
+ 
+ 	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
+-				  first_index + nr - 1) {
+-		/* Clip to the vma */
+-		vba = vma->vm_pgoff;
+-		vea = vba + vma_pages(vma);
+-		cba = first_index;
+-		cba = max(cba, vba);
+-		cea = first_index + nr;
+-		cea = min(cea, vea);
+-
+-		start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
+-		end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
+-		if (start_addr >= end_addr)
+-			continue;
++	for (unsigned int root = 0; root < i_mmap_nr_roots(mapping); root++) {
++		struct rb_root_cached *tree;
++
++		if (i_mmap_mapping_sharded(mapping))
++			i_mmap_lock_read_root(mapping, root);
++		tree = i_mmap_root(mapping, root);
++		vma_interval_tree_foreach(vma, tree, first_index,
++					  first_index + nr - 1) {
++			/* Clip to the vma */
++			vba = vma->vm_pgoff;
++			vea = vba + vma_pages(vma);
++			cba = first_index;
++			cba = max(cba, vba);
++			cea = first_index + nr;
++			cea = min(cea, vea);
++
++			start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
++			end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++			if (start_addr >= end_addr)
++				continue;
+ 
+-		walk.vma = vma;
+-		walk.mm = vma->vm_mm;
++			walk.vma = vma;
++			walk.mm = vma->vm_mm;
+ 
+-		err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
+-		if (err > 0) {
+-			err = 0;
+-			break;
+-		} else if (err < 0)
+-			break;
++			err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
++			if (err > 0) {
++				err = 0;
++				break;
++			} else if (err < 0)
++				break;
+ 
+-		err = __walk_page_range(start_addr, end_addr, &walk);
++			err = __walk_page_range(start_addr, end_addr, &walk);
++			if (err)
++				break;
++		}
++		if (i_mmap_mapping_sharded(mapping))
++			i_mmap_unlock_read_root(mapping, root);
+ 		if (err)
+ 			break;
+ 	}
+ 
++
+ 	return err;
+ }
+ 
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 0f00570d1b9e..1beed1381bb0 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -82,6 +82,7 @@
+ #include <trace/events/migrate.h>
+ 
+ #include "internal.h"
++#include "vma.h"
+ #include "swap.h"
+ 
+ static struct kmem_cache *anon_vma_cachep;
+@@ -3005,44 +3006,60 @@ static void __rmap_walk_file(struct folio *folio, struct address_space *mapping,
+ 			     struct rmap_walk_control *rwc, bool locked)
+ {
+ 	pgoff_t pgoff_end = pgoff_start + nr_pages - 1;
+-	struct vm_area_struct *vma;
++	unsigned int root, locked_roots = 0, nr_roots;
++	bool gate_locked = false, sharded;
+ 
+ 	VM_WARN_ON_FOLIO(folio && mapping != folio_mapping(folio), folio);
+ 	VM_WARN_ON_FOLIO(folio && pgoff_start != folio_pgoff(folio), folio);
+ 	VM_WARN_ON_FOLIO(folio && nr_pages != folio_nr_pages(folio), folio);
+ 
+ 	if (!locked) {
+-		if (i_mmap_trylock_read(mapping))
+-			goto lookup;
+-
+-		if (rwc->try_lock) {
+-			rwc->contended = true;
+-			return;
++		if (!i_mmap_trylock_read(mapping)) {
++			if (rwc->try_lock) {
++				rwc->contended = true;
++				return;
++			}
++			i_mmap_lock_read(mapping);
+ 		}
++		gate_locked = true;
++	}
+ 
+-		i_mmap_lock_read(mapping);
++	sharded = i_mmap_mapping_sharded(mapping);
++	nr_roots = i_mmap_nr_roots(mapping);
++	if (sharded) {
++		for (root = 0; root < nr_roots; root++)
++			i_mmap_lock_read_root(mapping, root);
++		locked_roots = nr_roots;
+ 	}
+-lookup:
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap,
+-			pgoff_start, pgoff_end) {
+-		unsigned long address = vma_address(vma, pgoff_start, nr_pages);
+ 
+-		VM_BUG_ON_VMA(address == -EFAULT, vma);
+-		cond_resched();
++	for (root = 0; root < nr_roots; root++) {
++		struct rb_root_cached *tree = i_mmap_root(mapping, root);
++		struct vm_area_struct *vma;
+ 
+-		if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
+-			continue;
++		vma_interval_tree_foreach(vma, tree, pgoff_start, pgoff_end) {
++			unsigned long address = vma_address(vma, pgoff_start, nr_pages);
+ 
+-		if (!rwc->rmap_one(folio, vma, address, rwc->arg))
+-			goto done;
+-		if (rwc->done && rwc->done(folio))
+-			goto done;
++			VM_BUG_ON_VMA(address == -EFAULT, vma);
++			cond_resched();
++
++			if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++				continue;
++
++			if (!rwc->rmap_one(folio, vma, address, rwc->arg))
++				goto done;
++			if (rwc->done && rwc->done(folio))
++				goto done;
++		}
+ 	}
+ done:
+-	if (!locked)
++	while (locked_roots)
++		i_mmap_unlock_read_root(mapping, --locked_roots);
++	if (gate_locked)
+ 		i_mmap_unlock_read(mapping);
+ }
+ 
++
++
+ /*
+  * rmap_walk_file - do something to file page using the object-based rmap method
+  * @folio: the folio to be handled
+diff --git a/mm/vma.c b/mm/vma.c
+index be64f781a3aa..2fb6165ece98 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -6,6 +6,9 @@
+ 
+ #include "vma_internal.h"
+ #include "vma.h"
++#include <linux/debugfs.h>
++#include <linux/hash.h>
++#include <linux/seq_file.h>
+ 
+ struct mmap_state {
+ 	struct mm_struct *mm;
+@@ -224,6 +227,412 @@ static bool can_vma_merge_after(struct vma_merge_struct *vmg)
+ 	return false;
+ }
+ 
++
++#if defined(CONFIG_SMP) && defined(CONFIG_DEBUG_FS)
++#define I_MMAP_DOMAIN_STAT_BITS		8
++#define I_MMAP_DOMAIN_STAT_SLOTS	(1U << I_MMAP_DOMAIN_STAT_BITS)
++#define I_MMAP_DOMAIN_STAT_MAX_NODES	64
++
++struct i_mmap_domain_stat_slot {
++	struct address_space *mapping;
++	atomic_long_t inserts[I_MMAP_DOMAIN_STAT_MAX_NODES];
++	atomic_long_t removes[I_MMAP_DOMAIN_STAT_MAX_NODES];
++	atomic_long_t collisions;
++};
++
++static struct i_mmap_domain_stat_slot i_mmap_domain_stats[I_MMAP_DOMAIN_STAT_SLOTS];
++
++static int i_mmap_domain_stat_nid(struct vm_area_struct *vma)
++{
++	int nid;
++
++	if (!vma->vm_mm)
++		return 0;
++
++	nid = READ_ONCE(vma->vm_mm->i_mmap_domain_nid);
++	if (unlikely(nid < 0 || nid >= nr_node_ids ||
++		     nid >= I_MMAP_DOMAIN_STAT_MAX_NODES))
++		return 0;
++	return nid;
++}
++
++static void i_mmap_domain_stat_account(struct address_space *mapping,
++					       struct vm_area_struct *vma,
++					       bool insert)
++{
++	struct i_mmap_domain_stat_slot *slot;
++	struct address_space *old;
++	unsigned int idx;
++	int nid;
++
++	if (!mapping || !vma)
++		return;
++
++	idx = hash_ptr(mapping, I_MMAP_DOMAIN_STAT_BITS);
++	slot = &i_mmap_domain_stats[idx];
++	old = READ_ONCE(slot->mapping);
++	if (!old) {
++		old = cmpxchg(&slot->mapping, NULL, mapping);
++		if (!old)
++			old = mapping;
++	}
++	if (old != mapping) {
++		atomic_long_inc(&slot->collisions);
++		return;
++	}
++
++	nid = i_mmap_domain_stat_nid(vma);
++	if (insert)
++		atomic_long_inc(&slot->inserts[nid]);
++	else
++		atomic_long_inc(&slot->removes[nid]);
++}
++
++void i_mmap_domain_stat_insert(struct address_space *mapping,
++				       struct vm_area_struct *vma)
++{
++	i_mmap_domain_stat_account(mapping, vma, true);
++}
++
++void i_mmap_domain_stat_remove(struct address_space *mapping,
++				       struct vm_area_struct *vma)
++{
++	i_mmap_domain_stat_account(mapping, vma, false);
++}
++
++static int i_mmap_domain_stats_show(struct seq_file *m, void *v)
++{
++	unsigned int i;
++
++	seq_puts(m, "slot mapping nid inserts removes collisions\n");
++	for (i = 0; i < I_MMAP_DOMAIN_STAT_SLOTS; i++) {
++		struct i_mmap_domain_stat_slot *slot = &i_mmap_domain_stats[i];
++		struct address_space *mapping = READ_ONCE(slot->mapping);
++		long collisions = atomic_long_read(&slot->collisions);
++		int nid, max_nid = min(nr_node_ids, I_MMAP_DOMAIN_STAT_MAX_NODES);
++		bool printed = false;
++
++		for (nid = 0; nid < max_nid; nid++) {
++			long inserts = atomic_long_read(&slot->inserts[nid]);
++			long removes = atomic_long_read(&slot->removes[nid]);
++
++			if (!inserts && !removes)
++				continue;
++			seq_printf(m, "%u %px %d %ld %ld %ld\n",
++				   i, mapping, nid, inserts, removes, collisions);
++			printed = true;
++		}
++		if (!printed && collisions)
++			seq_printf(m, "%u %px -1 0 0 %ld\n",
++				   i, mapping, collisions);
++	}
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(i_mmap_domain_stats);
++
++static int __init i_mmap_domain_stats_debugfs_init(void)
++{
++	debugfs_create_file("mm_i_mmap_domain_stats", 0444, NULL, NULL,
++			    &i_mmap_domain_stats_fops);
++	return 0;
++}
++late_initcall(i_mmap_domain_stats_debugfs_init);
++#else
++void i_mmap_domain_stat_insert(struct address_space *mapping,
++				       struct vm_area_struct *vma) { }
++void i_mmap_domain_stat_remove(struct address_space *mapping,
++				       struct vm_area_struct *vma) { }
++#endif
++
++
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++static int i_mmap_vma_nid(struct vm_area_struct *vma)
++{
++	int nid;
++
++	if (!vma || !vma->vm_mm)
++		return 0;
++
++	nid = READ_ONCE(vma->vm_mm->i_mmap_domain_nid);
++	if (unlikely(nid < 0 || nid >= nr_node_ids))
++		return 0;
++	return nid;
++}
++
++static bool i_mmap_can_shard(struct address_space *mapping,
++			     struct vm_area_struct *vma)
++{
++	if (!mapping || !mapping->host || !vma || !vma->vm_file)
++		return false;
++	if (vma_is_dax(vma))
++		return false;
++	if (is_vm_hugetlb_page(vma) || is_file_hugepages(vma->vm_file))
++		return false;
++	return true;
++}
++
++bool i_mmap_mapping_sharded(struct address_space *mapping)
++{
++	return smp_load_acquire(&mapping->i_mmap_shards) != NULL;
++}
++
++static struct i_mmap_shards *i_mmap_shards_alloc(void)
++{
++	struct i_mmap_shards *shards;
++	unsigned int i, nr = max_t(unsigned int, nr_node_ids, 1);
++	size_t size;
++
++	if (nr > I_MMAP_DOMAIN_MAX_SHARDS)
++		return NULL;
++
++	size = struct_size(shards, shard, nr);
++	shards = kzalloc(size, GFP_KERNEL);
++	if (!shards)
++		return NULL;
++	shards->nr = nr;
++	for (i = 0; i < nr; i++) {
++		shards->shard[i].root = RB_ROOT_CACHED;
++		init_rwsem(&shards->shard[i].rwsem);
++	}
++	return shards;
++}
++
++bool i_mmap_try_shard_mapping(struct address_space *mapping,
++			      struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *new, *shards;
++	struct vm_area_struct *iter;
++	long migrated = 0;
++
++	if (!i_mmap_can_shard(mapping, vma))
++		return false;
++	if (i_mmap_mapping_sharded(mapping))
++		return true;
++
++	new = i_mmap_shards_alloc();
++	if (!new)
++		return false;
++
++	i_mmap_lock_write(mapping);
++	shards = smp_load_acquire(&mapping->i_mmap_shards);
++	if (!shards) {
++		while ((iter = vma_interval_tree_iter_first(&mapping->i_mmap,
++							       0, ULONG_MAX))) {
++			int nid = i_mmap_vma_nid(iter);
++
++			if ((unsigned int)nid >= new->nr)
++				nid = 0;
++			vma_interval_tree_remove(iter, &mapping->i_mmap);
++			vma_interval_tree_insert(iter, &new->shard[nid].root);
++			migrated++;
++		}
++		atomic_long_set(&mapping->i_mmap_count, migrated);
++		smp_store_release(&mapping->i_mmap_shards, new);
++		new = NULL;
++	}
++	i_mmap_unlock_write(mapping);
++
++	kfree(new);
++	return i_mmap_mapping_sharded(mapping);
++}
++
++static struct i_mmap_shard *i_mmap_shard_for_vma(struct address_space *mapping,
++						 struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	int nid = i_mmap_vma_nid(vma);
++
++	if (WARN_ON_ONCE(!shards))
++		return NULL;
++	if ((unsigned int)nid >= shards->nr)
++		nid = 0;
++	return &shards->shard[nid];
++}
++
++unsigned int i_mmap_nr_roots(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++
++	return shards ? shards->nr : 1;
++}
++
++struct rb_root_cached *i_mmap_root(struct address_space *mapping,
++					  unsigned int index)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++
++	if (!shards)
++		return &mapping->i_mmap;
++	if (WARN_ON_ONCE(index >= shards->nr))
++		index = 0;
++	return &shards->shard[index].root;
++}
++
++bool i_mmap_trylock_read_root(struct address_space *mapping, unsigned int index)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++
++	if (!shards)
++		return i_mmap_trylock_read(mapping);
++	if (WARN_ON_ONCE(index >= shards->nr))
++		index = 0;
++	return down_read_trylock(&shards->shard[index].rwsem);
++}
++
++void i_mmap_lock_read_root(struct address_space *mapping, unsigned int index)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++
++	if (!shards) {
++		i_mmap_lock_read(mapping);
++		return;
++	}
++	if (WARN_ON_ONCE(index >= shards->nr))
++		index = 0;
++	down_read(&shards->shard[index].rwsem);
++}
++
++void i_mmap_unlock_read_root(struct address_space *mapping, unsigned int index)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++
++	if (!shards) {
++		i_mmap_unlock_read(mapping);
++		return;
++	}
++	if (WARN_ON_ONCE(index >= shards->nr))
++		index = 0;
++	up_read(&shards->shard[index].rwsem);
++}
++
++void i_mmap_lock_write_vma(struct address_space *mapping,
++			   struct vm_area_struct *vma)
++{
++	struct i_mmap_shard *shard;
++
++	for (;;) {
++		if (i_mmap_mapping_sharded(mapping)) {
++			shard = i_mmap_shard_for_vma(mapping, vma);
++			if (shard)
++				down_write(&shard->rwsem);
++			return;
++		}
++
++		i_mmap_lock_write(mapping);
++		if (!i_mmap_mapping_sharded(mapping))
++			return;
++		i_mmap_unlock_write(mapping);
++	}
++}
++
++void i_mmap_unlock_write_vma(struct address_space *mapping,
++			     struct vm_area_struct *vma)
++{
++	struct i_mmap_shard *shard;
++
++	if (!i_mmap_mapping_sharded(mapping)) {
++		i_mmap_unlock_write(mapping);
++		return;
++	}
++	shard = i_mmap_shard_for_vma(mapping, vma);
++	if (shard)
++		up_write(&shard->rwsem);
++}
++
++void i_mmap_lock_write_all(struct mm_struct *mm, struct address_space *mapping)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	unsigned int i;
++
++	if (!shards) {
++		down_write_nest_lock(&mapping->i_mmap_rwsem, &mm->mmap_lock);
++		return;
++	}
++	for (i = 0; i < shards->nr; i++)
++		down_write_nest_lock(&shards->shard[i].rwsem, &mm->mmap_lock);
++}
++
++void i_mmap_unlock_write_all(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	unsigned int i;
++
++	if (!shards) {
++		i_mmap_unlock_write(mapping);
++		return;
++	}
++	for (i = shards->nr; i > 0; i--)
++		up_write(&shards->shard[i - 1].rwsem);
++}
++
++void i_mmap_insert_vma(struct address_space *mapping, struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	struct rb_root_cached *root = &mapping->i_mmap;
++	int nid;
++
++	if (shards) {
++		nid = i_mmap_vma_nid(vma);
++		if ((unsigned int)nid >= shards->nr)
++			nid = 0;
++		root = &shards->shard[nid].root;
++	}
++	vma_interval_tree_insert(vma, root);
++	atomic_long_inc(&mapping->i_mmap_count);
++	i_mmap_domain_stat_insert(mapping, vma);
++}
++
++
++void i_mmap_insert_vma_after(struct address_space *mapping,
++			     struct vm_area_struct *vma,
++			     struct vm_area_struct *prev)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	struct rb_root_cached *root = &mapping->i_mmap;
++	int nid;
++
++	if (shards) {
++		nid = i_mmap_vma_nid(vma);
++		if ((unsigned int)nid >= shards->nr)
++			nid = 0;
++		root = &shards->shard[nid].root;
++		if (prev && i_mmap_vma_nid(prev) == nid)
++			vma_interval_tree_insert_after(vma, prev, root);
++		else
++			vma_interval_tree_insert(vma, root);
++	} else {
++		vma_interval_tree_insert_after(vma, prev, root);
++	}
++	atomic_long_inc(&mapping->i_mmap_count);
++	i_mmap_domain_stat_insert(mapping, vma);
++}
++
++void i_mmap_remove_vma(struct address_space *mapping, struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *shards = smp_load_acquire(&mapping->i_mmap_shards);
++	struct rb_root_cached *root = &mapping->i_mmap;
++	int nid;
++
++	if (shards) {
++		nid = i_mmap_vma_nid(vma);
++		if ((unsigned int)nid >= shards->nr)
++			nid = 0;
++		root = &shards->shard[nid].root;
++	}
++	vma_interval_tree_remove(vma, root);
++	atomic_long_dec(&mapping->i_mmap_count);
++	i_mmap_domain_stat_remove(mapping, vma);
++}
++#endif
++
++
++#ifndef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++static int i_mmap_vma_nid(struct vm_area_struct *vma)
++{
++	return 0;
++}
++#endif
++
+ static void __vma_link_file(struct vm_area_struct *vma,
+ 			    struct address_space *mapping)
+ {
+@@ -231,7 +640,7 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	i_mmap_insert_vma(mapping, vma);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -245,7 +654,7 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 		mapping_unmap_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_remove(vma, &mapping->i_mmap);
++	i_mmap_remove_vma(mapping, vma);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -302,8 +711,13 @@ static void vma_prepare(struct vma_prepare *vp)
+ 			 * throughout; but we cannot insert into address
+ 			 * space until vma start or end is updated.
+ 			 */
+-			__vma_link_file(vp->insert,
+-					vp->insert->vm_file->f_mapping);
++			struct address_space *insert_mapping = vp->insert->vm_file->f_mapping;
++
++			if (i_mmap_mapping_sharded(insert_mapping))
++				i_mmap_lock_write_vma(insert_mapping, vp->insert);
++			__vma_link_file(vp->insert, insert_mapping);
++			if (i_mmap_mapping_sharded(insert_mapping))
++				i_mmap_unlock_write_vma(insert_mapping, vp->insert);
+ 		}
+ 	}
+ 
+@@ -316,10 +730,18 @@ static void vma_prepare(struct vma_prepare *vp)
+ 
+ 	if (vp->file) {
+ 		flush_dcache_mmap_lock(vp->mapping);
+-		vma_interval_tree_remove(vp->vma, &vp->mapping->i_mmap);
+-		if (vp->adj_next)
+-			vma_interval_tree_remove(vp->adj_next,
+-						 &vp->mapping->i_mmap);
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_lock_write_vma(vp->mapping, vp->vma);
++		i_mmap_remove_vma(vp->mapping, vp->vma);
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_unlock_write_vma(vp->mapping, vp->vma);
++		if (vp->adj_next) {
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_lock_write_vma(vp->mapping, vp->adj_next);
++			i_mmap_remove_vma(vp->mapping, vp->adj_next);
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_unlock_write_vma(vp->mapping, vp->adj_next);
++		}
+ 	}
+ 
+ }
+@@ -336,17 +758,34 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 			 struct mm_struct *mm)
+ {
+ 	if (vp->file) {
+-		if (vp->adj_next)
+-			vma_interval_tree_insert(vp->adj_next,
+-						 &vp->mapping->i_mmap);
+-		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
++		if (vp->adj_next) {
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_lock_write_vma(vp->mapping, vp->adj_next);
++			i_mmap_insert_vma(vp->mapping, vp->adj_next);
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_unlock_write_vma(vp->mapping, vp->adj_next);
++		}
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_lock_write_vma(vp->mapping, vp->vma);
++		i_mmap_insert_vma(vp->mapping, vp->vma);
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_unlock_write_vma(vp->mapping, vp->vma);
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+ 	if (vp->remove && vp->file) {
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_lock_write_vma(vp->mapping, vp->remove);
+ 		__remove_shared_vm_struct(vp->remove, vp->mapping);
+-		if (vp->remove2)
++		if (i_mmap_mapping_sharded(vp->mapping))
++			i_mmap_unlock_write_vma(vp->mapping, vp->remove);
++		if (vp->remove2) {
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_lock_write_vma(vp->mapping, vp->remove2);
+ 			__remove_shared_vm_struct(vp->remove2, vp->mapping);
++			if (i_mmap_mapping_sharded(vp->mapping))
++				i_mmap_unlock_write_vma(vp->mapping, vp->remove2);
++		}
+ 	} else if (vp->insert) {
+ 		/*
+ 		 * split_vma has split insert from vma, and needs
+@@ -1771,18 +2210,29 @@ void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb)
+ 	vb->count = 0;
+ }
+ 
++static bool unlink_file_vma_batch_same_key(struct unlink_vma_file_batch *vb,
++						 struct vm_area_struct *vma)
++{
++	struct vm_area_struct *first = vb->vmas[0];
++
++	return first->vm_file->f_mapping == vma->vm_file->f_mapping &&
++	       i_mmap_vma_nid(first) == i_mmap_vma_nid(vma);
++}
++
+ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ {
+ 	struct address_space *mapping;
+ 	int i;
+ 
+ 	mapping = vb->vmas[0]->vm_file->f_mapping;
+-	i_mmap_lock_write(mapping);
++	i_mmap_lock_write_vma(mapping, vb->vmas[0]);
+ 	for (i = 0; i < vb->count; i++) {
+ 		VM_WARN_ON_ONCE(vb->vmas[i]->vm_file->f_mapping != mapping);
++		VM_WARN_ON_ONCE(i_mmap_vma_nid(vb->vmas[i]) !=
++				i_mmap_vma_nid(vb->vmas[0]));
+ 		__remove_shared_vm_struct(vb->vmas[i], mapping);
+ 	}
+-	i_mmap_unlock_write(mapping);
++	i_mmap_unlock_write_vma(mapping, vb->vmas[0]);
+ 
+ 	unlink_file_vma_batch_init(vb);
+ }
+@@ -1793,7 +2243,7 @@ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+ 	if (vma->vm_file == NULL)
+ 		return;
+ 
+-	if ((vb->count > 0 && vb->vmas[0]->vm_file != vma->vm_file) ||
++	if ((vb->count > 0 && !unlink_file_vma_batch_same_key(vb, vma)) ||
+ 	    vb->count == ARRAY_SIZE(vb->vmas))
+ 		unlink_file_vma_batch_process(vb);
+ 
+@@ -1814,10 +2264,12 @@ static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
+ 
+ 	if (file) {
+ 		mapping = file->f_mapping;
+-		i_mmap_lock_write(mapping);
++		if (!hold_rmap_lock)
++			i_mmap_try_shard_mapping(mapping, vma);
++		i_mmap_lock_write_vma(mapping, vma);
+ 		__vma_link_file(vma, mapping);
+ 		if (!hold_rmap_lock)
+-			i_mmap_unlock_write(mapping);
++			i_mmap_unlock_write_vma(mapping, vma);
+ 	}
+ }
+ 
+@@ -2152,7 +2604,7 @@ static void vm_lock_mapping(struct mm_struct *mm, struct address_space *mapping)
+ 		 */
+ 		if (test_and_set_bit(AS_MM_ALL_LOCKS, &mapping->flags))
+ 			BUG();
+-		down_write_nest_lock(&mapping->i_mmap_rwsem, &mm->mmap_lock);
++		i_mmap_lock_write_all(mm, mapping);
+ 	}
+ }
+ 
+@@ -2279,7 +2731,7 @@ static void vm_unlock_mapping(struct address_space *mapping)
+ 		 * AS_MM_ALL_LOCKS can't change to 0 from under us
+ 		 * because we hold the mm_all_locks_mutex.
+ 		 */
+-		i_mmap_unlock_write(mapping);
++		i_mmap_unlock_write_all(mapping);
+ 		if (!test_and_clear_bit(AS_MM_ALL_LOCKS,
+ 					&mapping->flags))
+ 			BUG();
+@@ -2712,7 +3164,7 @@ static int call_action_complete(struct mmap_state *map,
+ 	if (map->hold_file_rmap_lock) {
+ 		struct file *file = vma->vm_file;
+ 
+-		i_mmap_unlock_write(file->f_mapping);
++		i_mmap_unlock_write_vma(file->f_mapping, vma);
+ 	}
+ 	return ret;
+ }
+diff --git a/mm/vma.h b/mm/vma.h
+index eba388c61ef4..e1eb054f1401 100644
+--- a/mm/vma.h
++++ b/mm/vma.h
+@@ -439,6 +439,93 @@ __must_check struct vm_area_struct *vma_merge_extend(struct vma_iterator *vmi,
+ 
+ void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb);
+ 
++void i_mmap_domain_stat_insert(struct address_space *mapping,
++				       struct vm_area_struct *vma);
++
++void i_mmap_domain_stat_remove(struct address_space *mapping,
++				       struct vm_area_struct *vma);
++
++static inline void i_mmap_insert_vma_account(struct address_space *mapping,
++					     struct vm_area_struct *vma)
++{
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++	atomic_long_inc(&mapping->i_mmap_count);
++#endif
++	i_mmap_domain_stat_insert(mapping, vma);
++}
++
++#ifdef CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS
++bool i_mmap_try_shard_mapping(struct address_space *mapping,
++			      struct vm_area_struct *vma);
++bool i_mmap_mapping_sharded(struct address_space *mapping);
++unsigned int i_mmap_nr_roots(struct address_space *mapping);
++struct rb_root_cached *i_mmap_root(struct address_space *mapping,
++				  unsigned int index);
++bool i_mmap_trylock_read_root(struct address_space *mapping,
++				      unsigned int index);
++void i_mmap_lock_read_root(struct address_space *mapping, unsigned int index);
++void i_mmap_unlock_read_root(struct address_space *mapping, unsigned int index);
++void i_mmap_lock_write_vma(struct address_space *mapping,
++			   struct vm_area_struct *vma);
++void i_mmap_unlock_write_vma(struct address_space *mapping,
++			     struct vm_area_struct *vma);
++void i_mmap_lock_write_all(struct mm_struct *mm, struct address_space *mapping);
++void i_mmap_unlock_write_all(struct address_space *mapping);
++void i_mmap_insert_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma);
++void i_mmap_insert_vma_after(struct address_space *mapping,
++			     struct vm_area_struct *vma,
++			     struct vm_area_struct *prev);
++void i_mmap_remove_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma);
++#else
++static inline bool i_mmap_try_shard_mapping(struct address_space *mapping,
++					    struct vm_area_struct *vma) { return false; }
++static inline bool i_mmap_mapping_sharded(struct address_space *mapping) { return false; }
++static inline unsigned int i_mmap_nr_roots(struct address_space *mapping) { return 1; }
++static inline struct rb_root_cached *i_mmap_root(struct address_space *mapping,
++						 unsigned int index) { return &mapping->i_mmap; }
++static inline bool i_mmap_trylock_read_root(struct address_space *mapping,
++					    unsigned int index) { return i_mmap_trylock_read(mapping); }
++static inline void i_mmap_lock_read_root(struct address_space *mapping,
++					 unsigned int index) { i_mmap_lock_read(mapping); }
++static inline void i_mmap_unlock_read_root(struct address_space *mapping,
++					   unsigned int index) { i_mmap_unlock_read(mapping); }
++static inline void i_mmap_lock_write_vma(struct address_space *mapping,
++					 struct vm_area_struct *vma) { i_mmap_lock_write(mapping); }
++static inline void i_mmap_unlock_write_vma(struct address_space *mapping,
++					   struct vm_area_struct *vma) { i_mmap_unlock_write(mapping); }
++static inline void i_mmap_lock_write_all(struct mm_struct *mm,
++					 struct address_space *mapping)
++{
++	down_write_nest_lock(&mapping->i_mmap_rwsem, &mm->mmap_lock);
++}
++static inline void i_mmap_unlock_write_all(struct address_space *mapping)
++{
++	i_mmap_unlock_write(mapping);
++}
++static inline void i_mmap_insert_vma(struct address_space *mapping,
++				     struct vm_area_struct *vma)
++{
++	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	i_mmap_domain_stat_insert(mapping, vma);
++}
++static inline void i_mmap_insert_vma_after(struct address_space *mapping,
++					   struct vm_area_struct *vma,
++					   struct vm_area_struct *prev)
++{
++	vma_interval_tree_insert_after(vma, prev, &mapping->i_mmap);
++	i_mmap_domain_stat_insert(mapping, vma);
++}
++static inline void i_mmap_remove_vma(struct address_space *mapping,
++				     struct vm_area_struct *vma)
++{
++	vma_interval_tree_remove(vma, &mapping->i_mmap);
++	i_mmap_domain_stat_remove(mapping, vma);
++}
++#endif
++
++
+ void unlink_file_vma_batch_final(struct unlink_vma_file_batch *vb);
+ 
+ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+-- 
+2.43.0
+

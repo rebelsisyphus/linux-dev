@@ -1,0 +1,401 @@
+From 1e1f488c14400b2bc950647b50405cf90a58c97f Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Tue, 28 Apr 2026 10:05:30 +0800
+Subject: [PATCH 26/29] fork: cache mm rss_stat percpu backing
+
+---
+ include/linux/percpu_counter.h |  38 +++++++++
+ kernel/fork.c                  | 136 ++++++++++++++++++++++++++++++++-
+ lib/percpu_counter.c           |  99 ++++++++++++++++++++----
+ 3 files changed, 254 insertions(+), 19 deletions(-)
+
+diff --git a/include/linux/percpu_counter.h b/include/linux/percpu_counter.h
+index 3a44dd1e33d2..e45bb66555e2 100644
+--- a/include/linux/percpu_counter.h
++++ b/include/linux/percpu_counter.h
+@@ -33,6 +33,14 @@ extern int percpu_counter_batch;
+ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 			       gfp_t gfp, u32 nr_counters,
+ 			       struct lock_class_key *key);
++void __percpu *percpu_counter_alloc_many_backing(u32 nr_counters, gfp_t gfp);
++int __percpu_counter_init_many_from_backing(struct percpu_counter *fbc,
++					   s64 amount, void __percpu *backing,
++					   u32 nr_counters,
++					   struct lock_class_key *key);
++void __percpu *percpu_counter_detach_many(struct percpu_counter *fbc,
++					 u32 nr_counters);
++void percpu_counter_free_many_backing(void __percpu *backing);
+ 
+ #define percpu_counter_init_many(fbc, value, gfp, nr_counters)		\
+ 	({								\
+@@ -42,6 +50,13 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 					   &__key);			\
+ 	})
+ 
++#define percpu_counter_init_many_from_backing(fbc, value, backing, nr_counters) \
++	({								\
++		static struct lock_class_key __key;			\
++									\
++		__percpu_counter_init_many_from_backing(fbc, value, backing,\
++							 nr_counters, &__key);	\
++	})
+ 
+ #define percpu_counter_init(fbc, value, gfp)				\
+ 	percpu_counter_init_many(fbc, value, gfp, 1)
+@@ -154,6 +169,29 @@ static inline int percpu_counter_init(struct percpu_counter *fbc, s64 amount,
+ 	return percpu_counter_init_many(fbc, amount, gfp, 1);
+ }
+ 
++static inline void __percpu *percpu_counter_alloc_many_backing(u32 nr_counters,
++							       gfp_t gfp)
++{
++	return NULL;
++}
++
++static inline int percpu_counter_init_many_from_backing(
++		struct percpu_counter *fbc, s64 amount, void __percpu *backing,
++		u32 nr_counters)
++{
++	return percpu_counter_init_many(fbc, amount, 0, nr_counters);
++}
++
++static inline void __percpu *percpu_counter_detach_many(
++		struct percpu_counter *fbc, u32 nr_counters)
++{
++	return NULL;
++}
++
++static inline void percpu_counter_free_many_backing(void __percpu *backing)
++{
++}
++
+ static inline void percpu_counter_destroy_many(struct percpu_counter *fbc,
+ 					       u32 nr_counters)
+ {
+diff --git a/kernel/fork.c b/kernel/fork.c
+index c54ad8a57fcb..f65cac32c9fe 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -33,6 +33,7 @@
+ #include <linux/completion.h>
+ #include <linux/personality.h>
+ #include <linux/mempolicy.h>
++#include <linux/topology.h>
+ #include <linux/sem.h>
+ #include <linux/file.h>
+ #include <linux/fdtable.h>
+@@ -177,6 +178,135 @@ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+ struct task_domain **task_domains __read_mostly;
+ EXPORT_SYMBOL_GPL(task_domains);
+ 
++#ifdef CONFIG_SMP
++#define MM_RSS_STAT_BACKING_CACHE_DEPTH 64
++
++struct mm_rss_stat_backing_cache {
++	spinlock_t lock;
++	unsigned int nr;
++	void __percpu *entries[MM_RSS_STAT_BACKING_CACHE_DEPTH];
++};
++
++static struct mm_rss_stat_backing_cache *mm_rss_stat_backing_caches __read_mostly;
++
++static int mm_rss_stat_backing_cache_nid(void)
++{
++	int nid = numa_mem_id();
++
++	if (!mm_rss_stat_backing_caches || nid < 0 || nid >= nr_node_ids)
++		return NUMA_NO_NODE;
++	return nid;
++}
++
++static void __init init_mm_rss_stat_backing_cache(void)
++{
++	int nid;
++
++	mm_rss_stat_backing_caches = kcalloc(nr_node_ids,
++						 sizeof(*mm_rss_stat_backing_caches),
++						 GFP_KERNEL);
++	if (!mm_rss_stat_backing_caches) {
++		pr_warn("fork: mm rss_stat backing cache disabled\n");
++		return;
++	}
++
++	for (nid = 0; nid < nr_node_ids; nid++)
++		spin_lock_init(&mm_rss_stat_backing_caches[nid].lock);
++}
++
++static void __percpu *mm_rss_stat_backing_cache_pop(void)
++{
++	struct mm_rss_stat_backing_cache *cache;
++	void __percpu *backing = NULL;
++	unsigned long flags;
++	int nid;
++
++	nid = mm_rss_stat_backing_cache_nid();
++	if (nid == NUMA_NO_NODE)
++		return NULL;
++
++	cache = &mm_rss_stat_backing_caches[nid];
++	spin_lock_irqsave(&cache->lock, flags);
++	if (cache->nr) {
++		backing = cache->entries[--cache->nr];
++		cache->entries[cache->nr] = NULL;
++	}
++	spin_unlock_irqrestore(&cache->lock, flags);
++
++	return backing;
++}
++
++static void mm_rss_stat_backing_cache_push(void __percpu *backing)
++{
++	struct mm_rss_stat_backing_cache *cache;
++	unsigned long flags;
++	int nid;
++
++	if (!backing)
++		return;
++
++	nid = mm_rss_stat_backing_cache_nid();
++	if (nid == NUMA_NO_NODE) {
++		percpu_counter_free_many_backing(backing);
++		return;
++	}
++
++	cache = &mm_rss_stat_backing_caches[nid];
++	spin_lock_irqsave(&cache->lock, flags);
++	if (cache->nr < MM_RSS_STAT_BACKING_CACHE_DEPTH) {
++		cache->entries[cache->nr++] = backing;
++		backing = NULL;
++	}
++	spin_unlock_irqrestore(&cache->lock, flags);
++
++	percpu_counter_free_many_backing(backing);
++}
++
++static int mm_rss_stat_init(struct mm_struct *mm)
++{
++	void __percpu *backing;
++	int ret;
++
++	backing = mm_rss_stat_backing_cache_pop();
++	if (!backing) {
++		backing = percpu_counter_alloc_many_backing(NR_MM_COUNTERS,
++							     GFP_KERNEL_ACCOUNT);
++		if (!backing)
++			return -ENOMEM;
++	}
++
++	ret = percpu_counter_init_many_from_backing(mm->rss_stat, 0, backing,
++						     NR_MM_COUNTERS);
++	if (ret) {
++		percpu_counter_free_many_backing(backing);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void mm_rss_stat_destroy(struct mm_struct *mm)
++{
++	void __percpu *backing;
++
++	backing = percpu_counter_detach_many(mm->rss_stat, NR_MM_COUNTERS);
++	mm_rss_stat_backing_cache_push(backing);
++}
++#else
++static void __init init_mm_rss_stat_backing_cache(void) { }
++
++static int mm_rss_stat_init(struct mm_struct *mm)
++{
++	return percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
++					 NR_MM_COUNTERS);
++}
++
++static void mm_rss_stat_destroy(struct mm_struct *mm)
++{
++	percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
++}
++#endif
++
+ /*
+  * Iteration helper.  See the declaration in <linux/sched/signal.h>
+  * for the contract: pass &init_task to start, &init_task is returned
+@@ -884,7 +1014,7 @@ void __mmdrop(struct mm_struct *mm)
+ 	put_user_ns(mm->user_ns);
+ 	mm_pasid_drop(mm);
+ 	mm_destroy_cid(mm);
+-	percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
++	mm_rss_stat_destroy(mm);
+ 
+ 	free_mm(mm);
+ }
+@@ -1043,6 +1173,7 @@ void __init fork_init(void)
+ 	uprobes_init();
+ 
+ 	init_task_domains();
++	init_mm_rss_stat_backing_cache();
+ }
+ 
+ int __weak arch_dup_task_struct(struct task_struct *dst,
+@@ -1278,8 +1409,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	if (mm_alloc_cid(mm, p))
+ 		goto fail_cid;
+ 
+-	if (percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
+-				     NR_MM_COUNTERS))
++	if (mm_rss_stat_init(mm))
+ 		goto fail_pcpu;
+ 
+ 	mm->user_ns = get_user_ns(user_ns);
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index 2891f94a11c6..e73234918711 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -185,23 +185,46 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
+ }
+ EXPORT_SYMBOL(__percpu_counter_sum);
+ 
+-int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+-			       gfp_t gfp, u32 nr_counters,
+-			       struct lock_class_key *key)
++static size_t percpu_counter_many_size(u32 nr_counters)
++{
++	size_t counter_size;
++
++	counter_size = ALIGN(sizeof(s32), __alignof__(s32));
++	return nr_counters * counter_size;
++}
++
++void __percpu *percpu_counter_alloc_many_backing(u32 nr_counters, gfp_t gfp)
++{
++	return __alloc_percpu_gfp(percpu_counter_many_size(nr_counters),
++				     __alignof__(s32), gfp);
++}
++EXPORT_SYMBOL(percpu_counter_alloc_many_backing);
++
++static void percpu_counter_zero_many_backing(void __percpu *backing,
++					    u32 nr_counters)
++{
++	size_t size = percpu_counter_many_size(nr_counters);
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		memset(per_cpu_ptr(backing, cpu), 0, size);
++}
++
++int __percpu_counter_init_many_from_backing(struct percpu_counter *fbc,
++					   s64 amount, void __percpu *backing,
++					   u32 nr_counters,
++					   struct lock_class_key *key)
+ {
+ 	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+-	s32 __percpu *counters;
+ 	u32 i;
+ 
+-	counter_size = ALIGN(sizeof(*counters), __alignof__(*counters));
+-	counters = __alloc_percpu_gfp(nr_counters * counter_size,
+-				      __alignof__(*counters), gfp);
+-	if (!counters) {
++	if (!backing) {
+ 		fbc[0].counters = NULL;
+ 		return -ENOMEM;
+ 	}
+ 
++	counter_size = ALIGN(sizeof(s32), __alignof__(s32));
+ 	for (i = 0; i < nr_counters; i++) {
+ 		raw_spin_lock_init(&fbc[i].lock);
+ 		lockdep_set_class(&fbc[i].lock, key);
+@@ -209,7 +232,7 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 		INIT_LIST_HEAD(&fbc[i].list);
+ #endif
+ 		fbc[i].count = amount;
+-		fbc[i].counters = (void __percpu *)counters + i * counter_size;
++		fbc[i].counters = backing + i * counter_size;
+ 
+ 		debug_percpu_counter_activate(&fbc[i]);
+ 	}
+@@ -222,18 +245,37 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ #endif
+ 	return 0;
+ }
++EXPORT_SYMBOL(__percpu_counter_init_many_from_backing);
++
++int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
++			       gfp_t gfp, u32 nr_counters,
++			       struct lock_class_key *key)
++{
++	void __percpu *backing;
++	int ret;
++
++	backing = percpu_counter_alloc_many_backing(nr_counters, gfp);
++	ret = __percpu_counter_init_many_from_backing(fbc, amount, backing,
++						       nr_counters, key);
++	if (ret)
++		percpu_counter_free_many_backing(backing);
++	return ret;
++}
+ EXPORT_SYMBOL(__percpu_counter_init_many);
+ 
+-void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
++static void __percpu *__percpu_counter_detach_many(struct percpu_counter *fbc,
++		u32 nr_counters, bool clear_backing)
+ {
+ 	unsigned long flags __maybe_unused;
++	void __percpu *backing;
+ 	u32 i;
+ 
+ 	if (WARN_ON_ONCE(!fbc))
+-		return;
++		return NULL;
+ 
+-	if (!fbc[0].counters)
+-		return;
++	backing = fbc[0].counters;
++	if (!backing)
++		return NULL;
+ 
+ 	for (i = 0; i < nr_counters; i++)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+@@ -245,10 +287,35 @@ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ 	spin_unlock_irqrestore(&percpu_counters_lock, flags);
+ #endif
+ 
+-	free_percpu(fbc[0].counters);
+-
+-	for (i = 0; i < nr_counters; i++)
++	if (clear_backing)
++		percpu_counter_zero_many_backing(backing, nr_counters);
++	for (i = 0; i < nr_counters; i++) {
++		fbc[i].count = 0;
+ 		fbc[i].counters = NULL;
++	}
++
++	return backing;
++}
++
++void __percpu *percpu_counter_detach_many(struct percpu_counter *fbc,
++					 u32 nr_counters)
++{
++	return __percpu_counter_detach_many(fbc, nr_counters, true);
++}
++EXPORT_SYMBOL(percpu_counter_detach_many);
++
++void percpu_counter_free_many_backing(void __percpu *backing)
++{
++	free_percpu(backing);
++}
++EXPORT_SYMBOL(percpu_counter_free_many_backing);
++
++void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
++{
++	void __percpu *backing;
++
++	backing = __percpu_counter_detach_many(fbc, nr_counters, false);
++	percpu_counter_free_many_backing(backing);
+ }
+ EXPORT_SYMBOL(percpu_counter_destroy_many);
+ 
+-- 
+2.43.0
+

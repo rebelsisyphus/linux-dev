@@ -1,0 +1,319 @@
+#!/bin/bash
+# 测试内核 Skill - 修复版 v3
+# 修复: 使用正确的9p配置和mount tag
+
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# 配置
+QEMU_DIR="/home/sisyphus/code/qemu"
+TEST_DIR="/home/sisyphus/code/test"
+SERIAL_LOG="$QEMU_DIR/serial.log"
+QEMU_LOG="$QEMU_DIR/qemu.log"
+TEST_TIMEOUT=300
+SSH_PORT=2222
+
+# 保存原始工作目录
+ORIGINAL_DIR=$(pwd)
+
+# 解析内核路径参数 - 默认使用当前目录的bzImage
+KERNEL_ARG="${1:-./bzImage}"
+
+# 转换内核路径为绝对路径
+if [[ "$KERNEL_ARG" == /* ]]; then
+    KERNEL="$KERNEL_ARG"
+else
+    KERNEL="$ORIGINAL_DIR/$KERNEL_ARG"
+fi
+
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}     内核测试自动化流程${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+
+# 检查内核文件是否存在
+if [ ! -f "$KERNEL" ]; then
+    if [ -f "$ORIGINAL_DIR/arch/x86/boot/bzImage" ]; then
+        KERNEL="$ORIGINAL_DIR/arch/x86/boot/bzImage"
+        echo -e "${YELLOW}!${NC} 使用默认路径: $KERNEL"
+    else
+        echo -e "${RED}错误: 内核镜像不存在: $KERNEL_ARG${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✓${NC} 内核镜像: $KERNEL"
+echo ""
+
+# 清理历史测试记录
+echo -e "${YELLOW}[0/6] 清理历史测试记录...${NC}"
+cd "$QEMU_DIR"
+
+# 清理日志
+for logfile in "$SERIAL_LOG" "$QEMU_LOG" vm_boot.log panic.log; do
+    [ -f "$logfile" ] && rm -f "$logfile"
+done
+
+# 清理测试结果
+[ -f "$TEST_DIR/test_result.txt" ] && > "$TEST_DIR/test_result.txt"
+
+# 清理PID文件
+rm -f /tmp/qemu.pid /tmp/panic_monitor.pid /tmp/panic_detected.flag 2>/dev/null || true
+
+echo -e "${GREEN}✓${NC} 环境已清理"
+echo ""
+
+# Step 1: 检查并停止已运行的QEMU
+echo -e "${YELLOW}[1/6] 检查QEMU状态...${NC}"
+
+QEMU_PIDS=$(pgrep -f "qemu-system-x86_64" 2>/dev/null || true)
+if [ -n "$QEMU_PIDS" ]; then
+    echo -e "${YELLOW}!${NC} 停止运行中的QEMU..."
+    echo "$QEMU_PIDS" | xargs kill -9 2>/dev/null || true
+    sleep 2
+fi
+
+# 确保端口未被占用
+if lsof -Pi :$SSH_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo -e "${YELLOW}!${NC} 释放端口 $SSH_PORT..."
+    lsof -Pi :$SSH_PORT -sTCP:LISTEN -t | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
+
+echo -e "${GREEN}✓${NC} 环境已清理"
+echo ""
+
+# Step 2: 复制内核到QEMU目录
+echo -e "${YELLOW}[2/6] 准备内核镜像...${NC}"
+
+cp -f "$KERNEL" "$QEMU_DIR/bzImage"
+echo -e "${GREEN}✓${NC} 内核已复制到QEMU目录"
+echo ""
+
+# Step 3: 启动QEMU
+echo -e "${YELLOW}[3/6] 启动QEMU...${NC}"
+
+# 使用修复后的参数: 正确的9p配置，mount_tag=shared
+qemu-system-x86_64 \
+    -machine q35 \
+    -kernel "$QEMU_DIR/bzImage" \
+    -object memory-backend-ram,id=mem0,size=1G \
+    -object memory-backend-ram,id=mem1,size=1G \
+    -smp 4,sockets=2,cores=2 \
+    -m 2G \
+    -numa node,memdev=mem0,cpus=0-1 \
+    -numa node,memdev=mem1,cpus=2-3 \
+    -drive file="$QEMU_DIR/rootfs.img",format=raw \
+    -fsdev local,id=fsdev0,path="$TEST_DIR",security_model=none \
+    -device virtio-9p-pci,fsdev=fsdev0,mount_tag=shared \
+    -netdev user,id=net0,hostfwd=tcp::$SSH_PORT-:22 \
+    -device e1000,netdev=net0 \
+    -nographic \
+    -append "console=ttyS0 root=/dev/sda rw" > "$SERIAL_LOG" 2>&1 &
+
+QEMU_PID=$!
+echo $QEMU_PID > /tmp/qemu.pid
+
+sleep 3
+
+# 检查QEMU是否成功启动
+if ! kill -0 $QEMU_PID 2>/dev/null; then
+    echo -e "${RED}✗${NC} QEMU启动失败!"
+    echo "查看日志: tail -20 $SERIAL_LOG"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} QEMU启动成功 (PID: $QEMU_PID)"
+echo ""
+
+# Step 4: 启动panic监控
+echo -e "${YELLOW}[4/6] 启动panic监控...${NC}"
+
+(
+    while kill -0 $QEMU_PID 2>/dev/null; do
+        if grep -q "Kernel panic" "$SERIAL_LOG" 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Kernel panic detected!" > "$QEMU_LOG"
+            echo "" >> "$QEMU_LOG"
+            echo "=== Panic details ===" >> "$QEMU_LOG"
+            grep -A 30 "Kernel panic" "$SERIAL_LOG" >> "$QEMU_LOG"
+            touch /tmp/panic_detected.flag
+            break
+        fi
+        sleep 2
+    done
+) &
+echo $! > /tmp/panic_monitor.pid
+
+echo -e "${GREEN}✓${NC} Panic监控已启动"
+echo ""
+
+# Step 5: 等待SSH就绪
+echo -e "${YELLOW}[5/6] 等待VM启动和SSH就绪...${NC}"
+echo "  (预计需要30-40秒，请稍候...)"
+echo ""
+
+MAX_RETRIES=120
+RETRY_COUNT=0
+SSH_READY=false
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+
+    # 检查QEMU是否还在运行
+    if ! kill -0 $QEMU_PID 2>/dev/null; then
+        echo -e "${RED}✗${NC} QEMU进程异常退出!"
+        echo "查看日志: tail -30 $SERIAL_LOG"
+        exit 1
+    fi
+
+    # 检查panic标志文件
+    if [ -f /tmp/panic_detected.flag ]; then
+        echo -e "${RED}✗${NC} 检测到Panic!"
+        echo "查看详情: cat $QEMU_LOG"
+        exit 1
+    fi
+
+    # 检查串口日志中是否有启动完成的标志，然后尝试SSH连接
+    if grep -q "login:" "$SERIAL_LOG" 2>/dev/null || \
+       grep -q "Welcome to" "$SERIAL_LOG" 2>/dev/null || \
+       grep -q "sshd" "$SERIAL_LOG" 2>/dev/null; then
+        # 先检查端口是否开放
+        if nc -zv localhost $SSH_PORT 2>/dev/null; then
+            # 增加额外等待时间确保SSH服务完全就绪
+            sleep 3
+            # 测试无密码SSH
+            if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes root@localhost -p $SSH_PORT "echo ssh_ready" 2>/dev/null | grep -q "ssh_ready"; then
+                SSH_READY=true
+                break
+            fi
+        fi
+    fi
+
+    # 显示进度
+    if [ $((RETRY_COUNT % 10)) -eq 0 ]; then
+        echo "  等待中... ($RETRY_COUNT/$MAX_RETRIES)"
+    fi
+
+    sleep 2
+done
+
+if [ "$SSH_READY" = false ]; then
+    echo -e "${RED}✗${NC} SSH连接超时!"
+    echo "查看日志: tail -50 $SERIAL_LOG"
+    echo ""
+    echo "排查建议:"
+    echo "  1. 检查内核是否正确编译"
+    echo "  2. 检查rootfs.img是否完整"
+    echo "  3. 查看完整日志: cat $SERIAL_LOG"
+    kill $QEMU_PID 2>/dev/null || true
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} SSH连接就绪 (尝试 $RETRY_COUNT 次)"
+echo ""
+
+# Step 6: 执行测试
+echo -e "${YELLOW}[6/6] 执行测试脚本...${NC}"
+echo ""
+
+# 检查测试脚本是否存在
+TEST_SCRIPT="/mnt/shared/test.sh"
+if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p $SSH_PORT "test -f $TEST_SCRIPT" 2>/dev/null; then
+    echo -e "${YELLOW}!${NC} 未找到测试脚本，创建默认测试..."
+    
+    # 创建默认测试脚本
+    cat > "$TEST_DIR/test.sh" << 'TESTEOF'
+#!/bin/bash
+# 默认内核测试脚本
+
+echo "========================================"
+echo "       内核启动测试"
+echo "========================================"
+echo ""
+echo "测试时间: $(date)"
+echo "主机名: $(hostname)"
+echo "内核版本: $(uname -r)"
+echo "内核命令行: $(cat /proc/cmdline)"
+echo ""
+echo "系统信息:"
+echo "  - 内存: $(free -h | grep Mem | awk '{print $2}')"
+echo "  - 磁盘: $(df -h / | tail -1 | awk '{print $2}')"
+echo "  - 运行时间: $(uptime -p 2>/dev/null || uptime)"
+echo ""
+echo "========================================"
+echo "       测试结果: PASSED ✓"
+echo "========================================"
+TESTEOF
+    chmod +x "$TEST_DIR/test.sh"
+fi
+
+# 执行测试
+echo "开始执行测试..."
+echo "----------------------------------------"
+if ! TEST_OUTPUT=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p $SSH_PORT "cd /mnt/shared && ./test.sh" 2>&1); then
+    TEST_EXIT_CODE=$?
+    echo "$TEST_OUTPUT"
+    echo "----------------------------------------"
+    echo ""
+    echo -e "${RED}测试脚本执行失败 (exit code: $TEST_EXIT_CODE)${NC}"
+else
+    TEST_EXIT_CODE=0
+    echo "$TEST_OUTPUT"
+    echo "----------------------------------------"
+fi
+echo ""
+
+# 保存测试结果
+echo "$TEST_OUTPUT" > "$TEST_DIR/test_result.txt"
+echo -e "${GREEN}✓${NC} 测试结果已保存到: $TEST_DIR/test_result.txt"
+echo ""
+
+# 最终检查
+echo -e "${BLUE}========================================${NC}"
+if [ $TEST_EXIT_CODE -eq 0 ] && [ ! -f /tmp/panic_detected.flag ]; then
+    echo -e "${GREEN}         内核测试通过 ✓${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    echo "测试概要:"
+    echo "  ✓ 内核启动正常"
+    echo "  ✓ SSH连接正常 (端口: $SSH_PORT)"
+    echo "  ✓ 共享目录工作正常"
+    echo "  ✓ 测试脚本执行成功"
+    echo ""
+    echo "系统信息:"
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost -p $SSH_PORT "uname -r && uptime" 2>/dev/null || true
+    echo ""
+    echo "QEMU PID: $QEMU_PID"
+    echo "日志文件: $SERIAL_LOG"
+    echo ""
+    echo "常用命令:"
+    echo "  查看日志: tail -f $SERIAL_LOG"
+    echo "  连接SSH:  ssh root@localhost -p $SSH_PORT"
+    echo "  停止QEMU: kill $QEMU_PID"
+    exit 0
+else
+    echo -e "${RED}         内核测试失败 ✗${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo ""
+    
+    if [ -f /tmp/panic_detected.flag ]; then
+        echo -e "${RED}检测到Panic!${NC}"
+        echo "查看: cat $QEMU_LOG"
+    fi
+    
+    if [ $TEST_EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}测试脚本执行失败${NC}"
+    fi
+    
+    echo ""
+    echo "排查命令:"
+    echo "  查看日志: tail -100 $SERIAL_LOG"
+    echo "  停止QEMU: kill $QEMU_PID"
+    exit 1
+fi

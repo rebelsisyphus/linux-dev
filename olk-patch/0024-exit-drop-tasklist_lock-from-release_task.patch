@@ -1,0 +1,129 @@
+From 052c87f61fe784b45353e19f37a0d8c07ae266af Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:42:54 +0800
+Subject: [PATCH 24/30] exit: drop tasklist_lock from release_task
+
+release_task() still held tasklist_lock around several teardown steps.
+
+Those updates now have narrower serialization.
+
+Use task_lock(real_parent) with retry for sibling unlink.
+
+Use rcu_dereference_protected() for the released task sighand.
+
+Use cmpxchg() to arbitrate leader autoreap against wait reaping.
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ kernel/exit.c | 55 +++++++++++++++++++++++++++++++++------------------
+ 1 file changed, 36 insertions(+), 19 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index c75cc9bfd33f..a98e75785664 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -125,6 +125,8 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
+ 	atomic_long_dec(&nr_threads);
+ 	detach_pid(p, PIDTYPE_PID);
+ 	if (group_dead) {
++		struct task_struct *parent;
++
+ 		detach_pid(p, PIDTYPE_TGID);
+ 		detach_pid(p, PIDTYPE_PGID);
+ 		detach_pid(p, PIDTYPE_SID);
+@@ -133,13 +135,21 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
+ 		task_domains[p->task_domain_nid]->nr_tasks--;
+ 		/*
+ 		 * task_lock(real_parent) pairs with copy_process() and
+-		 * serializes concurrent writers of real_parent->children
+-		 * independently of tasklist_lock.  Layered under the
+-		 * tasklist_lock write-side for now.
++		 * forget_original_parent() as the writer mutex over the
++		 * children list.  Because tasklist_lock no longer serialises
++		 * us against concurrent reparents, snapshot ->real_parent and
++		 * re-check after the lock: if it moved, the new parent's
++		 * task_lock is the right one to retry.
+ 		 */
+-		task_lock(p->real_parent);
++retry:
++		parent = READ_ONCE(p->real_parent);
++		task_lock(parent);
++		if (unlikely(READ_ONCE(p->real_parent) != parent)) {
++			task_unlock(parent);
++			goto retry;
++		}
+ 		list_del_rcu(&p->sibling);
+-		task_unlock(p->real_parent);
++		task_unlock(parent);
+ 		__this_cpu_dec(process_counts);
+ 	}
+ 	list_del_rcu(&p->thread_group);
+@@ -157,8 +167,13 @@ static void __exit_signal(struct task_struct *tsk)
+ 	struct tty_struct *tty;
+ 	u64 utime, stime;
+ 
+-	sighand = rcu_dereference_check(tsk->sighand,
+-					lockdep_tasklist_lock_is_held());
++	/*
++	 * tsk is the task being released; nothing else writes tsk->sighand
++	 * now.  Plain dereference is safe (this used to assert
++	 * lockdep_tasklist_lock_is_held(), but release_task() no longer
++	 * takes tasklist_lock).
++	 */
++	sighand = rcu_dereference_protected(tsk->sighand, 1);
+ 	spin_lock(&sighand->siglock);
+ 
+ #ifdef CONFIG_POSIX_TIMERS
+@@ -262,15 +277,15 @@ void release_task(struct task_struct *p)
+ 
+ 	/*
+ 	 * The home shard was decided at copy_process() time and never
+-	 * changes; take its write lock as the OUTER lock so the per-shard
+-	 * task list mutation in __unhash_process() is serialised against
+-	 * concurrent fork()s on the same node.  Inner tasklist_lock still
+-	 * protects ptrace_release_task() and the cross-process notify
+-	 * paths.  See the lock-order note above shard locks.
++	 * changes; take its write lock so the per-shard task list mutation
++	 * in __unhash_process() is serialised against concurrent fork()s
++	 * on the same node.  tasklist_lock is no longer held here: ptrace
++	 * unlink uses task_lock(tracer), sibling unlink uses
++	 * task_lock(real_parent) (with retry), and do_notify_parent() pins
++	 * the parent via rcu_dereference + get_task_struct.
+ 	 */
+ 	nid = p->task_domain_nid;
+ 	write_lock_irq_task_domain(nid);
+-	write_lock(&tasklist_lock);
+ 	ptrace_release_task(p);
+ 	thread_pid = get_pid(p->thread_pid);
+ 	__exit_signal(p);
+@@ -282,19 +297,21 @@ void release_task(struct task_struct *p)
+ 	 */
+ 	zap_leader = 0;
+ 	leader = p->group_leader;
+-	if (leader != p && thread_group_empty(leader)
+-			&& leader->exit_state == EXIT_ZOMBIE) {
++	if (leader != p && thread_group_empty(leader) &&
++	    READ_ONCE(leader->exit_state) == EXIT_ZOMBIE) {
+ 		/*
+ 		 * If we were the last child thread and the leader has
+ 		 * exited already, and the leader's parent ignores SIGCHLD,
+ 		 * then we are the one who should release the leader.
++		 * cmpxchg arbitrates against a concurrent wait_task_zombie()
++		 * reaper so exactly one caller drops the leader's refcount.
+ 		 */
+-		zap_leader = do_notify_parent(leader, leader->exit_signal);
+-		if (zap_leader)
+-			leader->exit_state = EXIT_DEAD;
++		if (do_notify_parent(leader, leader->exit_signal) &&
++		    cmpxchg(&leader->exit_state, EXIT_ZOMBIE, EXIT_DEAD) ==
++			    EXIT_ZOMBIE)
++			zap_leader = 1;
+ 	}
+ 
+-	write_unlock(&tasklist_lock);
+ 	write_unlock_irq_task_domain(nid);
+ 	seccomp_filter_release(p);
+ 	proc_flush_pid(thread_pid);
+-- 
+2.43.0
+

@@ -1,0 +1,121 @@
+From 60c62342bba0647c75f7044c41fa60f75353de1e Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:39:24 +0800
+Subject: [PATCH 20/30] fork: drop tasklist_lock from copy_process()
+ [milestone]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+copy_process() no longer takes write_lock(&tasklist_lock).  Every
+piece of cross-process state that used to be protected by the
+inner tasklist_lock write-side now has its own fine-grained
+writer mutex, each of which is acquired inside the fork critical
+section by earlier commits in this series:
+
+  data                              protected by
+  --------------------------------  ---------------------------
+  per-NUMA tasks list + nr_tasks    shard write_lock (outer)
+  real_parent->children list        task_lock(real_parent)
+  pid->tasks[] hash (attach_pid ×4) pid->lock
+  tracer->ptraced list              task_lock(tracer)
+  pid_ns->child_reaper publish      cmpxchg (release store)
+  signal->thread_head               current->sighand->siglock
+  nr_threads / total_forks          atomic_long_t
+  process_counts                    per-cpu
+  has_child_subreaper inherit       benign bit-field semantics
+
+Lock order on the fork hot path is now:
+
+  per-NUMA shard_lock (IRQs off)
+    -> task_lock(real_parent | tracer)
+        -> pid->lock
+            -> current->sighand->siglock
+
+This is linear and acyclic, and does not overlap with any path
+that still takes tasklist_lock (which are now only cross-process
+iterators like oom_kill, /proc walkers, and release_task(), to be
+converted in follow-up commits).
+
+release_task() still holds tasklist_lock write-side until a
+separate commit converts it; the two writer sides do not need
+mutual exclusion because every individual data structure is now
+serialized by its own fine-grained lock.  RCU readers of children
+/ ptraced / tasks / thread_head / pid hash see each list in a
+consistent RCU-safe state, even though publication across lists
+is no longer atomic under a single writer lock -- no in-tree
+reader requires atomic cross-list publication.
+
+This is the primary goal of the per-NUMA tasklist sharding
+series: the fork hot path no longer touches the global
+tasklist_lock rwlock at all.
+
+Signed-off-by: NUMA tasklist sharding <dev@localhost>
+Signed-off-by: lurea-git <robin800601@gmail.com>
+---
+ kernel/fork.c | 28 +++++++++++++++++-----------
+ 1 file changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index f0d6b8833c83..3de2928ddc4e 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2924,22 +2924,30 @@ __latent_entropy struct task_struct *copy_process(
+ 
+ 	/*
+ 	 * Make it visible to the rest of the system, but dont wake it up yet.
+-	 * Need tasklist lock for parent etc handling!
+ 	 *
+-	 * Decide the home NUMA-domain shard for this process and take its
+-	 * write lock as the OUTER lock; the inner tasklist_lock still
+-	 * protects the cross-process relationship-graph mutations
+-	 * (parent->children, attach_pid hlists, ptrace links, ...).
+-	 * Lock order: shard -> tasklist_lock -> sighand->siglock.  IRQs
+-	 * are disabled by the shard lock; the inner tasklist_lock uses
+-	 * the plain write_lock variant.
++	 * copy_process() no longer takes tasklist_lock.  Each piece of
++	 * cross-process state that used to be protected by the inner
++	 * tasklist_lock write-side now has its own fine-grained writer
++	 * mutex, all of which are taken inside this section:
++	 *
++	 *   - per-NUMA tasks list + nr_tasks    : shard write_lock (outer)
++	 *   - real_parent->children list        : task_lock(real_parent)
++	 *   - pid->tasks[] hash (attach_pid ×4) : pid->lock
++	 *   - tracer->ptraced list              : task_lock(tracer)
++	 *   - child_reaper publish              : cmpxchg
++	 *   - signal->thread_head               : current->sighand->siglock
++	 *   - nr_threads / total_forks          : atomic_long_t
++	 *   - process_counts                    : per-cpu
++	 *   - has_child_subreaper inherit       : benign bit-field races
++	 *
++	 * Lock order: shard -> {pid->lock, task_lock(parent/tracer)}
++	 * -> sighand->siglock.  IRQs are disabled by the shard lock.
+ 	 */
+ 	nid = cpu_to_node(task_cpu(p));
+ 	if (unlikely(nid == NUMA_NO_NODE || nid >= nr_node_ids))
+ 		nid = 0;
+ 	p->task_domain_nid = nid;
+ 	write_lock_irq_task_domain(nid);
+-	write_lock(&tasklist_lock);
+ 
+ 	/* CLONE_PARENT re-uses the old parent */
+ 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {
+@@ -3060,7 +3068,6 @@ __latent_entropy struct task_struct *copy_process(
+ 	hlist_del_init(&delayed.node);
+ 	spin_unlock(&current->sighand->siglock);
+ 	syscall_tracepoint_update(p);
+-	write_unlock(&tasklist_lock);
+ 	write_unlock_irq_task_domain(nid);
+ 
+ 	if (pidfile)
+@@ -3082,7 +3089,6 @@ __latent_entropy struct task_struct *copy_process(
+ bad_fork_cancel_cgroup:
+ 	sched_core_free(p);
+ 	spin_unlock(&current->sighand->siglock);
+-	write_unlock(&tasklist_lock);
+ 	write_unlock_irq_task_domain(nid);
+ 	cgroup_cancel_fork(p, args);
+ bad_fork_put_pidfd:
+-- 
+2.43.0
+

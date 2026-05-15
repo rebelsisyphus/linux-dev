@@ -1,0 +1,108 @@
+From f296641c9e58c5815a182b58849311c2fa4b2cdb Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:41:20 +0800
+Subject: [PATCH 23/30] signal: pin do_notify_parent parent with a task
+ reference
+
+do_notify_parent() used to rely on tasklist_lock.
+
+That kept tsk->parent stable while SIGCHLD was prepared.
+
+Snapshot the parent under RCU.
+
+Hold a task reference across the notify path.
+
+Later exit paths can call do_notify_parent() without that lifetime pin.
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ kernel/signal.c | 36 +++++++++++++++++++-----------------
+ 1 file changed, 19 insertions(+), 17 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 50aa72d6ff4e..e2804583a46b 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -2060,6 +2060,7 @@ static void do_notify_pidfd(struct task_struct *task)
+  */
+ bool do_notify_parent(struct task_struct *tsk, int sig)
+ {
++	struct task_struct *parent;
+ 	struct kernel_siginfo info;
+ 	unsigned long flags;
+ 	struct sighand_struct *psig;
+@@ -2074,6 +2075,17 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 	WARN_ON_ONCE(!tsk->ptrace &&
+ 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
+ 
++	/*
++	 * Snapshot and pin tsk->parent under RCU.  Since the fork/exit hot
++	 * paths no longer hold tasklist_lock exclusively, the parent can be
++	 * reparented concurrently by forget_original_parent(); rcu_dereference
++	 * + get_task_struct() keeps the snapshot alive across siglock.
++	 */
++	rcu_read_lock();
++	parent = rcu_dereference(tsk->parent);
++	get_task_struct(parent);
++	rcu_read_unlock();
++
+ 	/* Wake up all pidfd waiters */
+ 	do_notify_pidfd(tsk);
+ 
+@@ -2082,27 +2094,16 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 		 * This is only possible if parent == real_parent.
+ 		 * Check if it has changed security domain.
+ 		 */
+-		if (tsk->parent_exec_id != READ_ONCE(tsk->parent->self_exec_id))
++		if (tsk->parent_exec_id != READ_ONCE(parent->self_exec_id))
+ 			sig = SIGCHLD;
+ 	}
+ 
+ 	clear_siginfo(&info);
+ 	info.si_signo = sig;
+ 	info.si_errno = 0;
+-	/*
+-	 * We are under tasklist_lock here so our parent is tied to
+-	 * us and cannot change.
+-	 *
+-	 * task_active_pid_ns will always return the same pid namespace
+-	 * until a task passes through release_task.
+-	 *
+-	 * write_lock() currently calls preempt_disable() which is the
+-	 * same as rcu_read_lock(), but according to Oleg, this is not
+-	 * correct to rely on this
+-	 */
+ 	rcu_read_lock();
+-	info.si_pid = task_pid_nr_ns(tsk, task_active_pid_ns(tsk->parent));
+-	info.si_uid = from_kuid_munged(task_cred_xxx(tsk->parent, user_ns),
++	info.si_pid = task_pid_nr_ns(tsk, task_active_pid_ns(parent));
++	info.si_uid = from_kuid_munged(task_cred_xxx(parent, user_ns),
+ 				       task_uid(tsk));
+ 	rcu_read_unlock();
+ 
+@@ -2120,7 +2121,7 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 		info.si_status = tsk->exit_code >> 8;
+ 	}
+ 
+-	psig = tsk->parent->sighand;
++	psig = parent->sighand;
+ 	spin_lock_irqsave(&psig->siglock, flags);
+ 	if (!tsk->ptrace && sig == SIGCHLD &&
+ 	    (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN ||
+@@ -2149,10 +2150,11 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 	 * parent's namespaces.
+ 	 */
+ 	if (valid_signal(sig) && sig)
+-		__send_signal_locked(sig, &info, tsk->parent, PIDTYPE_TGID, false);
+-	__wake_up_parent(tsk, tsk->parent);
++		__send_signal_locked(sig, &info, parent, PIDTYPE_TGID, false);
++	__wake_up_parent(tsk, parent);
+ 	spin_unlock_irqrestore(&psig->siglock, flags);
+ 
++	put_task_struct(parent);
+ 	return autoreap;
+ }
+ 
+-- 
+2.43.0
+

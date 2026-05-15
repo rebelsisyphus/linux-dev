@@ -1,0 +1,499 @@
+From befd96d86b5501fc81490d279213e206ad116b20 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 20:47:56 +0800
+Subject: [PATCH 27/30] fork: cache mm rss_stat percpu backing
+
+Adapted from linux 7.0-rc1 patch to OLK-6.6.
+- Added percpu_counter_alloc_many_backing, percpu_counter_init_many_from_backing,
+  percpu_counter_detach_many, percpu_counter_free_many_backing APIs
+- Added NUMA-local mm_rss_stat backing cache to avoid percpu allocation on fork
+- Wired mm_rss_stat_init/mm_rss_stat_destroy into mm_init/__mmdrop paths
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+---
+ AGENTS.md                      |  33 ++++++++
+ CLAUDE.md                      |  55 ++++++++++++++
+ include/linux/percpu_counter.h |  17 +++++
+ kernel/fork.c                  | 135 ++++++++++++++++++++++++++++++++-
+ lib/percpu_counter.c           | 102 ++++++++++++++++++++-----
+ opt-patches/adapt.md           |   6 ++
+ 6 files changed, 328 insertions(+), 20 deletions(-)
+ create mode 100644 AGENTS.md
+ create mode 100644 CLAUDE.md
+ create mode 100644 opt-patches/adapt.md
+
+diff --git a/AGENTS.md b/AGENTS.md
+new file mode 100644
+index 000000000000..d72587b9d8d0
+--- /dev/null
++++ b/AGENTS.md
+@@ -0,0 +1,33 @@
++# Repository Guidelines
++
++## Project Structure & Module Organization
++
++This is a Linux kernel source tree. Core code lives in `kernel/`, memory management in `mm/`, filesystems in `fs/`, networking in `net/`, architecture code in `arch/`, and drivers in `drivers/`. Public headers are under `include/`. Build and maintenance helpers live in `scripts/` and `tools/`; examples are in `samples/`. Tests are mainly in `tools/testing/selftests/` and KUnit code under `lib/kunit/`. Read `Documentation/` for subsystem guidance and `MAINTAINERS` for review ownership.
++
++## Build, Test, and Development Commands
++
++- `make defconfig`: create a baseline `.config` for the current architecture.
++- `make menuconfig`: interactively adjust kernel configuration.
++- `make -j$(nproc)`: build the configured kernel and modules.
++- `make -j$(nproc) M=drivers/foo`: build one external-style subtree or driver directory.
++- `make W=1 path/to/file.o`: compile a focused object with extra warnings.
++- `make headers_check`: validate exported UAPI headers.
++- `make kselftest`: run configured kernel selftests.
++- `./tools/testing/kunit/kunit.py run`: run KUnit tests when Python dependencies are available.
++- `scripts/checkpatch.pl --strict <patch>`: check patch style before submission.
++
++## Coding Style & Naming Conventions
++
++Follow `Documentation/process/coding-style.rst`: tabs for indentation, 8-column tab stops, braces and spacing in kernel style, and short helper functions where practical. Prefer existing subsystem helpers and locking patterns over new abstractions. C identifiers use lowercase with underscores; macros and Kconfig symbols use uppercase names. Keep user-visible ABI changes in `include/uapi/` stable and documented. Run `.clang-format` only on deliberately scoped code, not whole legacy files.
++
++## Testing Guidelines
++
++Build-test the smallest relevant target first, then the touched subsystem or full kernel if interfaces changed. Add selftests in `tools/testing/selftests/<subsystem>/` for user-visible behavior and KUnit tests for isolated kernel logic. Name tests after the behavior they validate, and keep them runnable locally and through `make kselftest`.
++
++## Commit & Pull Request Guidelines
++
++Recent history uses subsystem-prefixed subjects such as `iommu/ummu-core: support TID sharing within same mm` and downstream tags like `[OLK-6.6]` where applicable. Use imperative, concise subjects, include the affected subsystem prefix, and explain the problem, fix, and validation in the body. Sign off commits with `Signed-off-by` when submitting patches. Pull requests should identify the target subsystem, link issues or bug reports, list test commands and results, and note config or platform dependencies.
++
++## Agent-Specific Instructions
++
++Do not overwrite local user changes. Keep edits scoped to the requested subsystem, preserve generated files unless explicitly asked, and prefer `rg`, `git grep`, and targeted builds for investigation.
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 100644
+index 000000000000..f230458c70b0
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1,55 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Project Context
++
++This is the **openEuler Linux kernel** source tree, branch `OLK-6.6` (based on upstream Linux 6.6). Origin: `https://atomgit.com/openeuler/kernel.git`.
++
++It follows the standard Linux kernel layout: core code in `kernel/`, MM in `mm/`, filesystems in `fs/`, networking in `net/`, drivers in `drivers/`, architecture code in `arch/`, public headers in `include/` and `include/uapi/`, build helpers in `scripts/` and `tools/`, and tests in `tools/testing/selftests/` and `lib/kunit/`.
++
++Downstream openEuler patches often carry an `[OLK-6.6]` tag in the subject and an internal reference like `!22417`.
++
++## Build Commands
++
++- `make openeuler_defconfig` — baseline config for openEuler (x86_64)
++- `make x86_64_defconfig` / `make i386_defconfig` — upstream baseline configs
++- `make menuconfig` — interactive configuration
++- `make -j$(nproc)` — build kernel and modules
++- `make -j$(nproc) M=drivers/foo` — build a single driver subtree
++- `make W=1 path/to/file.o` — compile one object with extra warnings
++- `make modules` — build modules only
++- `make modules_install INSTALL_MOD_PATH=/path` — install modules
++- `make clean` / `make mrproper` — clean generated files (`mrproper` also removes `.config`)
++- `make headers_check` — validate exported UAPI headers
++
++Kbuild supports out-of-tree builds via `make O=/build/dir`. If you use `O=`, it must be passed to every `make` invocation.
++
++## Testing Commands
++
++- `./tools/testing/kunit/kunit.py run` — run KUnit tests (requires Python, uses UML by default)
++- `./tools/testing/kunit/kunit.py run --kunitconfig=.kunit/.kunitconfig` — run KUnit with custom config
++- `make kselftest` — run kernel selftests
++- `make -C tools/testing/selftests TARGETS=foo` — run one selftest suite
++
++KUnit tests live in `lib/kunit/`. Selftests live in `tools/testing/selftests/<subsystem>/`.
++
++## Style & Patch Checks
++
++- `scripts/checkpatch.pl --strict <patch>` — check patch style before submission
++- `scripts/checkpatch.pl -f path/to/file.c` — check a source file directly
++- Follow `Documentation/process/coding-style.rst`: tabs, 8-column tab stops, kernel brace style, 80-column soft limit.
++- `.clang-format` exists but should only be used on deliberately scoped code, not whole legacy files.
++
++## Commit Conventions
++
++- Use subsystem-prefixed subjects: `iommu/ummu-core: support TID sharing within same mm`
++- Downstream openEuler patches often include `[OLK-6.6]` in the subject
++- Include `Signed-off-by:` when submitting patches
++- Keep the body focused: problem, fix, and validation
++
++## Useful Investigation Commands
++
++- `scripts/get_maintainer.pl -f path/to/file` — find maintainers and mailing lists for a file
++- `git grep -n "symbol_name" -- include/ drivers/` — search headers and drivers
++- `make cscope` / `make tags` — generate indexer files
+diff --git a/include/linux/percpu_counter.h b/include/linux/percpu_counter.h
+index c50716df9fa3..3caad027830e 100644
+--- a/include/linux/percpu_counter.h
++++ b/include/linux/percpu_counter.h
+@@ -44,6 +44,15 @@ extern int percpu_counter_batch;
+ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 			       gfp_t gfp, u32 nr_counters,
+ 			       struct lock_class_key *key, bool switch_mode);
++void __percpu *percpu_counter_alloc_many_backing(u32 nr_counters, gfp_t gfp);
++int __percpu_counter_init_many_from_backing(struct percpu_counter *fbc,
++					    s64 amount, void __percpu *backing,
++					    u32 nr_counters,
++					    struct lock_class_key *key);
++void __percpu *percpu_counter_detach_many(struct percpu_counter *fbc,
++					  u32 nr_counters);
++void percpu_counter_free_many_backing(void __percpu *backing);
++
+ 
+ #define percpu_counter_init_many(fbc, value, gfp, nr_counters)		\
+ 	({								\
+@@ -53,6 +62,14 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ 					   &__key, false);		\
+ 	})
+ 
++#define percpu_counter_init_many_from_backing(fbc, value, backing, nr_counters) \
++	({												\
++		static struct lock_class_key __key;						\
++													\
++		__percpu_counter_init_many_from_backing(fbc, value, backing,	\
++						    nr_counters, &__key);	\
++	})
++
+ 
+ #define percpu_counter_init(fbc, value, gfp)				\
+ 	percpu_counter_init_many(fbc, value, gfp, 1)
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 70e33baa9b40..335e159dbd28 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -33,6 +33,7 @@
+ #include <linux/completion.h>
+ #include <linux/personality.h>
+ #include <linux/mempolicy.h>
++#include <linux/topology.h>
+ #include <linux/sem.h>
+ #include <linux/file.h>
+ #include <linux/fdtable.h>
+@@ -175,6 +176,135 @@ __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+ struct task_domain **task_domains __read_mostly;
+ EXPORT_SYMBOL_GPL(task_domains);
+ 
++#ifdef CONFIG_SMP
++#define MM_RSS_STAT_BACKING_CACHE_DEPTH 64
++
++struct mm_rss_stat_backing_cache {
++	spinlock_t lock;
++	unsigned int nr;
++	void __percpu *entries[MM_RSS_STAT_BACKING_CACHE_DEPTH];
++};
++
++static struct mm_rss_stat_backing_cache *mm_rss_stat_backing_caches __read_mostly;
++
++static int mm_rss_stat_backing_cache_nid(void)
++{
++	int nid = numa_mem_id();
++
++	if (!mm_rss_stat_backing_caches || nid < 0 || nid >= nr_node_ids)
++		return NUMA_NO_NODE;
++	return nid;
++}
++
++static void __init init_mm_rss_stat_backing_cache(void)
++{
++	int nid;
++
++	mm_rss_stat_backing_caches = kcalloc(nr_node_ids,
++						 sizeof(*mm_rss_stat_backing_caches),
++						 GFP_KERNEL);
++	if (!mm_rss_stat_backing_caches) {
++		pr_warn("fork: mm rss_stat backing cache disabled\n");
++		return;
++	}
++
++	for (nid = 0; nid < nr_node_ids; nid++)
++		spin_lock_init(&mm_rss_stat_backing_caches[nid].lock);
++}
++
++static void __percpu *mm_rss_stat_backing_cache_pop(void)
++{
++	struct mm_rss_stat_backing_cache *cache;
++	void __percpu *backing = NULL;
++	unsigned long flags;
++	int nid;
++
++	nid = mm_rss_stat_backing_cache_nid();
++	if (nid == NUMA_NO_NODE)
++		return NULL;
++
++	cache = &mm_rss_stat_backing_caches[nid];
++	spin_lock_irqsave(&cache->lock, flags);
++	if (cache->nr) {
++		backing = cache->entries[--cache->nr];
++		cache->entries[cache->nr] = NULL;
++	}
++	spin_unlock_irqrestore(&cache->lock, flags);
++
++	return backing;
++}
++
++static void mm_rss_stat_backing_cache_push(void __percpu *backing)
++{
++	struct mm_rss_stat_backing_cache *cache;
++	unsigned long flags;
++	int nid;
++
++	if (!backing)
++		return;
++
++	nid = mm_rss_stat_backing_cache_nid();
++	if (nid == NUMA_NO_NODE) {
++		percpu_counter_free_many_backing(backing);
++		return;
++	}
++
++	cache = &mm_rss_stat_backing_caches[nid];
++	spin_lock_irqsave(&cache->lock, flags);
++	if (cache->nr < MM_RSS_STAT_BACKING_CACHE_DEPTH) {
++		cache->entries[cache->nr++] = backing;
++		backing = NULL;
++	}
++	spin_unlock_irqrestore(&cache->lock, flags);
++
++	percpu_counter_free_many_backing(backing);
++}
++
++static int mm_rss_stat_init(struct mm_struct *mm)
++{
++	void __percpu *backing;
++	int ret;
++
++	backing = mm_rss_stat_backing_cache_pop();
++	if (!backing) {
++		backing = percpu_counter_alloc_many_backing(NR_MM_COUNTERS,
++							    GFP_KERNEL_ACCOUNT);
++		if (!backing)
++			return -ENOMEM;
++	}
++
++	ret = percpu_counter_init_many_from_backing(mm->rss_stat, 0, backing,
++						     NR_MM_COUNTERS);
++	if (ret) {
++		percpu_counter_free_many_backing(backing);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void mm_rss_stat_destroy(struct mm_struct *mm)
++{
++	void __percpu *backing;
++
++	backing = percpu_counter_detach_many(mm->rss_stat, NR_MM_COUNTERS);
++	mm_rss_stat_backing_cache_push(backing);
++}
++#else
++static void __init init_mm_rss_stat_backing_cache(void) { }
++
++static int mm_rss_stat_init(struct mm_struct *mm)
++{
++	return percpu_counter_init_many(mm->rss_stat, 0, GFP_KERNEL_ACCOUNT,
++					 NR_MM_COUNTERS);
++}
++
++static void mm_rss_stat_destroy(struct mm_struct *mm)
++{
++	percpu_counter_destroy_many(mm->rss_stat, NR_MM_COUNTERS);
++}
++#endif
++
+ /*
+  * Iteration helper.  See the declaration in <linux/sched/signal.h>
+  * for the contract: pass &init_task to start, &init_task is returned
+@@ -1188,7 +1318,7 @@ void __mmdrop(struct mm_struct *mm)
+ 	put_user_ns(mm->user_ns);
+ 	mm_pasid_drop(mm);
+ 	mm_destroy_cid(mm);
+-	mm_counter_destroy(mm);
++	mm_rss_stat_destroy(mm);
+ 
+ 	free_mm(mm);
+ }
+@@ -1350,6 +1480,7 @@ void __init fork_init(void)
+ 	uprobes_init();
+ 
+ 	init_task_domains();
++	init_mm_rss_stat_backing_cache();
+ }
+ 
+ int __weak arch_dup_task_struct(struct task_struct *dst,
+@@ -1621,7 +1752,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	if (mm_alloc_cid(mm))
+ 		goto fail_cid;
+ 
+-	if (mm_counter_init(mm))
++	if (mm_rss_stat_init(mm))
+ 		goto fail_pcpu;
+ 
+ 	sp_init_mm(mm);
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index fb30d739f4b5..aaaaf71329ba 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -151,32 +151,54 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
+ }
+ EXPORT_SYMBOL(__percpu_counter_sum);
+ 
+-int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+-			       gfp_t gfp, u32 nr_counters,
+-			       struct lock_class_key *key, bool switch_mode)
++static size_t percpu_counter_many_size(u32 nr_counters)
++{
++	size_t counter_size;
++
++	counter_size = ALIGN(sizeof(s32), __alignof__(s32));
++	return nr_counters * counter_size;
++}
++
++void __percpu *percpu_counter_alloc_many_backing(u32 nr_counters, gfp_t gfp)
++{
++	return __alloc_percpu_gfp(percpu_counter_many_size(nr_counters),
++				     __alignof__(s32), gfp);
++}
++EXPORT_SYMBOL(percpu_counter_alloc_many_backing);
++
++static void percpu_counter_zero_many_backing(void __percpu *backing,
++						    u32 nr_counters)
++{
++	size_t size = percpu_counter_many_size(nr_counters);
++	int cpu;
++
++	for_each_possible_cpu(cpu)
++		memset(per_cpu_ptr(backing, cpu), 0, size);
++}
++
++int __percpu_counter_init_many_from_backing(struct percpu_counter *fbc,
++					   s64 amount, void __percpu *backing,
++					   u32 nr_counters,
++					   struct lock_class_key *key)
+ {
+ 	unsigned long flags __maybe_unused;
+ 	size_t counter_size;
+-	s32 __percpu *counters;
+ 	u32 i;
+ 
+-	counter_size = ALIGN(sizeof(*counters), __alignof__(*counters));
+-	counters = __alloc_percpu_gfp(nr_counters * counter_size,
+-				      __alignof__(*counters), gfp);
+-	if (!counters) {
++	if (!backing) {
+ 		fbc[0].counters = NULL;
+ 		return -ENOMEM;
+ 	}
+ 
++	counter_size = ALIGN(sizeof(s32), __alignof__(s32));
+ 	for (i = 0; i < nr_counters; i++) {
+ 		raw_spin_lock_init(&fbc[i].lock);
+ 		lockdep_set_class(&fbc[i].lock, key);
+ #ifdef CONFIG_HOTPLUG_CPU
+ 		INIT_LIST_HEAD(&fbc[i].list);
+ #endif
+-		if (likely(!switch_mode))
+-			fbc[i].count = amount;
+-		fbc[i].counters = (void *)counters + (i * counter_size);
++		fbc[i].count = amount;
++		fbc[i].counters = backing + i * counter_size;
+ 
+ 		debug_percpu_counter_activate(&fbc[i]);
+ 	}
+@@ -189,18 +211,37 @@ int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
+ #endif
+ 	return 0;
+ }
++EXPORT_SYMBOL(__percpu_counter_init_many_from_backing);
++
++int __percpu_counter_init_many(struct percpu_counter *fbc, s64 amount,
++			       gfp_t gfp, u32 nr_counters,
++			       struct lock_class_key *key, bool switch_mode)
++{
++	void __percpu *backing;
++	int ret;
++
++	backing = percpu_counter_alloc_many_backing(nr_counters, gfp);
++	ret = __percpu_counter_init_many_from_backing(fbc, amount, backing,
++						       nr_counters, key);
++	if (ret)
++		percpu_counter_free_many_backing(backing);
++	return ret;
++}
+ EXPORT_SYMBOL(__percpu_counter_init_many);
+ 
+-void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
++static void __percpu *__percpu_counter_detach_many(struct percpu_counter *fbc,
++		u32 nr_counters, bool clear_backing)
+ {
+ 	unsigned long flags __maybe_unused;
++	void __percpu *backing;
+ 	u32 i;
+ 
+ 	if (WARN_ON_ONCE(!fbc))
+-		return;
++		return NULL;
+ 
+-	if (!fbc[0].counters)
+-		return;
++	backing = fbc[0].counters;
++	if (!backing)
++		return NULL;
+ 
+ 	for (i = 0; i < nr_counters; i++)
+ 		debug_percpu_counter_deactivate(&fbc[i]);
+@@ -212,10 +253,35 @@ void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
+ 	spin_unlock_irqrestore(&percpu_counters_lock, flags);
+ #endif
+ 
+-	free_percpu(fbc[0].counters);
+-
+-	for (i = 0; i < nr_counters; i++)
++	if (clear_backing)
++		percpu_counter_zero_many_backing(backing, nr_counters);
++	for (i = 0; i < nr_counters; i++) {
++		fbc[i].count = 0;
+ 		fbc[i].counters = NULL;
++	}
++
++	return backing;
++}
++
++void __percpu *percpu_counter_detach_many(struct percpu_counter *fbc,
++					 u32 nr_counters)
++{
++	return __percpu_counter_detach_many(fbc, nr_counters, true);
++}
++EXPORT_SYMBOL(percpu_counter_detach_many);
++
++void percpu_counter_free_many_backing(void __percpu *backing)
++{
++	free_percpu(backing);
++}
++EXPORT_SYMBOL(percpu_counter_free_many_backing);
++
++void percpu_counter_destroy_many(struct percpu_counter *fbc, u32 nr_counters)
++{
++	void __percpu *backing;
++
++	backing = __percpu_counter_detach_many(fbc, nr_counters, false);
++	percpu_counter_free_many_backing(backing);
+ }
+ EXPORT_SYMBOL(percpu_counter_destroy_many);
+ 
+diff --git a/opt-patches/adapt.md b/opt-patches/adapt.md
+new file mode 100644
+index 000000000000..961e3b9f22e1
+--- /dev/null
++++ b/opt-patches/adapt.md
+@@ -0,0 +1,6 @@
++任务：
++opt-patch目录下补丁为linux 7.0-rc1上的补丁(代码目录：/home/sisyphus/code/linux)，要求将这些补丁适配到当前git仓unix-test分支(基于linux lts-6.6分支)上
++要求：
++使用git工具，逐个适配补丁，要求功能逻辑适配完整，不引入新的问题
++在/home/sisyphus/code/linux和当前目录下中找到引入上下文冲突的commit，必要的话可以回合
++每个补丁适配之后，进行test-kernel测试(使用当前config测试，不要重新生成），生成适配冲突报告，和风险分析
+-- 
+2.43.0
+

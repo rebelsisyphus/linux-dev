@@ -1,0 +1,119 @@
+From 81a5f1fdbd86b269ba1cd944adfa5e882a657dbd Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:48:00 +0800
+Subject: [PATCH 26/30] mm: batch file VMA interval tree insertion in dup_mmap
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ kernel/fork.c | 70 ++++++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 61 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index e9e1bf7a6486..70e33baa9b40 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -821,6 +821,62 @@ static void dup_mm_exe_file(struct mm_struct *mm, struct mm_struct *oldmm)
+ }
+ 
+ #ifdef CONFIG_MMU
++
++struct file_vma_link_batch {
++	int count;
++	struct address_space *mapping;
++	struct vm_area_struct *parents[8];
++	struct vm_area_struct *children[8];
++};
++
++static void file_vma_link_batch_init(struct file_vma_link_batch *fb)
++{
++	fb->count = 0;
++	fb->mapping = NULL;
++}
++
++static void file_vma_link_batch_flush(struct file_vma_link_batch *fb)
++{
++	struct address_space *mapping = fb->mapping;
++	int i;
++
++	if (!fb->count)
++		return;
++
++	i_mmap_lock_write(mapping);
++	for (i = 0; i < fb->count; i++) {
++		if (fb->children[i]->vm_flags & VM_SHARED)
++			mapping_allow_writable(mapping);
++	}
++	flush_dcache_mmap_lock(mapping);
++	for (i = 0; i < fb->count; i++) {
++		/* insert child into the share list, just after parent */
++		vma_interval_tree_insert_after(fb->children[i], fb->parents[i],
++					       &mapping->i_mmap);
++	}
++	flush_dcache_mmap_unlock(mapping);
++	i_mmap_unlock_write(mapping);
++
++	file_vma_link_batch_init(fb);
++}
++
++static void file_vma_link_batch_add(struct file_vma_link_batch *fb,
++				    struct vm_area_struct *parent,
++				    struct vm_area_struct *child,
++				    struct address_space *mapping)
++{
++	if (fb->count > 0 &&
++	    (fb->mapping != mapping || fb->count == ARRAY_SIZE(fb->children)))
++		file_vma_link_batch_flush(fb);
++
++	if (!fb->count)
++		fb->mapping = mapping;
++
++	fb->parents[fb->count] = parent;
++	fb->children[fb->count] = child;
++	fb->count++;
++}
++
+ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 					struct mm_struct *oldmm)
+ {
+@@ -829,8 +885,10 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 	unsigned long charge = 0;
+ 	LIST_HEAD(uf);
+ 	VMA_ITERATOR(vmi, mm, 0);
++	struct file_vma_link_batch file_batch;
+ 
+ 	uprobe_start_dup_mmap();
++	file_vma_link_batch_init(&file_batch);
+ 	if (mmap_write_lock_killable(oldmm)) {
+ 		retval = -EINTR;
+ 		goto fail_uprobe_end;
+@@ -932,15 +990,7 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 			struct address_space *mapping = file->f_mapping;
+ 
+ 			get_file(file);
+-			i_mmap_lock_write(mapping);
+-			if (tmp->vm_flags & VM_SHARED)
+-				mapping_allow_writable(mapping);
+-			flush_dcache_mmap_lock(mapping);
+-			/* insert tmp into the share list, just after mpnt */
+-			vma_interval_tree_insert_after(tmp, mpnt,
+-					&mapping->i_mmap);
+-			flush_dcache_mmap_unlock(mapping);
+-			i_mmap_unlock_write(mapping);
++			file_vma_link_batch_add(&file_batch, mpnt, tmp, mapping);
+ 		}
+ 
+ 		if (!(tmp->vm_flags & VM_WIPEONFORK))
+@@ -952,8 +1002,10 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 		}
+ 	}
+ 	/* a new mm has just been created */
++	file_vma_link_batch_flush(&file_batch);
+ 	retval = arch_dup_mmap(oldmm, mm);
+ loop_out:
++	file_vma_link_batch_flush(&file_batch);
+ 	vma_iter_free(&vmi);
+ 	if (!retval) {
+ 		mt_set_in_rcu(vmi.mas.tree);
+-- 
+2.43.0
+

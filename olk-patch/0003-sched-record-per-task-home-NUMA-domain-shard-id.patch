@@ -1,0 +1,81 @@
+From dc55b2c56304b8f6e99a0306fe862c5734dd7964 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:20:48 +0800
+Subject: [PATCH 03/30] sched: record per-task home NUMA-domain shard id
+
+Add task_struct::task_domain_nid (u16), the home NUMA-domain shard
+this task will belong to once the per-shard task list goes live.
+The value is decided once at copy_process() time as
+cpu_to_node(task_cpu(p)) -- i.e. the node of the CPU the scheduler
+placed the new task on -- and is not updated when the task later
+migrates.  Pinning the home keeps release_task() cheap: it always
+knows which shard lock to take without any cross-shard rebalancing.
+
+init_task is initialised with task_domain_nid = 0 for completeness;
+init_task is intentionally never linked into any shard, so the value
+is unused on that path.
+
+Phase 1 NOTE: this commit only records the field; nothing reads it
+yet.  A subsequent commit will use it from the per-shard link/unlink
+helpers.
+
+Signed-off-by: lurea-git <robin800601@gmail.com>
+---
+ include/linux/sched.h | 9 +++++++++
+ init/init_task.c      | 1 +
+ kernel/fork.c         | 7 +++++++
+ 3 files changed, 17 insertions(+)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index a4f1c5e6e013..f526af566386 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -924,6 +924,15 @@ struct task_struct {
+ 	struct sched_info		sched_info;
+ 
+ 	struct list_head		tasks;
++	/*
++	 * Home NUMA-domain shard for the per-domain task list (see
++	 * struct task_domain in <linux/sched/task.h>).  Decided once
++	 * at copy_process() time as cpu_to_node(task_cpu(p)) and never
++	 * changed afterwards, so release_task() can find the right
++	 * shard lock without rebalancing.  u16 is enough for any
++	 * realistic MAX_NUMNODES and fits an existing alignment hole.
++	 */
++	u16				task_domain_nid;
+ #ifdef CONFIG_SMP
+ 	struct plist_node		pushable_tasks;
+ 	struct rb_node			pushable_dl_tasks;
+diff --git a/init/init_task.c b/init/init_task.c
+index 9fd44251b8b7..f1d726ad8820 100644
+--- a/init/init_task.c
++++ b/init/init_task.c
+@@ -106,6 +106,7 @@ struct task_struct init_task
+ 		.time_slice	= RR_TIMESLICE,
+ 	},
+ 	.tasks		= LIST_HEAD_INIT(init_task.tasks),
++	.task_domain_nid = 0,
+ #ifdef CONFIG_SMP
+ 	.pushable_tasks	= PLIST_NODE_INIT(init_task.pushable_tasks, MAX_PRIO),
+ #endif
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 7f4a6e413926..454cee22b6c6 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2884,6 +2884,13 @@ __latent_entropy struct task_struct *copy_process(
+ 			p->signal->has_child_subreaper = p->real_parent->signal->has_child_subreaper ||
+ 							 p->real_parent->signal->is_child_subreaper;
+ 			list_add_tail(&p->sibling, &p->real_parent->children);
++			/*
++			 * Decide and record the home NUMA-domain shard for
++			 * this process.  Phase 1 only stores the value here;
++			 * a subsequent commit will use it to link p into the
++			 * per-shard task list instead of init_task.tasks.
++			 */
++			p->task_domain_nid = cpu_to_node(task_cpu(p));
+ 			list_add_tail_rcu(&p->tasks, &init_task.tasks);
+ 			attach_pid(p, PIDTYPE_TGID);
+ 			attach_pid(p, PIDTYPE_PGID);
+-- 
+2.43.0
+

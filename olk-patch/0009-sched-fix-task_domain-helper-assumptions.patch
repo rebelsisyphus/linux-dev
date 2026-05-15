@@ -1,0 +1,54 @@
+From f75aba20fb99d6ae63be7f3391009a9e3428a003 Mon Sep 17 00:00:00 2001
+From: robin <robin800601@gmail.com>
+Date: Thu, 23 Apr 2026 20:19:03 +0800
+Subject: [PATCH 09/30] sched: fix task_domain helper assumptions
+
+---
+ include/linux/sched/signal.h | 12 +++++++++++-
+ kernel/fork.c                |  5 +++--
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
+index 81b4367f84f0..35493ed2aea4 100644
+--- a/include/linux/sched/signal.h
++++ b/include/linux/sched/signal.h
+@@ -645,7 +645,17 @@ extern void __cleanup_sighand(struct sighand_struct *);
+ extern void flush_itimer_signals(void);
+ 
+ #define tasklist_empty() \
+-	list_empty(&init_task.tasks)
++({\
++	bool __empty = true;\
++	int __nid;\
++\
++	for (__nid = 0; __nid < nr_node_ids; __nid++)\
++		if (!list_empty(&task_domains[__nid]->tasks)) {\
++			__empty = false;\
++			break;\
++		}\
++	__empty;\
++})
+ 
+ /*
+  * Return the next process leader in iteration order, or &init_task to
+diff --git a/kernel/fork.c b/kernel/fork.c
+index cf16362233be..3f498148a055 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -229,10 +229,11 @@ static void __init init_task_domains(void)
+ 	if (!task_domains)
+ 		panic("fork_init: failed to allocate task_domains array\n");
+ 
+-	for_each_node(nid) {
++	for (nid = 0; nid < nr_node_ids; nid++) {
+ 		struct task_domain *td;
++		int alloc_nid = node_online(nid) ? nid : NUMA_NO_NODE;
+ 
+-		td = kzalloc_node(sizeof(*td), GFP_KERNEL, nid);
++		td = kzalloc_node(sizeof(*td), GFP_KERNEL, alloc_nid);
+ 		if (!td)
+ 			panic("fork_init: failed to allocate task_domain for node %d\n",
+ 			      nid);
+-- 
+2.43.0
+

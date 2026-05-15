@@ -1,0 +1,258 @@
+From c052b82bcba2b1bb1c01b69d7e21c4fe83c87e66 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 21:02:35 +0800
+Subject: [PATCH 28/30] fork: return rss_stat backing to original NUMA cache
+
+Adapted from linux 7.0-rc1 patch to OLK-6.6.
+- Track original NUMA node in mm_struct.rss_stat_backing_nid
+- Return backing memory to its original NUMA cache on destroy
+- Add cache statistics (hits, misses, pushes, full, frees)
+- Add debugfs file /sys/kernel/debug/mm_rss_stat_backing_cache
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+---
+ include/linux/mm_types.h   |  3 ++
+ kernel/fork.c              | 70 +++++++++++++++++++++++++++++++++-----
+ opt-patches/report-0026.md | 53 +++++++++++++++++++++++++++++
+ 3 files changed, 118 insertions(+), 8 deletions(-)
+ create mode 100644 opt-patches/report-0026.md
+
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 0810cf6ec28e..535259cad70b 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -903,6 +903,9 @@ struct mm_struct {
+ 		unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
+ 
+ 		struct percpu_counter rss_stat[NR_MM_COUNTERS];
++#ifdef CONFIG_SMP
++		int rss_stat_backing_nid;
++#endif
+ 
+ 		struct linux_binfmt *binfmt;
+ 
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 335e159dbd28..ac2693d9973e 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -182,6 +182,11 @@ EXPORT_SYMBOL_GPL(task_domains);
+ struct mm_rss_stat_backing_cache {
+ 	spinlock_t lock;
+ 	unsigned int nr;
++	unsigned long hits;
++	unsigned long misses;
++	unsigned long pushes;
++	unsigned long full;
++	unsigned long frees;
+ 	void __percpu *entries[MM_RSS_STAT_BACKING_CACHE_DEPTH];
+ };
+ 
+@@ -196,6 +201,12 @@ static int mm_rss_stat_backing_cache_nid(void)
+ 	return nid;
+ }
+ 
++static bool mm_rss_stat_backing_cache_valid_nid(int nid)
++{
++	return mm_rss_stat_backing_caches && nid >= 0 &&
++		nid < nr_node_ids;
++}
++
+ static void __init init_mm_rss_stat_backing_cache(void)
+ {
+ 	int nid;
+@@ -212,7 +223,7 @@ static void __init init_mm_rss_stat_backing_cache(void)
+ 		spin_lock_init(&mm_rss_stat_backing_caches[nid].lock);
+ }
+ 
+-static void __percpu *mm_rss_stat_backing_cache_pop(void)
++static void __percpu *mm_rss_stat_backing_cache_pop(int *nidp)
+ {
+ 	struct mm_rss_stat_backing_cache *cache;
+ 	void __percpu *backing = NULL;
+@@ -222,50 +233,59 @@ static void __percpu *mm_rss_stat_backing_cache_pop(void)
+ 	nid = mm_rss_stat_backing_cache_nid();
+ 	if (nid == NUMA_NO_NODE)
+ 		return NULL;
++	*nidp = nid;
+ 
+ 	cache = &mm_rss_stat_backing_caches[nid];
+ 	spin_lock_irqsave(&cache->lock, flags);
+ 	if (cache->nr) {
+ 		backing = cache->entries[--cache->nr];
+ 		cache->entries[cache->nr] = NULL;
++		cache->hits++;
++	} else {
++		cache->misses++;
+ 	}
+ 	spin_unlock_irqrestore(&cache->lock, flags);
+ 
+ 	return backing;
+ }
+ 
+-static void mm_rss_stat_backing_cache_push(void __percpu *backing)
++static void mm_rss_stat_backing_cache_push(void __percpu *backing, int nid)
+ {
+ 	struct mm_rss_stat_backing_cache *cache;
+ 	unsigned long flags;
+-	int nid;
+ 
+ 	if (!backing)
+ 		return;
+ 
+-	nid = mm_rss_stat_backing_cache_nid();
+-	if (nid == NUMA_NO_NODE) {
++	if (!mm_rss_stat_backing_cache_valid_nid(nid)) {
+ 		percpu_counter_free_many_backing(backing);
+ 		return;
+ 	}
+ 
+ 	cache = &mm_rss_stat_backing_caches[nid];
+ 	spin_lock_irqsave(&cache->lock, flags);
++	cache->pushes++;
+ 	if (cache->nr < MM_RSS_STAT_BACKING_CACHE_DEPTH) {
+ 		cache->entries[cache->nr++] = backing;
+ 		backing = NULL;
++	} else {
++		cache->full++;
++		cache->frees++;
+ 	}
+ 	spin_unlock_irqrestore(&cache->lock, flags);
+ 
+-	percpu_counter_free_many_backing(backing);
++	if (backing)
++		percpu_counter_free_many_backing(backing);
+ }
+ 
+ static int mm_rss_stat_init(struct mm_struct *mm)
+ {
+ 	void __percpu *backing;
++	int nid = NUMA_NO_NODE;
+ 	int ret;
+ 
+-	backing = mm_rss_stat_backing_cache_pop();
++	mm->rss_stat_backing_nid = NUMA_NO_NODE;
++	backing = mm_rss_stat_backing_cache_pop(&nid);
+ 	if (!backing) {
+ 		backing = percpu_counter_alloc_many_backing(NR_MM_COUNTERS,
+ 							    GFP_KERNEL_ACCOUNT);
+@@ -280,16 +300,45 @@ static int mm_rss_stat_init(struct mm_struct *mm)
+ 		return ret;
+ 	}
+ 
++	mm->rss_stat_backing_nid = nid;
+ 	return 0;
+ }
+ 
+ static void mm_rss_stat_destroy(struct mm_struct *mm)
+ {
+ 	void __percpu *backing;
++	int nid = mm->rss_stat_backing_nid;
+ 
++	mm->rss_stat_backing_nid = NUMA_NO_NODE;
+ 	backing = percpu_counter_detach_many(mm->rss_stat, NR_MM_COUNTERS);
+-	mm_rss_stat_backing_cache_push(backing);
++	mm_rss_stat_backing_cache_push(backing, nid);
++}
++#ifdef CONFIG_DEBUG_FS
++static int mm_rss_stat_backing_cache_show(struct seq_file *m, void *v)
++{
++	int nid;
++
++	seq_puts(m, "nid nr hits misses pushes full frees\n");
++	if (!mm_rss_stat_backing_caches)
++		return 0;
++
++	for (nid = 0; nid < nr_node_ids; nid++) {
++		struct mm_rss_stat_backing_cache *cache;
++
++		cache = &mm_rss_stat_backing_caches[nid];
++		seq_printf(m, "%d %u %lu %lu %lu %lu %lu\n",
++			   nid,
++			   READ_ONCE(cache->nr),
++			   READ_ONCE(cache->hits),
++			   READ_ONCE(cache->misses),
++			   READ_ONCE(cache->pushes),
++			   READ_ONCE(cache->full),
++			   READ_ONCE(cache->frees));
++	}
++	return 0;
+ }
++DEFINE_SHOW_ATTRIBUTE(mm_rss_stat_backing_cache);
++#endif
+ #else
+ static void __init init_mm_rss_stat_backing_cache(void) { }
+ 
+@@ -399,6 +448,11 @@ static int __init task_domains_debugfs_init(void)
+ 				    &task_domain_addr_fops);
+ 	}
+ 
++#ifdef CONFIG_SMP
++	debugfs_create_file("mm_rss_stat_backing_cache", 0444, NULL, NULL,
++			    &mm_rss_stat_backing_cache_fops);
++#endif
++
+ 	return 0;
+ }
+ late_initcall(task_domains_debugfs_init);
+diff --git a/opt-patches/report-0026.md b/opt-patches/report-0026.md
+new file mode 100644
+index 000000000000..9909c9998dca
+--- /dev/null
++++ b/opt-patches/report-0026.md
+@@ -0,0 +1,53 @@
++# Patch 0026 Adaptation Report: fork: cache mm rss_stat percpu backing
++
++## Patch Info
++- **Original**: 0026-fork-cache-mm-rss_stat-percpu-backing.patch (linux 7.0-rc1)
++- **Status**: Adapted and tested successfully
++- **Commit**: befd96d86b55
++
++## Files Modified
++- `include/linux/percpu_counter.h` — Added new APIs: alloc/init_from_backing/detach/free backing
++- `lib/percpu_counter.c` — Refactored __percpu_counter_init_many to separate backing allocation from initialization
++- `kernel/fork.c` — Added mm_rss_stat_backing_cache, mm_rss_stat_init/destroy, wired into mm_init/__mmdrop
++
++## Adaptation Conflicts & Resolutions
++
++### 1. percpu_counter.h inline stub signatures
++**Conflict**: 6.6 uses different inline stub patterns for !CONFIG_SMP paths.
++**Resolution**: Added proper inline stubs matching 6.6 style.
++
++### 2. __percpu_counter_init_many signature difference
++**Conflict**: 6.6 has an extra `bool switch_mode` parameter in `__percpu_counter_init_many`.
++**Resolution**: Kept existing function as wrapper that allocates backing then calls new `__percpu_counter_init_many_from_backing`. The `switch_mode` parameter is preserved in the wrapper.
++
++### 3. mm_counter_init/mm_counter_destroy inline wrappers
++**Conflict**: 6.6 uses `mm_counter_init()` and `mm_counter_destroy()` inline wrappers in `include/linux/mm.h`, while 7.0-rc1 patch directly calls percpu APIs.
++**Resolution**: Replaced `mm_counter_init(mm)` with `mm_rss_stat_init(mm)` and `mm_counter_destroy(mm)` with `mm_rss_stat_destroy(mm)` in `kernel/fork.c` mm_init/__mmdrop.
++
++### 4. init_mm_rss_stat_backing_cache call site missing
++**Conflict**: The call to `init_mm_rss_stat_backing_cache()` in `fork_init()` was not in the patch context and needed to be added manually.
++**Resolution**: Added call after `init_task_domains()` in `fork_init()`.
++
++### 5. CONFIG_SMP guard
++**Conflict**: Backing cache only makes sense with CONFIG_SMP. Added proper `#ifdef CONFIG_SMP` / `#else` fallback.
++**Resolution**: Non-SMP fallback uses original `percpu_counter_init_many`/`percpu_counter_destroy_many`.
++
++## Risk Analysis
++
++| Risk | Level | Mitigation |
++|------|-------|------------|
++| Memory leak on cache push when full | Low | `percpu_counter_free_many_backing` handles overflow gracefully |
++| Per-NUMA cache imbalance | Low | `numa_mem_id()` determines cache; natural locality |
++| !CONFIG_SMP fallback correctness | Low | Falls back to direct percpu_counter_init_many |
++| init_mm_rss_stat_backing_cache unused warning | Low | Fixed by adding call in fork_init() |
++
++## Test Results
++- **Compile**: Passed (kernel/ directory builds cleanly)
++- **test-kernel**: Passed — VM boots successfully, SSH reachable, basic system operations work
++
++## Verification Commands
++```bash
++make -j$(nproc) kernel/   # kernel builds
++# QEMU boots with 4 CPUs, 2 NUMA nodes
++# uname -r: 6.6.0-...-dirty
++```
+-- 
+2.43.0
+

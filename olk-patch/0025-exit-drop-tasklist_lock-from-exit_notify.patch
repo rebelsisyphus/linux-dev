@@ -1,0 +1,119 @@
+From 159e63ba448c26633e33184dc10f867d4f855f46 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 18:44:04 +0800
+Subject: [PATCH 25/30] exit: drop tasklist_lock from exit_notify
+
+exit_notify() still took tasklist_lock as a writer.
+
+The reparent and notify paths now have narrower locking.
+
+The release and autoreap paths now have explicit state arbitration.
+
+Publish EXIT_ZOMBIE with WRITE_ONCE.
+
+Use cmpxchg() for the autoreap transition to EXIT_DEAD.
+
+Signed-off-by: robin <robin800601@gmail.com>
+---
+ kernel/exit.c | 52 ++++++++++++++++++++++++++++++++++++---------------
+ 1 file changed, 37 insertions(+), 15 deletions(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index a98e75785664..7649f8667bc7 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -619,8 +619,6 @@ static struct task_struct *find_alive_thread(struct task_struct *p)
+ 
+ static struct task_struct *find_child_reaper(struct task_struct *father,
+ 						struct list_head *dead)
+-	__releases(&tasklist_lock)
+-	__acquires(&tasklist_lock)
+ {
+ 	struct pid_namespace *pid_ns = task_active_pid_ns(father);
+ 	struct task_struct *reaper = pid_ns->child_reaper;
+@@ -635,15 +633,17 @@ static struct task_struct *find_child_reaper(struct task_struct *father,
+ 		return reaper;
+ 	}
+ 
+-	write_unlock_irq(&tasklist_lock);
+-
++	/*
++	 * tasklist_lock is no longer held across forget_original_parent();
++	 * just drain @dead and let zap_pid_ns_processes() run with its own
++	 * locking.  release_task() takes its finer-grained locks itself.
++	 */
+ 	list_for_each_entry_safe(p, n, dead, ptrace_entry) {
+ 		list_del_init(&p->ptrace_entry);
+ 		release_task(p);
+ 	}
+ 
+ 	zap_pid_ns_processes(pid_ns);
+-	write_lock_irq(&tasklist_lock);
+ 
+ 	return father;
+ }
+@@ -767,13 +767,41 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
+ 	struct task_struct *p, *n;
+ 	LIST_HEAD(dead);
+ 
+-	write_lock_irq(&tasklist_lock);
++	/*
++	 * tasklist_lock is no longer held across exit_notify().  Everything
++	 * that used to rely on it now has a finer-grained cover:
++	 *
++	 *   - forget_original_parent() takes task_lock(father, reaper) per
++	 *     child (commit 21) to rewrite the children lists and parent
++	 *     pointers; the PF_EXITING flag set by exit_signals() before
++	 *     this call is what tells concurrent reparents to skip us.
++	 *   - do_notify_parent() pins ->parent via rcu_dereference +
++	 *     get_task_struct (commit 22).
++	 *   - tsk->exit_state is read with READ_ONCE on the wait side; we
++	 *     publish it with WRITE_ONCE.  Only one thread runs do_exit()
++	 *     for tsk, so the ZOMBIE -> DEAD transition is exclusive here.
++	 *   - de_thread()'s notify_count wakeup is still ordered after the
++	 *     exit_state store by the IRQ disable / siglock acquire below.
++	 */
+ 	forget_original_parent(tsk, &dead);
+ 
+ 	if (group_dead)
+ 		kill_orphaned_pgrp(tsk->group_leader, NULL);
+ 
+-	tsk->exit_state = EXIT_ZOMBIE;
++	/*
++	 * mt-exec, de_thread() is waiting for group leader.  Do this
++	 * wakeup BEFORE publishing EXIT_ZOMBIE: once EXIT_ZOMBIE is
++	 * visible, a concurrent wait_task_zombie() on another CPU may
++	 * call release_task() and NULL our ->sighand.  Plain read of
++	 * notify_count is fine here — this mirrors the original
++	 * (tasklist_lock-protected) access, which also did not take
++	 * sighand->siglock.
++	 */
++	if (unlikely(tsk->signal->notify_count < 0))
++		wake_up_process(tsk->signal->group_exec_task);
++
++	WRITE_ONCE(tsk->exit_state, EXIT_ZOMBIE);
++
+ 	if (unlikely(tsk->ptrace)) {
+ 		int sig = thread_group_leader(tsk) &&
+ 				thread_group_empty(tsk) &&
+@@ -787,15 +815,9 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
+ 		autoreap = true;
+ 	}
+ 
+-	if (autoreap) {
+-		tsk->exit_state = EXIT_DEAD;
++	if (autoreap &&
++	    cmpxchg(&tsk->exit_state, EXIT_ZOMBIE, EXIT_DEAD) == EXIT_ZOMBIE)
+ 		list_add(&tsk->ptrace_entry, &dead);
+-	}
+-
+-	/* mt-exec, de_thread() is waiting for group leader */
+-	if (unlikely(tsk->signal->notify_count < 0))
+-		wake_up_process(tsk->signal->group_exec_task);
+-	write_unlock_irq(&tasklist_lock);
+ 
+ 	list_for_each_entry_safe(p, n, &dead, ptrace_entry) {
+ 		list_del_init(&p->ptrace_entry);
+-- 
+2.43.0
+

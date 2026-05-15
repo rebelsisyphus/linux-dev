@@ -1,0 +1,136 @@
+From 0b2bf3918b23371616156ecf182f3d6396f0b530 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 22:06:44 +0800
+Subject: [PATCH 30/30] exit: arbitrate reparented zombie autoreap
+
+Adapted from linux 7.0-rc1 patch to OLK-6.6.
+- Use READ_ONCE(p->exit_state) instead of direct access
+- Use cmpxchg for ZOMBIE -> DEAD transition in reparent_leader
+- Prevents race between reparenting and wait_task_zombie() after
+tasklist_lock removal from exit_notify path.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+---
+ kernel/exit.c              | 16 +++++---
+ opt-patches/report-0028.md | 75 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 85 insertions(+), 6 deletions(-)
+ create mode 100644 opt-patches/report-0028.md
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 7649f8667bc7..dd76a874dc79 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -696,19 +696,23 @@ static struct task_struct *find_new_reaper(struct task_struct *father,
+ static void reparent_leader(struct task_struct *father, struct task_struct *p,
+ 				struct list_head *dead)
+ {
+-	if (unlikely(p->exit_state == EXIT_DEAD))
++	if (unlikely(READ_ONCE(p->exit_state) == EXIT_DEAD))
+ 		return;
+ 
+ 	/* We don't want people slaying init. */
+ 	p->exit_signal = SIGCHLD;
+ 
+-	/* If it has exited notify the new parent about this child's death. */
++	/*
++	 * If it has exited, notify the new parent about this child's death.
++	 * tasklist_lock no longer serializes this path against wait_task_zombie(),
++	 * so arbitrate the ZOMBIE -> DEAD transition the same way as exit_notify().
++	 */
+ 	if (!p->ptrace &&
+-	    p->exit_state == EXIT_ZOMBIE && thread_group_empty(p)) {
+-		if (do_notify_parent(p, p->exit_signal)) {
+-			p->exit_state = EXIT_DEAD;
++	    READ_ONCE(p->exit_state) == EXIT_ZOMBIE && thread_group_empty(p)) {
++		if (do_notify_parent(p, p->exit_signal) &&
++		    cmpxchg(&p->exit_state, EXIT_ZOMBIE, EXIT_DEAD) ==
++			    EXIT_ZOMBIE)
+ 			list_add(&p->ptrace_entry, dead);
+-		}
+ 	}
+ 
+ 	kill_orphaned_pgrp(p, father);
+diff --git a/opt-patches/report-0028.md b/opt-patches/report-0028.md
+new file mode 100644
+index 000000000000..7073be4585db
+--- /dev/null
++++ b/opt-patches/report-0028.md
+@@ -0,0 +1,75 @@
++# Patch 0028 Adaptation Report: mm: shard file i_mmap trees by NUMA domain
++
++## Patch Info
++- **Original**: 0028-mm-shard-file-i_mmap-trees-by-NUMA-domain.patch (linux 7.0-rc1)
++- **Status**: Adapted and tested successfully
++- **Commit**: e59c3c774269
++
++## Files Modified
++- `fs/inode.c` — init/cleanup of i_mmap_shards on address_space
++- `include/linux/fs.h` — Added `i_mmap_shard`, `i_mmap_shards` structs; `i_mmap_shards`, `i_mmap_count` fields to `address_space`; updated `mapping_mapped()`
++- `include/linux/mm_types.h` — Added `i_mmap_domain_nid` to `mm_struct`
++- `kernel/fork.c` — Added `task_domain_select_nid()`; set `mm->i_mmap_domain_nid`; updated `file_vma_link_batch_flush` for sharding
++- `mm/Kconfig` — Added `CONFIG_NUMA_DOMAIN_I_MMAP_SHARDS`
++- `mm/internal.h` — Added all i_mmap sharding API declarations and inline stubs
++- `mm/mmap.c` — Added shard allocation, locking, insertion/removal implementations; modified `__vma_link_file`, `__remove_shared_vm_struct`, `vma_prepare`, `vma_complete`, `vma_link_file`, `unlink_file_vma_batch_*`, `vm_lock_mapping`, `vm_unlock_mapping`
++- `mm/khugepaged.c` — Modified `retract_page_tables`, `collapse_file` to iterate sharded roots
++- `mm/memory-failure.c` — Modified `collect_procs_file`, `collect_procs_fsdax` to iterate sharded roots
++- `mm/memory.c` — Modified `unmap_mapping_folio`, `unmap_mapping_pages` to iterate sharded roots
++- `mm/pagewalk.c` — Modified `walk_page_mapping` to iterate sharded roots
++- `mm/rmap.c` — Modified `rmap_walk_file` to iterate sharded roots
++
++## Major Adaptation Conflicts & Resolutions
++
++### 1. mm/vma.c and mm/vma.h don't exist in 6.6
++**Conflict**: In 7.0-rc1, patch adds code to `mm/vma.c` and declarations to `mm/vma.h`. In 6.6, these functions are in `mm/mmap.c` and declarations are in `mm/internal.h`.
++**Resolution**: Put all implementations in `mm/mmap.c` and declarations in `mm/internal.h`.
++
++### 2. kernel/fork.c needs mm/internal.h
++**Conflict**: `kernel/fork.c` calls `i_mmap_*` APIs but doesn't include any mm internal header.
++**Resolution**: Added `#include "../mm/internal.h"` to `kernel/fork.c`.
++
++### 3. file_vma_link_batch_flush location
++**Conflict**: In 7.0-rc1 patch 0025, this function is in `mm/mmap.c`. In 6.6, it's in `kernel/fork.c`.
++**Resolution**: Applied sharding changes to `kernel/fork.c`'s version.
++
++### 4. vma_is_shared_maywrite() doesn't exist in 6.6
++**Conflict**: Patch uses `vma_is_shared_maywrite()`. 6.6 doesn't have it.
++**Resolution**: Used `vm_flags & VM_SHARED` instead (same as patch 0025 adaptation).
++
++### 5. collect_procs_pfn doesn't exist in 6.6
++**Conflict**: Patch modifies `collect_procs_pfn` in `mm/memory-failure.c`.
++**Resolution**: Function doesn't exist in 6.6; skipped.
++
++### 6. call_action_complete doesn't exist in 6.6
++**Conflict**: Patch modifies `call_action_complete` in `mm/vma.c`.
++**Resolution**: Function doesn't exist in 6.6; skipped.
++
++### 7. i_mmap_vma_nid forward declaration needed
++**Conflict**: `unlink_file_vma_batch_same_key` uses `i_mmap_vma_nid` before its definition.
++**Resolution**: Added forward declaration `static int i_mmap_vma_nid(struct vm_area_struct *vma);` before the batch functions.
++
++### 8. __remove_shared_vm_struct signature
++**Conflict**: In 7.0-rc1, `__remove_shared_vm_struct` is in `mm/vma.c` and uses `i_mmap_remove_vma`. In 6.6, it's in `mm/mmap.c`.
++**Resolution**: Modified 6.6's `__remove_shared_vm_struct` to call `i_mmap_remove_vma`.
++
++## Risk Analysis
++
++| Risk | Level | Mitigation |
++|------|-------|------------|
++| Config defaults off - no runtime impact unless enabled | Low | `default n` in Kconfig |
++| DAX/hugetlb excluded from sharding | Low | Explicit checks in `i_mmap_can_shard()` |
++| Shard migration under write lock | Medium | One-time migration; small mappings only |
++| Debugfs stats memory | Low | Fixed-size array, only under CONFIG_DEBUG_FS |
++| Inline stub overhead when disabled | Low | All stubs inline to legacy path |
++
++## Test Results
++- **Compile**: Passed (core kernel/ and mm/ build cleanly; driver errors are pre-existing)
++- **test-kernel**: Passed — VM boots successfully with 4 CPUs, 2 NUMA nodes
++
++## Verification Commands
++```bash
++make -j$(nproc) kernel/ mm/  # builds cleanly
++# QEMU boots with 4 CPUs, 2 NUMA nodes
++# uname -r: 6.6.0-...-dirty
++```
+-- 
+2.43.0
+

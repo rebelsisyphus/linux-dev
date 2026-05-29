@@ -1,0 +1,138 @@
+From 5f6deeef35b2772d129c941c1a512cec16e68cd2 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:57:21 +0800
+Subject: [PATCH 10/13] mm: add shard-aware batch locking for i_mmap unlink
+
+Batched file-VMA unlink currently takes the central i_mmap_rwsem once
+for all VMAs in the batch.  Once sharded i_mmap state can be published,
+the same operation needs deterministic per-shard locking instead of
+falling back to one global lock.
+
+Add helpers that load the shard state with acquire ordering, collect
+the unique target shards for a VMA batch, lock them in ascending index
+order, and unlock in reverse order.  The existing central lock path
+remains unchanged when no sharded state is present.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/vma.c | 70 ++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 66 insertions(+), 4 deletions(-)
+
+diff --git a/mm/vma.c b/mm/vma.c
+index 9cd4a73cfe62..a06ba85ce6ec 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -40,6 +40,12 @@ static unsigned int i_mmap_shard_index(const struct i_mmap_shards *shards,
+ 	return hash_ptr(vma->vm_mm, I_MMAP_SHARD_SHIFT) % shards->nr_shards;
+ }
+ 
++static struct i_mmap_shards *i_mmap_shards_load(struct address_space *mapping)
++{
++	/* Pair with install-time publish after shard trees are initialized. */
++	return smp_load_acquire(&mapping->i_mmap_shards);
++}
++
+ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 				  struct i_mmap_shards *shards)
+ {
+@@ -71,7 +77,7 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ static void i_mmap_insert_vma(struct address_space *mapping,
+ 			      struct vm_area_struct *vma)
+ {
+-	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
+ 
+ 	if (shards) {
+ 		struct i_mmap_shard *shard;
+@@ -88,7 +94,7 @@ static void i_mmap_insert_vma(struct address_space *mapping,
+ static void i_mmap_remove_vma(struct address_space *mapping,
+ 			      struct vm_area_struct *vma)
+ {
+-	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
+ 
+ 	if (shards) {
+ 		struct i_mmap_shard *shard;
+@@ -102,6 +108,60 @@ static void i_mmap_remove_vma(struct address_space *mapping,
+ 	vma_interval_tree_remove(vma, &mapping->i_mmap);
+ }
+ 
++static int i_mmap_lock_vmas_write(struct address_space *mapping,
++				  struct i_mmap_shard *locked[],
++				  struct vm_area_struct **vmas, int count)
++{
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
++	unsigned int shard_idx[I_MMAP_NR_SHARDS];
++	int i, nr_locked = 0;
++
++	if (!shards) {
++		i_mmap_lock_write(mapping);
++		return 0;
++	}
++
++	for (i = 0; i < count; i++) {
++		unsigned int idx = i_mmap_shard_index(shards, vmas[i]);
++		int pos = nr_locked;
++
++		while (pos > 0 && shard_idx[pos - 1] > idx) {
++			shard_idx[pos] = shard_idx[pos - 1];
++			locked[pos] = locked[pos - 1];
++			pos--;
++		}
++
++		if (pos > 0 && shard_idx[pos - 1] == idx)
++			continue;
++		if (pos < nr_locked && shard_idx[pos] == idx)
++			continue;
++
++		shard_idx[pos] = idx;
++		locked[pos] = &shards->shard[idx];
++		nr_locked++;
++	}
++
++	for (i = 0; i < nr_locked; i++)
++		down_write(&locked[i]->rwsem);
++
++	return nr_locked;
++}
++
++static void i_mmap_unlock_vmas_write(struct address_space *mapping,
++				     struct i_mmap_shard *locked[],
++				     int nr_locked)
++{
++	int i;
++
++	if (!nr_locked) {
++		i_mmap_unlock_write(mapping);
++		return;
++	}
++
++	for (i = nr_locked - 1; i >= 0; i--)
++		up_write(&locked[i]->rwsem);
++}
++
+ struct mmap_state {
+ 	struct mm_struct *mm;
+ 	struct vma_iterator *vmi;
+@@ -1888,14 +1948,16 @@ void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb)
+ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ {
+ 	struct address_space *mapping = vb->mapping;
++	struct i_mmap_shard *locked[I_MMAP_NR_SHARDS];
++	int nr_locked;
+ 	int i;
+ 
+-	i_mmap_lock_write(mapping);
++	nr_locked = i_mmap_lock_vmas_write(mapping, locked, vb->vmas, vb->count);
+ 	for (i = 0; i < vb->count; i++) {
+ 		VM_WARN_ON_ONCE(vb->vmas[i]->vm_file->f_mapping != mapping);
+ 		__remove_shared_vm_struct(vb->vmas[i], mapping);
+ 	}
+-	i_mmap_unlock_write(mapping);
++	i_mmap_unlock_vmas_write(mapping, locked, nr_locked);
+ 
+ 	unlink_file_vma_batch_init(vb);
+ }
+-- 
+2.43.0
+

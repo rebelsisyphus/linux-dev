@@ -1,0 +1,52 @@
+From 2e7928ea02625f8e5341bd4394fdfbac7c2f35bc Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 01:09:24 +0800
+Subject: [PATCH 11/13] mm: distinguish central i_mmap batch lock state
+
+The shard-aware batch locking helper returned zero both when it had
+taken the central i_mmap_rwsem and when a sharded batch had no locks
+to release. That is harmless for the current non-empty caller, but it
+makes the helper fragile for the next users of the batching interface.
+
+Return a dedicated sentinel for the central lock path so zero
+unambiguously means that no shard locks were acquired.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/vma.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/mm/vma.c b/mm/vma.c
+index a06ba85ce6ec..0e6fad46d3ee 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -9,6 +9,8 @@
+ #include "vma_internal.h"
+ #include "vma.h"
+ 
++#define I_MMAP_LOCKED_CENTRAL	(-1)
++
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+ {
+ 	struct i_mmap_shards *shards;
+@@ -118,7 +120,7 @@ static int i_mmap_lock_vmas_write(struct address_space *mapping,
+ 
+ 	if (!shards) {
+ 		i_mmap_lock_write(mapping);
+-		return 0;
++		return I_MMAP_LOCKED_CENTRAL;
+ 	}
+ 
+ 	for (i = 0; i < count; i++) {
+@@ -153,7 +155,7 @@ static void i_mmap_unlock_vmas_write(struct address_space *mapping,
+ {
+ 	int i;
+ 
+-	if (!nr_locked) {
++	if (nr_locked == I_MMAP_LOCKED_CENTRAL) {
+ 		i_mmap_unlock_write(mapping);
+ 		return;
+ 	}
+-- 
+2.43.0
+

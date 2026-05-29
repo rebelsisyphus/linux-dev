@@ -1,0 +1,399 @@
+From 924a2d0ce770d046f616c30eaaaa8d2733b0c466 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 10:38:30 +0800
+Subject: [PATCH 13/13] mm: enable i_mmap shards after write contention
+
+Dynamic i_mmap sharding needs a safe trigger point after the
+preparatory sharded tree and reader support is in place. Try the
+central i_mmap write lock first; repeated trylock failures on
+regular-file mappings allocate and publish sharded i_mmap state, then
+retry the update through the shard locking path.
+
+Make the hot file VMA update paths use the same state-aware lock
+helpers. dup_mmap() keeps its insert_after() fast path while the
+mapping is central and falls back to normal interval-tree insertion
+once sharded. vma_prepare() locks all file VMAs touched by the
+prepare/complete operation, so split and merge updates do not modify a
+shard without holding its lock.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/mmap.c |  16 ++++--
+ mm/vma.c  | 164 +++++++++++++++++++++++++++++++++++++++++++++++-------
+ mm/vma.h  |  17 ++++++
+ 3 files changed, 172 insertions(+), 25 deletions(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index d9f4f677d480..df998124588c 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1746,21 +1746,29 @@ static void dup_mmap_file_batch_init(struct dup_mmap_file_batch *batch)
+ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *batch)
+ {
+ 	struct address_space *mapping = batch->mapping;
++	struct i_mmap_shard *locked[I_MMAP_NR_SHARDS];
++	int nr_locked;
+ 	unsigned int i;
+ 
+ 	if (!batch->count)
+ 		return;
+ 
+-	i_mmap_lock_write(mapping);
++	nr_locked = i_mmap_lock_vmas_write_contended(mapping, locked,
++						     batch->vmas,
++						     batch->count);
+ 	flush_dcache_mmap_lock(mapping);
+ 	for (i = 0; i < batch->count; i++) {
+ 		if (vma_is_shared_maywrite(batch->vmas[i]))
+ 			mapping_allow_writable(mapping);
+-		vma_interval_tree_insert_after(batch->vmas[i], batch->prev[i],
+-					       &mapping->i_mmap);
++		if (nr_locked == I_MMAP_LOCKED_CENTRAL)
++			vma_interval_tree_insert_after(batch->vmas[i],
++						       batch->prev[i],
++						       &mapping->i_mmap);
++		else
++			i_mmap_insert_vma(mapping, batch->vmas[i]);
+ 	}
+ 	flush_dcache_mmap_unlock(mapping);
+-	i_mmap_unlock_write(mapping);
++	i_mmap_unlock_vmas_write(mapping, locked, nr_locked);
+ 
+ 	dup_mmap_file_batch_init(batch);
+ }
+diff --git a/mm/vma.c b/mm/vma.c
+index 0e6fad46d3ee..408f8c602dab 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -9,7 +9,7 @@
+ #include "vma_internal.h"
+ #include "vma.h"
+ 
+-#define I_MMAP_LOCKED_CENTRAL	(-1)
++#define I_MMAP_SHARD_FAILS	4
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+ {
+@@ -57,7 +57,7 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 
+ 	i_mmap_assert_write_locked(mapping);
+ 
+-	if (WARN_ON_ONCE(READ_ONCE(mapping->i_mmap_shards)))
++	if (READ_ONCE(mapping->i_mmap_shards))
+ 		return false;
+ 
+ 	while ((vma = vma_interval_tree_iter_first(root, 0, ULONG_MAX))) {
+@@ -76,8 +76,8 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 	return true;
+ }
+ 
+-static void i_mmap_insert_vma(struct address_space *mapping,
+-			      struct vm_area_struct *vma)
++void i_mmap_insert_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma)
+ {
+ 	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
+ 
+@@ -93,8 +93,8 @@ static void i_mmap_insert_vma(struct address_space *mapping,
+ 	vma_interval_tree_insert(vma, &mapping->i_mmap);
+ }
+ 
+-static void i_mmap_remove_vma(struct address_space *mapping,
+-			      struct vm_area_struct *vma)
++void i_mmap_remove_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma)
+ {
+ 	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
+ 
+@@ -110,9 +110,9 @@ static void i_mmap_remove_vma(struct address_space *mapping,
+ 	vma_interval_tree_remove(vma, &mapping->i_mmap);
+ }
+ 
+-static int i_mmap_lock_vmas_write(struct address_space *mapping,
+-				  struct i_mmap_shard *locked[],
+-				  struct vm_area_struct **vmas, int count)
++int i_mmap_lock_vmas_write(struct address_space *mapping,
++			   struct i_mmap_shard *locked[],
++			   struct vm_area_struct **vmas, int count)
+ {
+ 	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
+ 	unsigned int shard_idx[I_MMAP_NR_SHARDS];
+@@ -149,9 +149,62 @@ static int i_mmap_lock_vmas_write(struct address_space *mapping,
+ 	return nr_locked;
+ }
+ 
+-static void i_mmap_unlock_vmas_write(struct address_space *mapping,
++static bool i_mmap_shards_allowed(struct address_space *mapping)
++{
++	struct inode *inode = mapping->host;
++
++	return inode && S_ISREG(inode->i_mode);
++}
++
++static void i_mmap_maybe_install_shards(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards;
++
++	if (i_mmap_shards_load(mapping))
++		return;
++	if (!i_mmap_shards_allowed(mapping))
++		return;
++	if (atomic_inc_return(&mapping->i_mmap_trylock_fails) <
++	    I_MMAP_SHARD_FAILS)
++		return;
++
++	shards = i_mmap_shards_alloc(GFP_KERNEL);
++	if (!shards)
++		return;
++
++	i_mmap_lock_write(mapping);
++	if (i_mmap_shards_install_locked(mapping, shards)) {
++		atomic_set(&mapping->i_mmap_trylock_fails, 0);
++		shards = NULL;
++	}
++	i_mmap_unlock_write(mapping);
++	i_mmap_shards_free(shards);
++}
++
++int i_mmap_lock_vmas_write_contended(struct address_space *mapping,
+ 				     struct i_mmap_shard *locked[],
+-				     int nr_locked)
++				     struct vm_area_struct **vmas, int count)
++{
++	if (i_mmap_shards_load(mapping))
++		return i_mmap_lock_vmas_write(mapping, locked, vmas, count);
++
++	if (i_mmap_trylock_write(mapping)) {
++		if (likely(!i_mmap_shards_load(mapping)))
++			return I_MMAP_LOCKED_CENTRAL;
++
++		i_mmap_unlock_write(mapping);
++		return i_mmap_lock_vmas_write(mapping, locked, vmas, count);
++	}
++
++	if (i_mmap_shards_load(mapping))
++		return i_mmap_lock_vmas_write(mapping, locked, vmas, count);
++
++	i_mmap_maybe_install_shards(mapping);
++	return i_mmap_lock_vmas_write(mapping, locked, vmas, count);
++}
++
++void i_mmap_unlock_vmas_write(struct address_space *mapping,
++			      struct i_mmap_shard *locked[], int nr_locked)
+ {
+ 	int i;
+ 
+@@ -197,8 +250,17 @@ struct mmap_state {
+ 	bool check_ksm_early :1;
+ 	/* If .mmap_prepare changed the file, we don't need to pin. */
+ 	bool file_doesnt_need_get :1;
++	struct i_mmap_shard *i_mmap_locked[I_MMAP_NR_SHARDS];
++	int i_mmap_nr_locked;
+ };
+ 
++static void mmap_state_unlock_file(struct mmap_state *map,
++				   struct address_space *mapping)
++{
++	i_mmap_unlock_vmas_write(mapping, map->i_mmap_locked,
++				 map->i_mmap_nr_locked);
++}
++
+ #define MMAP_STATE(name, mm_, vmi_, addr_, len_, pgoff_, vma_flags_, file_) \
+ 	struct mmap_state name = {					\
+ 		.mm = mm_,						\
+@@ -441,6 +503,38 @@ anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
+ 		anon_vma_interval_tree_insert(avc, &avc->anon_vma->rb_root);
+ }
+ 
++static void vma_prepare_add_file_vma(struct vma_prepare *vp,
++				     struct vm_area_struct **vmas,
++				     int *count, struct vm_area_struct *vma)
++{
++	if (vma && vma->vm_file && vma->vm_file->f_mapping == vp->mapping)
++		vmas[(*count)++] = vma;
++}
++
++static void vma_prepare_lock_file(struct vma_prepare *vp)
++{
++	struct vm_area_struct *vmas[5];
++	int count = 0;
++	int nr_locked;
++
++	vma_prepare_add_file_vma(vp, vmas, &count, vp->vma);
++	vma_prepare_add_file_vma(vp, vmas, &count, vp->adj_next);
++	vma_prepare_add_file_vma(vp, vmas, &count, vp->insert);
++	vma_prepare_add_file_vma(vp, vmas, &count, vp->remove);
++	vma_prepare_add_file_vma(vp, vmas, &count, vp->remove2);
++
++	nr_locked = i_mmap_lock_vmas_write_contended(vp->mapping,
++						     vp->i_mmap_locked,
++						     vmas, count);
++	vp->i_mmap_nr_locked = nr_locked;
++}
++
++static void vma_prepare_unlock_file(struct vma_prepare *vp)
++{
++	i_mmap_unlock_vmas_write(vp->mapping, vp->i_mmap_locked,
++				 vp->i_mmap_nr_locked);
++}
++
+ /*
+  * vma_prepare() - Helper function for handling locking VMAs prior to altering
+  * @vp: The initialized vma_prepare struct
+@@ -454,7 +548,7 @@ static void vma_prepare(struct vma_prepare *vp)
+ 			uprobe_munmap(vp->adj_next, vp->adj_next->vm_start,
+ 				      vp->adj_next->vm_end);
+ 
+-		i_mmap_lock_write(vp->mapping);
++		vma_prepare_lock_file(vp);
+ 		if (vp->insert && vp->insert->vm_file) {
+ 			/*
+ 			 * Put into interval tree now, so instantiated pages
+@@ -523,7 +617,7 @@ static void vma_complete(struct vma_prepare *vp, struct vma_iterator *vmi,
+ 	}
+ 
+ 	if (vp->file) {
+-		i_mmap_unlock_write(vp->mapping);
++		vma_prepare_unlock_file(vp);
+ 
+ 		if (!vp->skip_vma_uprobe) {
+ 			uprobe_mmap(vp->vma);
+@@ -1954,7 +2048,8 @@ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ 	int nr_locked;
+ 	int i;
+ 
+-	nr_locked = i_mmap_lock_vmas_write(mapping, locked, vb->vmas, vb->count);
++	nr_locked = i_mmap_lock_vmas_write_contended(mapping, locked,
++						     vb->vmas, vb->count);
+ 	for (i = 0; i < vb->count; i++) {
+ 		VM_WARN_ON_ONCE(vb->vmas[i]->vm_file->f_mapping != mapping);
+ 		__remove_shared_vm_struct(vb->vmas[i], mapping);
+@@ -1988,17 +2083,26 @@ void unlink_file_vma_batch_final(struct unlink_vma_file_batch *vb)
+ 		unlink_file_vma_batch_process(vb);
+ }
+ 
+-static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock)
++static void vma_link_file(struct vm_area_struct *vma, bool hold_rmap_lock,
++			  struct i_mmap_shard *locked[], int *nr_locked)
+ {
+ 	struct file *file = vma->vm_file;
+ 	struct address_space *mapping;
++	struct i_mmap_shard *local_locked[I_MMAP_NR_SHARDS];
++	int local_nr_locked;
+ 
+ 	if (file) {
++		if (!locked)
++			locked = local_locked;
++		if (!nr_locked)
++			nr_locked = &local_nr_locked;
++
+ 		mapping = file->f_mapping;
+-		i_mmap_lock_write(mapping);
++		*nr_locked = i_mmap_lock_vmas_write_contended(mapping,
++							      locked, &vma, 1);
+ 		__vma_link_file(vma, mapping);
+ 		if (!hold_rmap_lock)
+-			i_mmap_unlock_write(mapping);
++			i_mmap_unlock_vmas_write(mapping, locked, *nr_locked);
+ 	}
+ }
+ 
+@@ -2012,7 +2116,7 @@ static int vma_link(struct mm_struct *mm, struct vm_area_struct *vma)
+ 
+ 	vma_start_write(vma);
+ 	vma_iter_store_new(&vmi, vma);
+-	vma_link_file(vma, /* hold_rmap_lock= */false);
++	vma_link_file(vma, /* hold_rmap_lock= */false, NULL, NULL);
+ 	mm->map_count++;
+ 	validate_mm(mm);
+ 	return 0;
+@@ -2743,7 +2847,9 @@ static int __mmap_new_vma(struct mmap_state *map, struct vm_area_struct **vmap,
+ 	vma_start_write(vma);
+ 	vma_iter_store_new(vmi, vma);
+ 	map->mm->map_count++;
+-	vma_link_file(vma, action->hide_from_rmap_until_complete);
++	vma_link_file(vma, action->hide_from_rmap_until_complete,
++		      map->i_mmap_locked,
++		      &map->i_mmap_nr_locked);
+ 
+ 	/*
+ 	 * vma_merge_new_range() calls khugepaged_enter_vma() too, the below
+@@ -2890,6 +2996,23 @@ static bool can_set_ksm_flags_early(struct mmap_state *map)
+ 	return false;
+ }
+ 
++static int call_action_complete(struct mmap_state *map,
++				struct vm_area_struct *vma,
++				struct mmap_action *action)
++{
++	int ret;
++
++	ret = mmap_action_complete(vma, action, /*is_compat=*/false);
++
++	/* If we held the file rmap we need to release it. */
++	if (action->hide_from_rmap_until_complete) {
++		struct file *file = vma->vm_file;
++
++		mmap_state_unlock_file(map, file->f_mapping);
++	}
++	return ret;
++}
++
+ static unsigned long __mmap_region(struct file *file, unsigned long addr,
+ 		unsigned long len, vma_flags_t vma_flags,
+ 		unsigned long pgoff, struct list_head *uf)
+@@ -2941,8 +3064,7 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
+ 	__mmap_complete(&map, vma);
+ 
+ 	if (have_mmap_prepare && allocated_new) {
+-		error = mmap_action_complete(vma, &desc.action,
+-					     /*is_compat=*/false);
++		error = call_action_complete(&map, vma, &desc.action);
+ 		if (error)
+ 			return error;
+ 	}
+diff --git a/mm/vma.h b/mm/vma.h
+index f763353f5c28..6b1c11bb0662 100644
+--- a/mm/vma.h
++++ b/mm/vma.h
+@@ -7,6 +7,8 @@
+ #ifndef __MM_VMA_H
+ #define __MM_VMA_H
+ 
++#define I_MMAP_LOCKED_CENTRAL	(-1)
++
+ /*
+  * VMA lock generalization
+  */
+@@ -19,6 +21,8 @@ struct vma_prepare {
+ 	struct vm_area_struct *insert;
+ 	struct vm_area_struct *remove;
+ 	struct vm_area_struct *remove2;
++	struct i_mmap_shard *i_mmap_locked[I_MMAP_NR_SHARDS];
++	int i_mmap_nr_locked;
+ 
+ 	bool skip_vma_uprobe :1;
+ };
+@@ -29,6 +33,19 @@ struct unlink_vma_file_batch {
+ 	struct vm_area_struct *vmas[8];
+ };
+ 
++int i_mmap_lock_vmas_write(struct address_space *mapping,
++			   struct i_mmap_shard *locked[],
++			   struct vm_area_struct **vmas, int count);
++int i_mmap_lock_vmas_write_contended(struct address_space *mapping,
++				     struct i_mmap_shard *locked[],
++				     struct vm_area_struct **vmas, int count);
++void i_mmap_unlock_vmas_write(struct address_space *mapping,
++			      struct i_mmap_shard *locked[], int nr_locked);
++void i_mmap_insert_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma);
++void i_mmap_remove_vma(struct address_space *mapping,
++		       struct vm_area_struct *vma);
++
+ /*
+  * vma munmap operation
+  */
+-- 
+2.43.0
+

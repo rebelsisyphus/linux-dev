@@ -1,0 +1,91 @@
+From f889db11eb227183bfb3c90ffb0075cd025f3c95 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:14:22 +0800
+Subject: [PATCH 05/13] mm: add helpers for sharded i_mmap allocation
+
+The sharded i_mmap state needs one allocation path that initializes
+every shard consistently before later conversion code can publish it
+on an address_space.
+
+Add allocation and free helpers for the optional sharded state.
+The allocator initializes the fixed shard count, accounting counters,
+interval-tree roots, and per-shard rwsems; inode teardown now uses
+the matching free helper.
+
+No runtime allocation site is added yet, so this only prepares the
+sharded i_mmap lifecycle for the follow-up conversion path.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/inode.c         |  2 +-
+ include/linux/fs.h |  3 +++
+ mm/vma.c           | 26 ++++++++++++++++++++++++++
+ 3 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index c6fc5514f3c5..791ce61c2f64 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -367,7 +367,7 @@ void __destroy_inode(struct inode *inode)
+ {
+ 	struct address_space *mapping = inode->i_mapping;
+ 
+-	kfree(mapping->i_mmap_shards);
++	i_mmap_shards_free(mapping->i_mmap_shards);
+ 	mapping->i_mmap_shards = NULL;
+ 	inode_detach_wb(inode);
+ 	security_inode_free(inode);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index cb2beebf77e2..1ef3f1966ccd 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -465,6 +465,9 @@ struct i_mmap_shards {
+ 	struct i_mmap_shard	shard[];
+ };
+ 
++struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
++void i_mmap_shards_free(struct i_mmap_shards *shards);
++
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+  * @host: Owner, either the inode or the block_device.
+diff --git a/mm/vma.c b/mm/vma.c
+index e7f306888f20..efee0d0c4805 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -7,6 +7,32 @@
+ #include "vma_internal.h"
+ #include "vma.h"
+ 
++struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
++{
++	struct i_mmap_shards *shards;
++	unsigned int i;
++
++	shards = kzalloc(struct_size(shards, shard, I_MMAP_NR_SHARDS), gfp);
++	if (!shards)
++		return NULL;
++
++	shards->nr_shards = I_MMAP_NR_SHARDS;
++	atomic_set(&shards->nr_vmas, 0);
++	atomic_set(&shards->trylock_fails, 0);
++
++	for (i = 0; i < I_MMAP_NR_SHARDS; i++) {
++		shards->shard[i].tree = RB_ROOT_CACHED;
++		init_rwsem(&shards->shard[i].rwsem);
++	}
++
++	return shards;
++}
++
++void i_mmap_shards_free(struct i_mmap_shards *shards)
++{
++	kfree(shards);
++}
++
+ struct mmap_state {
+ 	struct mm_struct *mm;
+ 	struct vma_iterator *vmi;
+-- 
+2.43.0
+

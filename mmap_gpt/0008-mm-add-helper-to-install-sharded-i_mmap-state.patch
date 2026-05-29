@@ -1,0 +1,91 @@
+From 50d4b36288c60433452c47fd0c32d29133bcd450 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:32:58 +0800
+Subject: [PATCH 08/13] mm: add helper to install sharded i_mmap state
+
+Dynamic i_mmap sharding needs a single conversion point that can move
+the existing central interval tree into the per-shard trees before
+publishing the optional shard state.
+
+Add a locked install helper that hashes VMAs by mm, moves every VMA
+from mapping->i_mmap into the selected shard tree, initializes the
+aggregate VMA count, and publishes the shard pointer with release
+ordering.  No caller is added yet, so this only prepares the later
+dynamic conversion path.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/fs.h |  2 ++
+ mm/vma.c           | 36 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index b6988be2b876..3c56090ed532 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -465,6 +465,8 @@ struct i_mmap_shards {
+ };
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
++bool i_mmap_shards_install_locked(struct address_space *mapping,
++				  struct i_mmap_shards *shards);
+ void i_mmap_shards_free(struct i_mmap_shards *shards);
+ 
+ /**
+diff --git a/mm/vma.c b/mm/vma.c
+index c8249e99ae75..e1ca615b8809 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -4,6 +4,8 @@
+  * VMA-specific functions.
+  */
+ 
++#include <linux/hash.h>
++
+ #include "vma_internal.h"
+ #include "vma.h"
+ 
+@@ -32,6 +34,40 @@ void i_mmap_shards_free(struct i_mmap_shards *shards)
+ 	kfree(shards);
+ }
+ 
++static unsigned int i_mmap_shard_index(const struct i_mmap_shards *shards,
++				       const struct vm_area_struct *vma)
++{
++	return hash_ptr(vma->vm_mm, I_MMAP_SHARD_SHIFT) % shards->nr_shards;
++}
++
++bool i_mmap_shards_install_locked(struct address_space *mapping,
++				  struct i_mmap_shards *shards)
++{
++	struct rb_root_cached *root = &mapping->i_mmap;
++	struct vm_area_struct *vma;
++	unsigned int nr_vmas = 0;
++
++	i_mmap_assert_write_locked(mapping);
++
++	if (WARN_ON_ONCE(READ_ONCE(mapping->i_mmap_shards)))
++		return false;
++
++	while ((vma = vma_interval_tree_iter_first(root, 0, ULONG_MAX))) {
++		struct i_mmap_shard *shard;
++
++		vma_interval_tree_remove(vma, root);
++		shard = &shards->shard[i_mmap_shard_index(shards, vma)];
++		vma_interval_tree_insert(vma, &shard->tree);
++		nr_vmas++;
++	}
++
++	atomic_set(&shards->nr_vmas, nr_vmas);
++	/* Publish only after all moved VMAs and counters are visible. */
++	smp_store_release(&mapping->i_mmap_shards, shards);
++
++	return true;
++}
++
+ struct mmap_state {
+ 	struct mm_struct *mm;
+ 	struct vma_iterator *vmi;
+-- 
+2.43.0
+

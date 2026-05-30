@@ -1,0 +1,109 @@
+From 3e50e34b88e0cf0d62c99f0be8807cf2723e05db Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:35:44 +0800
+Subject: [PATCH 09/16] mm: route VMA i_mmap updates through helpers
+
+The sharded i_mmap conversion path needs all file-VMA tree updates to
+go through a common point before shard-specific locking can be enabled.
+
+Add local insert and remove helpers that keep using the central
+interval tree when no sharded state is present, and update the shard
+tree plus aggregate VMA count if sharded state has been published.
+Convert the main mm/vma.c file-VMA update sites to use them.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/mmap.c | 48 ++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 40 insertions(+), 8 deletions(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 1733b20e483c..fbc0f3e162f0 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -126,6 +126,40 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 	return true;
+ }
+ 
++static void i_mmap_insert_vma(struct address_space *mapping,
++			      struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
++
++	if (shards) {
++		struct i_mmap_shard *shard;
++
++		shard = &shards->shard[i_mmap_shard_index(shards, vma)];
++		vma_interval_tree_insert(vma, &shard->tree);
++		atomic_inc(&shards->nr_vmas);
++		return;
++	}
++
++	vma_interval_tree_insert(vma, &mapping->i_mmap);
++}
++
++static void i_mmap_remove_vma(struct address_space *mapping,
++			      struct vm_area_struct *vma)
++{
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
++
++	if (shards) {
++		struct i_mmap_shard *shard;
++
++		shard = &shards->shard[i_mmap_shard_index(shards, vma)];
++		vma_interval_tree_remove(vma, &shard->tree);
++		atomic_dec(&shards->nr_vmas);
++		return;
++	}
++
++	vma_interval_tree_remove(vma, &mapping->i_mmap);
++}
++
+ #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+ const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
+ const int mmap_rnd_bits_max = CONFIG_ARCH_MMAP_RND_BITS_MAX;
+@@ -175,7 +209,7 @@ static void __remove_shared_vm_struct(struct vm_area_struct *vma,
+ 		mapping_unmap_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_remove(vma, &mapping->i_mmap);
++	i_mmap_remove_vma(mapping, vma);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -497,7 +531,7 @@ static void __vma_link_file(struct vm_area_struct *vma,
+ 		mapping_allow_writable(mapping);
+ 
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_insert(vma, &mapping->i_mmap);
++	i_mmap_insert_vma(mapping, vma);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+@@ -604,10 +638,9 @@ static inline void vma_prepare(struct vma_prepare *vp)
+ 
+ 	if (vp->file) {
+ 		flush_dcache_mmap_lock(vp->mapping);
+-		vma_interval_tree_remove(vp->vma, &vp->mapping->i_mmap);
++		i_mmap_remove_vma(vp->mapping, vp->vma);
+ 		if (vp->adj_next)
+-			vma_interval_tree_remove(vp->adj_next,
+-						 &vp->mapping->i_mmap);
++			i_mmap_remove_vma(vp->mapping, vp->adj_next);
+ 	}
+ 
+ }
+@@ -625,9 +658,8 @@ static inline void vma_complete(struct vma_prepare *vp,
+ {
+ 	if (vp->file) {
+ 		if (vp->adj_next)
+-			vma_interval_tree_insert(vp->adj_next,
+-						 &vp->mapping->i_mmap);
+-		vma_interval_tree_insert(vp->vma, &vp->mapping->i_mmap);
++			i_mmap_insert_vma(vp->mapping, vp->adj_next);
++		i_mmap_insert_vma(vp->mapping, vp->vma);
+ 		flush_dcache_mmap_unlock(vp->mapping);
+ 	}
+ 
+-- 
+2.43.0
+

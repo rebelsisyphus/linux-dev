@@ -1,0 +1,93 @@
+From b8b9f314cdf5c8b5d26c3be7d7dcaae9574b5bf5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:07:46 +0800
+Subject: [PATCH 04/16] mm: add sharded i_mmap state to address_space
+
+The i_mmap interval tree is protected by one address_space-wide rwsem.
+Highly parallel exec workloads can concentrate VMA insertions and
+removals on a few mappings such as libc and the dynamic loader,
+making that lock a scalability bottleneck.
+
+Add the address_space-side data structures needed for a future sharded
+i_mmap implementation.  The new optional shard pointer is initialized
+with the address_space and released when the inode is destroyed.
+
+This patch only adds lifecycle support for the sharded state.
+The existing central i_mmap tree and i_mmap_rwsem remain authoritative,
+so runtime behavior is unchanged.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/inode.c         |  5 +++++
+ include/linux/fs.h | 18 +++++++++++++++++-
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ad7445342ee9..8a1d251d0ff7 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -281,6 +281,10 @@ static struct inode *alloc_inode(struct super_block *sb)
+ 
+ void __destroy_inode(struct inode *inode)
+ {
++	struct address_space *mapping = inode->i_mapping;
++
++	kfree(mapping->i_mmap_shards);
++	mapping->i_mmap_shards = NULL;
+ 	BUG_ON(inode_has_buffers(inode));
+ 	inode_detach_wb(inode);
+ 	security_inode_free(inode);
+@@ -401,6 +405,7 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	INIT_LIST_HEAD(&mapping->private_list);
+ 	spin_lock_init(&mapping->private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
++	mapping->i_mmap_shards = NULL;
+ }
+ 
+ void address_space_init_once(struct address_space *mapping)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index c154746ca38e..850a9762e77d 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -471,6 +471,21 @@ struct address_space_operations {
+ 
+ extern const struct address_space_operations empty_aops;
+ 
++#define I_MMAP_SHARD_SHIFT	3
++#define I_MMAP_NR_SHARDS	BIT(I_MMAP_SHARD_SHIFT)
++
++struct i_mmap_shard {
++	struct rb_root_cached	tree;
++	struct rw_semaphore	rwsem;
++};
++
++struct i_mmap_shards {
++	unsigned int		nr_shards;
++	atomic_t		nr_vmas;
++	atomic_t		trylock_fails;
++	struct i_mmap_shard	shard[];
++};
++
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+  * @host: Owner, either the inode or the block_device.
+@@ -483,6 +498,7 @@ extern const struct address_space_operations empty_aops;
+  * @i_mmap_writable: Number of VM_SHARED mappings.
+  * @nr_thps: Number of THPs in the pagecache (non-shmem only).
+  * @i_mmap: Tree of private and shared mappings.
++ * @i_mmap_shards: Optional distributed i_mmap trees and locks.
+  * @i_mmap_rwsem: Protects @i_mmap and @i_mmap_writable.
+  * @nrpages: Number of page entries, protected by the i_pages lock.
+  * @writeback_index: Writeback starts here.
+@@ -514,7 +530,7 @@ struct address_space {
+ 	struct rw_semaphore	i_mmap_rwsem;
+ 	void			*private_data;
+ 
+-	KABI_RESERVE(1)
++	KABI_USE(1, struct i_mmap_shards *i_mmap_shards)
+ 	KABI_RESERVE(2)
+ 	KABI_RESERVE(3)
+ 	KABI_RESERVE(4)
+-- 
+2.43.0
+

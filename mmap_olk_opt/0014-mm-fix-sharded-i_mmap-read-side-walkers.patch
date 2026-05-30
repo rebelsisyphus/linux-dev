@@ -1,0 +1,723 @@
+From e576c79fdd151de1365fe4a1229a879a7fc0012a Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 30 May 2026 09:47:14 +0800
+Subject: [PATCH 14/16] mm: fix sharded i_mmap read-side walkers
+
+Dynamic i_mmap sharding moves VMAs out of the central mapping->i_mmap tree after write-side contention.  Readers that continue to walk the central tree directly can then miss every VMA for a sharded regular-file mapping.
+
+Add a common sharded-aware read walker and convert the regular-file read-side users that can observe sharded state, including rmap, DAX writeback, memory failure collection, khugepaged page-table retract, and pagewalk.  Keep unconverted special mapping classes on the central tree by excluding shmem and hugetlbfs from dynamic shard installation.
+
+Also close the unmap_mapping_range() install race by rechecking shard state after taking the central read lock, and make vma_link_file() validate that callers pass shard-lock storage as a pair.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/dax.c            |  27 ++++++---
+ include/linux/fs.h  |   5 ++
+ mm/khugepaged.c     | 140 ++++++++++++++++++++++----------------------
+ mm/memory-failure.c |  76 +++++++++++++++++-------
+ mm/memory.c         |  18 +++---
+ mm/mmap.c           |  75 +++++++++++++++++++++++-
+ mm/pagewalk.c       |  92 +++++++++++++++++++++--------
+ mm/rmap.c           |  71 ++++++++++++----------
+ 8 files changed, 340 insertions(+), 164 deletions(-)
+
+diff --git a/fs/dax.c b/fs/dax.c
+index e61a31c30df6..5d4c4c5a617a 100644
+--- a/fs/dax.c
++++ b/fs/dax.c
+@@ -923,12 +923,27 @@ static void *dax_insert_entry(struct xa_state *xas, struct vm_fault *vmf,
+ 	return entry;
+ }
+ 
++struct dax_mkclean_walk {
++	unsigned long pfn;
++	unsigned long count;
++	unsigned long index;
++};
++
++static int dax_mkclean_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct dax_mkclean_walk *walk = arg;
++
++	pfn_mkclean_range(walk->pfn, walk->count, walk->index, vma);
++	cond_resched();
++	return 0;
++}
++
+ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 		struct address_space *mapping, void *entry)
+ {
+ 	unsigned long pfn, index, count, end;
++	struct dax_mkclean_walk walk;
+ 	long ret = 0;
+-	struct vm_area_struct *vma;
+ 
+ 	/*
+ 	 * A page got tagged dirty in DAX mapping? Something is seriously
+@@ -987,14 +1002,12 @@ static int dax_writeback_one(struct xa_state *xas, struct dax_device *dax_dev,
+ 	count = 1UL << dax_entry_order(entry);
+ 	index = xas->xa_index & ~(count - 1);
+ 	end = index + count - 1;
++	walk.pfn = pfn;
++	walk.count = count;
++	walk.index = index;
+ 
+ 	/* Walk all mappings of a given index of a file and writeprotect them */
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, index, end) {
+-		pfn_mkclean_range(pfn, count, index, vma);
+-		cond_resched();
+-	}
+-	i_mmap_unlock_read(mapping);
++	i_mmap_read_walk(mapping, index, end, false, dax_mkclean_vma, &walk);
+ 
+ 	dax_flush(dax_dev, page_address(pfn_to_page(pfn)), count * PAGE_SIZE);
+ 	/*
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 51ce4487f30c..e8041901cc34 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -486,10 +486,15 @@ struct i_mmap_shards {
+ 	struct i_mmap_shard	shard[];
+ };
+ 
++typedef int (*i_mmap_walk_fn)(struct vm_area_struct *vma, void *arg);
++
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
+ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 				  struct i_mmap_shards *shards);
+ void i_mmap_shards_free(struct i_mmap_shards *shards);
++int i_mmap_read_walk(struct address_space *mapping, pgoff_t start,
++		     pgoff_t last, bool try_lock, i_mmap_walk_fn fn,
++		     void *arg);
+ int i_mmap_lock_vmas_write(struct address_space *mapping,
+ 			   struct i_mmap_shard *locked[],
+ 			   struct vm_area_struct **vmas, int count);
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 1a19514c1967..6af8247fee66 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1678,88 +1678,88 @@ int collapse_pte_mapped_thp(struct mm_struct *mm, unsigned long addr,
+ 	return result;
+ }
+ 
+-static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
++static int retract_page_tables_vma(struct vm_area_struct *vma, void *arg)
+ {
+-	struct vm_area_struct *vma;
+-
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-		struct mmu_notifier_range range;
+-		struct mm_struct *mm;
+-		unsigned long addr;
+-		pmd_t *pmd, pgt_pmd;
+-		spinlock_t *pml;
+-		spinlock_t *ptl;
+-		bool skipped_uffd = false;
++	pgoff_t pgoff = *(pgoff_t *)arg;
++	struct mmu_notifier_range range;
++	struct mm_struct *mm;
++	unsigned long addr;
++	pmd_t *pmd, pgt_pmd;
++	spinlock_t *pml;
++	spinlock_t *ptl;
++	bool skipped_uffd = false;
+ 
+-		/*
+-		 * Check vma->anon_vma to exclude MAP_PRIVATE mappings that
+-		 * got written to. These VMAs are likely not worth removing
+-		 * page tables from, as PMD-mapping is likely to be split later.
+-		 */
+-		if (READ_ONCE(vma->anon_vma))
+-			continue;
++	/*
++	 * Check vma->anon_vma to exclude MAP_PRIVATE mappings that got written
++	 * to. These VMAs are likely not worth removing page tables from, as
++	 * PMD-mapping is likely to be split later.
++	 */
++	if (READ_ONCE(vma->anon_vma))
++		return 0;
+ 
+-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+-		if (addr & ~HPAGE_PMD_MASK ||
+-		    vma->vm_end < addr + HPAGE_PMD_SIZE)
+-			continue;
++	addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++	if (addr & ~HPAGE_PMD_MASK || vma->vm_end < addr + HPAGE_PMD_SIZE)
++		return 0;
+ 
+-		mm = vma->vm_mm;
+-		if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
+-			continue;
++	mm = vma->vm_mm;
++	if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
++		return 0;
+ 
+-		if (hpage_collapse_test_exit(mm))
+-			continue;
+-		/*
+-		 * When a vma is registered with uffd-wp, we cannot recycle
+-		 * the page table because there may be pte markers installed.
+-		 * Other vmas can still have the same file mapped hugely, but
+-		 * skip this one: it will always be mapped in small page size
+-		 * for uffd-wp registered ranges.
+-		 */
+-		if (userfaultfd_wp(vma))
+-			continue;
++	if (hpage_collapse_test_exit(mm))
++		return 0;
++	/*
++	 * When a vma is registered with uffd-wp, we cannot recycle the page
++	 * table because there may be pte markers installed. Other vmas can
++	 * still have the same file mapped hugely, but skip this one: it will
++	 * always be mapped in small page size for uffd-wp registered ranges.
++	 */
++	if (userfaultfd_wp(vma))
++		return 0;
+ 
+-		/* PTEs were notified when unmapped; but now for the PMD? */
+-		mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
+-					addr, addr + HPAGE_PMD_SIZE);
+-		mmu_notifier_invalidate_range_start(&range);
++	/* PTEs were notified when unmapped; but now for the PMD? */
++	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
++				addr, addr + HPAGE_PMD_SIZE);
++	mmu_notifier_invalidate_range_start(&range);
+ 
+-		pml = pmd_lock(mm, pmd);
+-		ptl = pte_lockptr(mm, pmd);
+-		if (ptl != pml)
+-			spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++	pml = pmd_lock(mm, pmd);
++	ptl = pte_lockptr(mm, pmd);
++	if (ptl != pml)
++		spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
+ 
+-		/*
+-		 * Huge page lock is still held, so normally the page table
+-		 * must remain empty; and we have already skipped anon_vma
+-		 * and userfaultfd_wp() vmas.  But since the mmap_lock is not
+-		 * held, it is still possible for a racing userfaultfd_ioctl()
+-		 * to have inserted ptes or markers.  Now that we hold ptlock,
+-		 * repeating the anon_vma check protects from one category,
+-		 * and repeating the userfaultfd_wp() check from another.
+-		 */
+-		if (unlikely(vma->anon_vma || userfaultfd_wp(vma))) {
+-			skipped_uffd = true;
+-		} else {
+-			pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
+-			pmdp_get_lockless_sync();
+-		}
++	/*
++	 * Huge page lock is still held, so normally the page table must remain
++	 * empty; and we have already skipped anon_vma and userfaultfd_wp()
++	 * vmas. But since the mmap_lock is not held, it is still possible for
++	 * a racing userfaultfd_ioctl() to have inserted ptes or markers. Now
++	 * that we hold ptlock, repeating the anon_vma check protects from one
++	 * category, and repeating the userfaultfd_wp() check from another.
++	 */
++	if (unlikely(vma->anon_vma || userfaultfd_wp(vma))) {
++		skipped_uffd = true;
++	} else {
++		pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
++		pmdp_get_lockless_sync();
++	}
+ 
+-		if (ptl != pml)
+-			spin_unlock(ptl);
+-		spin_unlock(pml);
++	if (ptl != pml)
++		spin_unlock(ptl);
++	spin_unlock(pml);
+ 
+-		mmu_notifier_invalidate_range_end(&range);
++	mmu_notifier_invalidate_range_end(&range);
+ 
+-		if (!skipped_uffd) {
+-			mm_dec_nr_ptes(mm);
+-			page_table_check_pte_clear_range(mm, addr, pgt_pmd);
+-			pte_free_defer(mm, pmd_pgtable(pgt_pmd));
+-		}
++	if (!skipped_uffd) {
++		mm_dec_nr_ptes(mm);
++		page_table_check_pte_clear_range(mm, addr, pgt_pmd);
++		pte_free_defer(mm, pmd_pgtable(pgt_pmd));
+ 	}
+-	i_mmap_unlock_read(mapping);
++
++	return 0;
++}
++
++static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
++{
++	i_mmap_read_walk(mapping, pgoff, pgoff, false, retract_page_tables_vma,
++			 &pgoff);
+ }
+ 
+ /**
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index 3388acc996e2..5d1dff3b6d85 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -649,37 +649,51 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
+ /*
+  * Collect processes when the error hit a file mapped page.
+  */
++struct collect_procs_file_walk {
++	struct page *page;
++	struct task_struct *task;
++	struct list_head *to_kill;
++};
++
++static int collect_procs_file_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct collect_procs_file_walk *walk = arg;
++
++	/*
++	 * Send early kill signal to tasks where a vma covers the page but the
++	 * corrupted page is not necessarily mapped in its pte. Assume
++	 * applications who requested early kill want to be informed of all such
++	 * data corruptions.
++	 */
++	if (vma->vm_mm == walk->task->mm)
++		add_to_kill_anon_file(walk->task, walk->page, vma,
++				      walk->to_kill);
++	return 0;
++}
++
+ static void collect_procs_file(struct folio *folio, struct page *page,
+ 		struct list_head *to_kill, int force_early)
+ {
+-	struct vm_area_struct *vma;
+ 	struct task_struct *tsk;
+ 	struct address_space *mapping = folio->mapping;
+ 	pgoff_t pgoff;
+ 
+-	i_mmap_lock_read(mapping);
+ 	rcu_read_lock();
+ 	pgoff = page_to_pgoff(page);
+ 	for_each_process(tsk) {
+ 		struct task_struct *t = task_early_kill(tsk, force_early);
++		struct collect_procs_file_walk walk = {
++			.page = page,
++			.task = t,
++			.to_kill = to_kill,
++		};
+ 
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+-				      pgoff) {
+-			/*
+-			 * Send early kill signal to tasks where a vma covers
+-			 * the page but the corrupted page is not necessarily
+-			 * mapped in its pte.
+-			 * Assume applications who requested early kill want
+-			 * to be informed of all such data corruptions.
+-			 */
+-			if (vma->vm_mm == t->mm)
+-				add_to_kill_anon_file(t, page, vma, to_kill);
+-		}
++		i_mmap_read_walk(mapping, pgoff, pgoff, false,
++				 collect_procs_file_vma, &walk);
+ 	}
+ 	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
+ }
+ 
+ #ifdef CONFIG_FS_DAX
+@@ -693,27 +707,45 @@ static void add_to_kill_fsdax(struct task_struct *tsk, struct page *p,
+ /*
+  * Collect processes when the error hit a fsdax page.
+  */
++struct collect_procs_fsdax_walk {
++	struct page *page;
++	struct task_struct *task;
++	struct list_head *to_kill;
++	pgoff_t pgoff;
++};
++
++static int collect_procs_fsdax_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct collect_procs_fsdax_walk *walk = arg;
++
++	if (vma->vm_mm == walk->task->mm)
++		add_to_kill_fsdax(walk->task, walk->page, vma,
++				  walk->to_kill, walk->pgoff);
++	return 0;
++}
++
+ static void collect_procs_fsdax(struct page *page,
+ 		struct address_space *mapping, pgoff_t pgoff,
+ 		struct list_head *to_kill)
+ {
+-	struct vm_area_struct *vma;
+ 	struct task_struct *tsk;
+ 
+-	i_mmap_lock_read(mapping);
+ 	rcu_read_lock();
+ 	for_each_process(tsk) {
+ 		struct task_struct *t = task_early_kill(tsk, true);
++		struct collect_procs_fsdax_walk walk = {
++			.page = page,
++			.task = t,
++			.to_kill = to_kill,
++			.pgoff = pgoff,
++		};
+ 
+ 		if (!t)
+ 			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-			if (vma->vm_mm == t->mm)
+-				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
+-		}
++		i_mmap_read_walk(mapping, pgoff, pgoff, false,
++				 collect_procs_fsdax_vma, &walk);
+ 	}
+ 	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
+ }
+ #endif /* CONFIG_FS_DAX */
+ 
+diff --git a/mm/memory.c b/mm/memory.c
+index 5fa54b8b251e..539173666d00 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3858,18 +3858,20 @@ static void unmap_mapping_range_file(struct address_space *mapping,
+ 	struct i_mmap_shards *shards;
+ 	unsigned int i;
+ 
+-	/*
+-	 * If sharding is not yet published, the central read lock excludes
+-	 * install-time migration to shard trees.
+-	 */
+ 	shards = smp_load_acquire(&mapping->i_mmap_shards);
+ 	if (!shards) {
+ 		i_mmap_lock_read(mapping);
+-		if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-			unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-						 last_index, details);
++		/* Pair with install-time publish after shard trees are built. */
++		shards = smp_load_acquire(&mapping->i_mmap_shards);
++		if (!shards) {
++			if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
++				unmap_mapping_range_tree(&mapping->i_mmap,
++							 first_index,
++							 last_index, details);
++			i_mmap_unlock_read(mapping);
++			return;
++		}
+ 		i_mmap_unlock_read(mapping);
+-		return;
+ 	}
+ 
+ 	for (i = 0; i < shards->nr_shards; i++) {
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 72f73a4146a1..fd9d4d298ed6 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -51,6 +51,7 @@
+ #include <linux/vm_object.h>
+ #include <linux/xcall.h>
+ #include <linux/hash.h>
++#include <linux/magic.h>
+ 
+ #include <linux/uaccess.h>
+ #include <asm/cacheflush.h>
+@@ -211,7 +212,8 @@ static bool i_mmap_shards_allowed(struct address_space *mapping)
+ {
+ 	struct inode *inode = mapping->host;
+ 
+-	return inode && S_ISREG(inode->i_mode);
++	return inode && S_ISREG(inode->i_mode) && !shmem_mapping(mapping) &&
++		inode->i_sb->s_magic != HUGETLBFS_MAGIC;
+ }
+ 
+ static void i_mmap_maybe_install_shards(struct address_space *mapping)
+@@ -275,6 +277,77 @@ void i_mmap_unlock_vmas_write(struct address_space *mapping,
+ 		up_write(&locked[i]->rwsem);
+ }
+ 
++static int i_mmap_read_walk_shards(struct i_mmap_shards *shards,
++				   pgoff_t start, pgoff_t last,
++				   bool try_lock, i_mmap_walk_fn fn,
++				   void *arg)
++{
++	struct vm_area_struct *vma;
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < shards->nr_shards; i++) {
++		struct i_mmap_shard *shard = &shards->shard[i];
++
++		if (try_lock) {
++			if (!down_read_trylock(&shard->rwsem))
++				return -EAGAIN;
++		} else {
++			down_read(&shard->rwsem);
++		}
++
++		vma_interval_tree_foreach(vma, &shard->tree, start, last) {
++			ret = fn(vma, arg);
++			if (ret) {
++				up_read(&shard->rwsem);
++				return ret;
++			}
++		}
++		up_read(&shard->rwsem);
++	}
++
++	return 0;
++}
++
++int i_mmap_read_walk(struct address_space *mapping, pgoff_t start,
++		     pgoff_t last, bool try_lock, i_mmap_walk_fn fn,
++		     void *arg)
++{
++	struct i_mmap_shards *shards;
++	struct vm_area_struct *vma;
++	int ret;
++
++	shards = i_mmap_shards_load(mapping);
++	if (shards)
++		return i_mmap_read_walk_shards(shards, start, last, try_lock,
++					       fn, arg);
++
++	if (try_lock) {
++		if (!i_mmap_trylock_read(mapping))
++			return -EAGAIN;
++	} else {
++		i_mmap_lock_read(mapping);
++	}
++
++	shards = i_mmap_shards_load(mapping);
++	if (shards) {
++		i_mmap_unlock_read(mapping);
++		return i_mmap_read_walk_shards(shards, start, last, try_lock,
++					       fn, arg);
++	}
++
++	vma_interval_tree_foreach(vma, &mapping->i_mmap, start, last) {
++		ret = fn(vma, arg);
++		if (ret) {
++			i_mmap_unlock_read(mapping);
++			return ret;
++		}
++	}
++
++	i_mmap_unlock_read(mapping);
++	return 0;
++}
++
+ #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+ const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
+ const int mmap_rnd_bits_max = CONFIG_ARCH_MMAP_RND_BITS_MAX;
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index 0ee2ff6eac2b..7f86d91eb7e8 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -644,38 +644,82 @@ int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+ 		.ops		= ops,
+ 		.private	= private,
+ 	};
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
+ 	struct vm_area_struct *vma;
+ 	pgoff_t vba, vea, cba, cea;
+ 	unsigned long start_addr, end_addr;
++	pgoff_t last_index = first_index + nr - 1;
++	unsigned int i;
+ 	int err = 0;
+ 
+-	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
+-				  first_index + nr - 1) {
+-		/* Clip to the vma */
+-		vba = vma->vm_pgoff;
+-		vea = vba + vma_pages(vma);
+-		cba = first_index;
+-		cba = max(cba, vba);
+-		cea = first_index + nr;
+-		cea = min(cea, vea);
+-
+-		start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
+-		end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
+-		if (start_addr >= end_addr)
+-			continue;
++	if (!shards) {
++		lockdep_assert_held(&mapping->i_mmap_rwsem);
++		vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
++					  last_index) {
++			/* Clip to the vma */
++			vba = vma->vm_pgoff;
++			vea = vba + vma_pages(vma);
++			cba = max(first_index, vba);
++			cea = min(first_index + nr, vea);
++
++			start_addr = ((cba - vba) << PAGE_SHIFT) +
++				vma->vm_start;
++			end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++			if (start_addr >= end_addr)
++				continue;
+ 
+-		walk.vma = vma;
+-		walk.mm = vma->vm_mm;
++			walk.vma = vma;
++			walk.mm = vma->vm_mm;
+ 
+-		err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
+-		if (err > 0) {
+-			err = 0;
+-			break;
+-		} else if (err < 0)
+-			break;
++			err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
++			if (err > 0) {
++				err = 0;
++				break;
++			} else if (err < 0) {
++				break;
++			}
++
++			err = __walk_page_range(start_addr, end_addr, &walk);
++			if (err)
++				break;
++		}
++		return err;
++	}
++
++	for (i = 0; i < shards->nr_shards; i++) {
++		struct i_mmap_shard *shard = &shards->shard[i];
++
++		down_read(&shard->rwsem);
++		vma_interval_tree_foreach(vma, &shard->tree, first_index,
++					  last_index) {
++			/* Clip to the vma */
++			vba = vma->vm_pgoff;
++			vea = vba + vma_pages(vma);
++			cba = max(first_index, vba);
++			cea = min(first_index + nr, vea);
++
++			start_addr = ((cba - vba) << PAGE_SHIFT) +
++				vma->vm_start;
++			end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++			if (start_addr >= end_addr)
++				continue;
++
++			walk.vma = vma;
++			walk.mm = vma->vm_mm;
++
++			err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
++			if (err > 0) {
++				err = 0;
++				break;
++			} else if (err < 0) {
++				break;
++			}
+ 
+-		err = __walk_page_range(start_addr, end_addr, &walk);
++			err = __walk_page_range(start_addr, end_addr, &walk);
++			if (err)
++				break;
++		}
++		up_read(&shard->rwsem);
+ 		if (err)
+ 			break;
+ 	}
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 249101894e4f..f92e45534989 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -2655,12 +2655,45 @@ static void rmap_walk_anon(struct folio *folio,
+  * Find all the mappings of a folio using the mapping pointer and the vma chains
+  * contained in the address_space struct it points to.
+  */
++struct rmap_walk_file_arg {
++	struct folio *folio;
++	struct rmap_walk_control *rwc;
++};
++
++static int rmap_walk_file_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct rmap_walk_file_arg *walk = arg;
++	struct rmap_walk_control *rwc = walk->rwc;
++	unsigned long address;
++
++	address = vma_address(&walk->folio->page, vma);
++	if (unlikely(address == -EFAULT)) {
++		VM_WARN_ON_ONCE_VMA(true, vma);
++		return 0;
++	}
++	cond_resched();
++
++	if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++		return 0;
++
++	if (!rwc->rmap_one(walk->folio, vma, address, rwc->arg))
++		return 1;
++	if (rwc->done && rwc->done(walk->folio))
++		return 1;
++
++	return 0;
++}
++
+ static void rmap_walk_file(struct folio *folio,
+ 		struct rmap_walk_control *rwc, bool locked)
+ {
+ 	struct address_space *mapping = folio_mapping(folio);
+ 	pgoff_t pgoff_start, pgoff_end;
+-	struct vm_area_struct *vma;
++	struct rmap_walk_file_arg walk = {
++		.folio = folio,
++		.rwc = rwc,
++	};
++	int ret;
+ 
+ 	/*
+ 	 * The page lock not only makes sure that page->mapping cannot
+@@ -2675,37 +2708,11 @@ static void rmap_walk_file(struct folio *folio,
+ 
+ 	pgoff_start = folio_pgoff(folio);
+ 	pgoff_end = pgoff_start + folio_nr_pages(folio) - 1;
+-	if (!locked) {
+-		if (i_mmap_trylock_read(mapping))
+-			goto lookup;
+-
+-		if (rwc->try_lock) {
+-			rwc->contended = true;
+-			return;
+-		}
+-
+-		i_mmap_lock_read(mapping);
+-	}
+-lookup:
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap,
+-			pgoff_start, pgoff_end) {
+-		unsigned long address = vma_address(&folio->page, vma);
+-
+-		VM_BUG_ON_VMA(address == -EFAULT, vma);
+-		cond_resched();
+-
+-		if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
+-			continue;
+-
+-		if (!rwc->rmap_one(folio, vma, address, rwc->arg))
+-			goto done;
+-		if (rwc->done && rwc->done(folio))
+-			goto done;
+-	}
+-
+-done:
+-	if (!locked)
+-		i_mmap_unlock_read(mapping);
++	ret = i_mmap_read_walk(mapping, pgoff_start, pgoff_end,
++			       !locked && rwc->try_lock, rmap_walk_file_vma,
++			       &walk);
++	if (ret == -EAGAIN)
++		rwc->contended = true;
+ }
+ 
+ void rmap_walk(struct folio *folio, struct rmap_walk_control *rwc)
+-- 
+2.43.0
+

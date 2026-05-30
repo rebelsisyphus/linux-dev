@@ -1,0 +1,38 @@
+From cb9c358a129f1500e2a7001a5b074e76f1d8c97b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 00:19:37 +0800
+Subject: [PATCH 06/16] mm: make mapping_mapped aware of i_mmap shards
+
+Future sharded i_mmap users will no longer keep the central interval
+tree as the only source of mapped-state information.  Prepare the
+lightweight mapping_mapped() query to handle that state before
+write-side conversion is enabled.
+
+If sharded state has been published, use the aggregate VMA counter
+maintained by the shard owner.  Otherwise keep the existing central
+tree check unchanged.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/fs.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 53b47a8f2306..51a9e07e4e9f 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -605,6 +605,11 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+  */
+ static inline int mapping_mapped(struct address_space *mapping)
+ {
++	struct i_mmap_shards *shards = READ_ONCE(mapping->i_mmap_shards);
++
++	if (shards)
++		return atomic_read(&shards->nr_vmas) > 0;
++
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+ }
+ 
+-- 
+2.43.0
+

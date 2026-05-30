@@ -1,0 +1,92 @@
+From 215c29fb220c2711a691646453b5c29b6bf7e2d3 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 01:09:24 +0800
+Subject: [PATCH 12/16] mm: make unmap_mapping_range handle i_mmap shards
+
+Sharded i_mmap trees cannot be enabled until direct readers
+stop assuming that every VMA is present in mapping->i_mmap.
+unmap_mapping_folio() and unmap_mapping_pages() are core read-side
+walkers used by truncation and invalidation paths.
+
+Add a local helper that keeps the existing central-tree behavior before
+sharding is published and walks each shard under its read lock after
+publication. This keeps the unmap paths correct for a mapping that
+has already migrated to sharded i_mmap state.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/memory.c | 44 ++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 34 insertions(+), 10 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index ee5388130f2b..5fa54b8b251e 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3851,6 +3851,38 @@ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
+ 	}
+ }
+ 
++static void unmap_mapping_range_file(struct address_space *mapping,
++				     pgoff_t first_index, pgoff_t last_index,
++				     struct zap_details *details)
++{
++	struct i_mmap_shards *shards;
++	unsigned int i;
++
++	/*
++	 * If sharding is not yet published, the central read lock excludes
++	 * install-time migration to shard trees.
++	 */
++	shards = smp_load_acquire(&mapping->i_mmap_shards);
++	if (!shards) {
++		i_mmap_lock_read(mapping);
++		if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
++			unmap_mapping_range_tree(&mapping->i_mmap, first_index,
++						 last_index, details);
++		i_mmap_unlock_read(mapping);
++		return;
++	}
++
++	for (i = 0; i < shards->nr_shards; i++) {
++		struct i_mmap_shard *shard = &shards->shard[i];
++
++		down_read(&shard->rwsem);
++		if (unlikely(!RB_EMPTY_ROOT(&shard->tree.rb_root)))
++			unmap_mapping_range_tree(&shard->tree, first_index,
++						 last_index, details);
++		up_read(&shard->rwsem);
++	}
++}
++
+ /**
+  * unmap_mapping_folio() - Unmap single folio from processes.
+  * @folio: The locked folio to be unmapped.
+@@ -3878,11 +3910,7 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.single_folio = folio;
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	unmap_mapping_range_file(mapping, first_index, last_index, &details);
+ }
+ 
+ /**
+@@ -3908,11 +3936,7 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 	if (last_index < first_index)
+ 		last_index = ULONG_MAX;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	unmap_mapping_range_file(mapping, first_index, last_index, &details);
+ }
+ EXPORT_SYMBOL_GPL(unmap_mapping_pages);
+ 
+-- 
+2.43.0
+

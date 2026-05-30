@@ -1,0 +1,45 @@
+From 2ae88f6f51fa1fc0ef70c80f5aeb2fede389a3f3 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 30 May 2026 10:32:52 +0800
+Subject: [PATCH 15/16] mm: fix sharded i_mmap adaptation build issues
+
+Adapt the sharded i_mmap series to this branch by mirroring the local copy_page_range() predicate in dup_mmap() and using the VMA debug macro available here.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 5 ++++-
+ mm/rmap.c     | 2 +-
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 8bbb40d8cc19..e046ae1a8bff 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -770,7 +770,10 @@ static void dup_mmap_file_batch_add(struct dup_mmap_file_batch *batches,
+ static bool dup_mmap_needs_page_copy(struct vm_area_struct *dst_vma,
+ 				     struct vm_area_struct *src_vma)
+ {
+-	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
++	if (userfaultfd_wp(dst_vma))
++		return true;
++
++	if (src_vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP))
+ 		return true;
+ 
+ 	return src_vma->anon_vma;
+diff --git a/mm/rmap.c b/mm/rmap.c
+index f92e45534989..d5e894e59f33 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -2668,7 +2668,7 @@ static int rmap_walk_file_vma(struct vm_area_struct *vma, void *arg)
+ 
+ 	address = vma_address(&walk->folio->page, vma);
+ 	if (unlikely(address == -EFAULT)) {
+-		VM_WARN_ON_ONCE_VMA(true, vma);
++		VM_BUG_ON_VMA(true, vma);
+ 		return 0;
+ 	}
+ 	cond_resched();
+-- 
+2.43.0
+

@@ -1,7 +1,7 @@
 From f889db11eb227183bfb3c90ffb0075cd025f3c95 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:14:22 +0800
-Subject: [PATCH 05/13] mm: add helpers for sharded i_mmap allocation
+Subject: [PATCH 05/14] mm: add helpers for sharded i_mmap allocation
 
 The sharded i_mmap state needs one allocation path that initializes
 every shard consistently before later conversion code can publish it

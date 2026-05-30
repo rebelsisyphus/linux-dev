@@ -1,7 +1,7 @@
 From 9e5a1e72e711e01cb7d1d5befa9bfdaf6f887546 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Tue, 12 May 2026 22:28:02 +0800
-Subject: [PATCH 02/13] mm: batch file VMA unlink by address_space
+Subject: [PATCH 02/14] mm: batch file VMA unlink by address_space
 
 free_pgtables() batches file-backed VMA unlink operations so
 teardown can remove nearby VMAs from i_mmap under fewer i_mmap_rwsem

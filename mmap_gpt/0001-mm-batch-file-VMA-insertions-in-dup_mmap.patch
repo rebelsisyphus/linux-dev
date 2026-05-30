@@ -1,7 +1,7 @@
 From 309d768c7f35ecf8f6e8dad4761f8f51f100af57 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Tue, 12 May 2026 21:58:49 +0800
-Subject: [PATCH 01/13] mm: batch file VMA insertions in dup_mmap
+Subject: [PATCH 01/14] mm: batch file VMA insertions in dup_mmap
 
 dup_mmap() currently takes mapping->i_mmap_rwsem for every file-backed
 VMA copied into the child mm.  Large dynamically linked processes

@@ -1,7 +1,7 @@
 From 50d4b36288c60433452c47fd0c32d29133bcd450 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:32:58 +0800
-Subject: [PATCH 08/13] mm: add helper to install sharded i_mmap state
+Subject: [PATCH 08/14] mm: add helper to install sharded i_mmap state
 
 Dynamic i_mmap sharding needs a single conversion point that can move
 the existing central interval tree into the per-shard trees before

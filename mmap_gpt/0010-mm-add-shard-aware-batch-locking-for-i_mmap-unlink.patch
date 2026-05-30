@@ -1,7 +1,7 @@
 From 5f6deeef35b2772d129c941c1a512cec16e68cd2 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:57:21 +0800
-Subject: [PATCH 10/13] mm: add shard-aware batch locking for i_mmap unlink
+Subject: [PATCH 10/14] mm: add shard-aware batch locking for i_mmap unlink
 
 Batched file-VMA unlink currently takes the central i_mmap_rwsem once
 for all VMAs in the batch.  Once sharded i_mmap state can be published,

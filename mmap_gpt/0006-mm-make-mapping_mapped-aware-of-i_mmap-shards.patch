@@ -1,7 +1,7 @@
 From 588d711e14e248ab6c18a63827b81e0cff6f4d6e Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:19:37 +0800
-Subject: [PATCH 06/13] mm: make mapping_mapped aware of i_mmap shards
+Subject: [PATCH 06/14] mm: make mapping_mapped aware of i_mmap shards
 
 Future sharded i_mmap users will no longer keep the central interval
 tree as the only source of mapped-state information.  Prepare the

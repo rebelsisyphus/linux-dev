@@ -1,7 +1,7 @@
 From 2d40a32e35981a77ac4a6d2a289957e8e5216742 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:25:50 +0800
-Subject: [PATCH 07/13] mm: keep i_mmap contention counter in address_space
+Subject: [PATCH 07/14] mm: keep i_mmap contention counter in address_space
 
 Dynamic i_mmap sharding needs to count failed trylock attempts before
 sharded state exists.  Keeping that counter inside struct i_mmap_shards

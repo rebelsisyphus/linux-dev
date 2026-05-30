@@ -1,7 +1,7 @@
 From 4a35117fac5d92c51aaf1935596b140694918a01 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 00:35:44 +0800
-Subject: [PATCH 09/13] mm: route VMA i_mmap updates through helpers
+Subject: [PATCH 09/14] mm: route VMA i_mmap updates through helpers
 
 The sharded i_mmap conversion path needs all file-VMA tree updates to
 go through a common point before shard-specific locking can be enabled.

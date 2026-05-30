@@ -1,7 +1,7 @@
 From 49ae4d34be4716ef9df195616506192192a5668d Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 01:09:24 +0800
-Subject: [PATCH 12/13] mm: make unmap_mapping_range handle i_mmap shards
+Subject: [PATCH 12/14] mm: make unmap_mapping_range handle i_mmap shards
 
 Sharded i_mmap trees cannot be enabled until direct readers
 stop assuming that every VMA is present in mapping->i_mmap.

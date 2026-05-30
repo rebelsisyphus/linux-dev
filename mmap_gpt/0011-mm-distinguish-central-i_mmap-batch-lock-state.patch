@@ -1,7 +1,7 @@
 From 2e7928ea02625f8e5341bd4394fdfbac7c2f35bc Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 01:09:24 +0800
-Subject: [PATCH 11/13] mm: distinguish central i_mmap batch lock state
+Subject: [PATCH 11/14] mm: distinguish central i_mmap batch lock state
 
 The shard-aware batch locking helper returned zero both when it had
 taken the central i_mmap_rwsem and when a sharded batch had no locks

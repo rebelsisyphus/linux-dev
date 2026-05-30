@@ -1,7 +1,7 @@
 From 924a2d0ce770d046f616c30eaaaa8d2733b0c466 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Wed, 13 May 2026 10:38:30 +0800
-Subject: [PATCH 13/13] mm: enable i_mmap shards after write contention
+Subject: [PATCH 13/14] mm: enable i_mmap shards after write contention
 
 Dynamic i_mmap sharding needs a safe trigger point after the
 preparatory sharded tree and reader support is in place. Try the

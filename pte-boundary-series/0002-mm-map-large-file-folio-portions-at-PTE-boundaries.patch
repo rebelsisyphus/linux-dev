@@ -1,0 +1,68 @@
+From 707fe69aee444bd781706b4ab51f76d25a3cf64b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 23 Jun 2026 09:44:46 +0800
+Subject: [PATCH 2/2] mm: map large file folio portions at PTE boundaries
+
+finish_fault() maps a whole file folio only if the folio fits in the
+faulting VMA and a single PTE table.  If the folio crosses a PTE table
+boundary, it currently falls back to mapping only the fault page.
+
+On systems with 4KB base pages, an order-4 file folio occupies 64KB
+while a PTE table covers 2MB.  Concurrent exec workloads can repeatedly
+fault shared executable folios at a PTE table boundary.  Mapping only one
+page in this case loses most of the large folio fault reduction while
+retaining the larger folio lock contention domain.
+
+Map the largest subrange of the folio that contains the fault page and
+fits in the current PTE table.  Keep the existing per-page fallback for
+VMA boundaries, file size boundaries, userfaultfd and PTE conflicts.
+
+Build-tested: make -j$(nproc) mm/memory.o
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/memory.c | 22 ++++++++++++++--------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index c2388b7f2a7d..7e0c084ee255 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -5249,20 +5249,26 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
+ 		pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
+ 		/* The index of the entry in the pagetable for fault page. */
+ 		pgoff_t pte_off = pte_index(vmf->address);
++		pgoff_t pte_first, pte_last;
+ 
+ 		/*
+-		 * Fallback to per-page fault in case the folio size in page
+-		 * cache beyond the VMA limits and PMD pagetable limits.
++		 * Fallback to per-page fault if the folio extends beyond the
++		 * VMA.  If it only crosses a PTE table boundary, map the largest
++		 * folio subrange that contains the fault page and fits in the
++		 * current PTE table.
+ 		 */
+ 		if (unlikely(vma_off < idx ||
+-			    vma_off + (nr_pages - idx) > vma_pages(vma) ||
+-			    pte_off < idx ||
+-			    pte_off + (nr_pages - idx)  > PTRS_PER_PTE)) {
++			    vma_off + (nr_pages - idx) > vma_pages(vma))) {
+ 			nr_pages = 1;
+ 		} else {
+-			/* Now we can set mappings for the whole large folio. */
+-			addr = vmf->address - idx * PAGE_SIZE;
+-			page = &folio->page;
++			pte_first = pte_off < idx ? idx - pte_off : 0;
++			pte_last = min_t(pgoff_t, nr_pages,
++					 idx + PTRS_PER_PTE - pte_off);
++
++			/* Map the whole folio unless it crosses a PTE table boundary. */
++			addr = vmf->address - (idx - pte_first) * PAGE_SIZE;
++			page = folio_page(folio, pte_first);
++			nr_pages = pte_last - pte_first;
+ 		}
+ 	}
+ 
+-- 
+2.43.0
+

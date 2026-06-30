@@ -1,0 +1,31 @@
+WARNING! Selftests relying on bpf_testmod.ko will be skipped.
+Can't find bpf_testmod.ko kernel module: -2
+test_sockmap_drop_after_partial_read:PASS:open_and_load 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(native) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:recv_timeout(partial) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_prog_attach 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_map_update_elem 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(drop) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_map_delete_elem 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(native again) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:setsockopt(SO_ZEROCOPY) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:getsockopt(TCP_ZEROCOPY_RECEIVE) 0 nsec
+test_sockmap_drop_after_partial_read:FAIL:recv_timeout(native again) unexpected recv_timeout(native again): actual -1 != expected 1
+#1/34    sockmap_basic/sockmap drop after partial read:FAIL
+#1       sockmap_basic:FAIL
+
+All error logs:
+test_sockmap_drop_after_partial_read:PASS:open_and_load 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(native) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:recv_timeout(partial) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_prog_attach 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_map_update_elem 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(drop) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:bpf_map_delete_elem 0 nsec
+test_sockmap_drop_after_partial_read:PASS:xsend(native again) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:setsockopt(SO_ZEROCOPY) 0 nsec
+test_sockmap_drop_after_partial_read:PASS:getsockopt(TCP_ZEROCOPY_RECEIVE) 0 nsec
+test_sockmap_drop_after_partial_read:FAIL:recv_timeout(native again) unexpected recv_timeout(native again): actual -1 != expected 1
+#1/34    sockmap_basic/sockmap drop after partial read:FAIL
+#1       sockmap_basic:FAIL
+Summary: 0/0 PASSED, 0 SKIPPED, 1 FAILED

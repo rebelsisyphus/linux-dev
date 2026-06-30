@@ -1,0 +1,32 @@
+From 3cdaf21ee1899aa545f64de0d5a0977e5be177b0 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 30 Jun 2026 14:45:23 +0800
+Subject: [PATCH 0/2] bpf, sockmap: fix copied_seq after partial TCP read
+
+tcp_eat_skb() assumes that an skb dequeued by the sockmap verdict path
+has not previously been consumed. A socket can, however, be inserted
+into a sockmap after userspace has partially read the skb at the head of
+its receive queue.
+
+When new data invokes the verdict path, tcp_eat_skb() advances
+copied_seq by the full skb length. This counts the already-read prefix
+twice, moves copied_seq beyond rcv_nxt, and makes later native TCP reads
+fail. TCP_ZEROCOPY_RECEIVE then triggers the tcp_recvmsg_locked()
+sequence warning reported by syzbot.
+
+Patch 1 advances copied_seq to the skb end sequence and accounts only
+the unread sequence-space delta during receive-buffer cleanup.
+
+Patch 2 adds a deterministic regression test which reproduces the
+tcp_recvmsg_locked() warning on the unpatched kernel.
+
+Dong Chenchen (2):
+  bpf, sockmap: account only unread data in tcp_eat_skb
+  selftests/bpf: cover sockmap drop after partial TCP read
+
+ net/ipv4/tcp_bpf.c                            |  9 ++-
+ .../selftests/bpf/prog_tests/sockmap_basic.c  | 73 +++++++++++++++++++
+ 2 files changed, 78 insertions(+), 4 deletions(-)
+
+-- 
+2.43.0

@@ -1,0 +1,83 @@
+[   14.208832] ------------[ cut here ]------------
+[   14.208953] TCP recvmsg seq # bug 2: copied AA28C633, seq AA28C601, rcvnxt AA28C602, fl 40
+[   14.209031] WARNING: net/ipv4/tcp.c:2745 at tcp_recvmsg_locked+0x45e/0x9f0, CPU#1: test_progs/307
+[   14.209469] Modules linked in:
+[   14.209679] CPU: 1 UID: 0 PID: 307 Comm: test_progs Not tainted 7.1.0-rc5-00151-g78aa5e823bc3-dirty #237 PREEMPT(lazy) 
+[   14.209712] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+[   14.209764] RIP: 0010:tcp_recvmsg_locked+0x46f/0x9f0
+[   14.209808] Code: 48 c7 43 18 00 00 00 00 e8 4e 0e ef ff e9 e2 00 00 00 48 8d 3d 52 0c 68 01 8b 8d c0 06 00 00 8b 53 28 41 8b 36 44 8b 44 24 10 <67> 48 0f b9 3a e9 dc fc ff ff 48 8b 45 60 a8 02 0f 85 bb 04 00 00
+[   14.209836] RSP: 0018:ffff9c7640f4b938 EFLAGS: 00000246
+[   14.209855] RAX: ffff9b30066cc4e8 RBX: ffff9b30066cc4e8 RCX: 00000000aa28c602
+[   14.209862] RDX: 00000000aa28c601 RSI: 00000000aa28c633 RDI: ffffffffa3d247f0
+[   14.209869] RBP: ffff9b30027c5580 R08: 0000000000000040 R09: ffff9c7640f4bc18
+[   14.209876] R10: 00000000ffffffcf R11: 0000000000000000 R12: 0000000000000032
+[   14.209882] R13: 0000000000000000 R14: ffff9b30027c5b48 R15: ffff9b30027c5628
+[   14.209914] FS:  00007fc37aacc140(0000) GS:ffff9b309a720000(0000) knlGS:0000000000000000
+[   14.209924] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[   14.209931] CR2: 000055d3a002a58c CR3: 000000000667a000 CR4: 00000000000006f0
+[   14.209977] Call Trace:
+[   14.210412]  <TASK>
+[   14.210612]  tcp_zerocopy_receive+0x4d0/0xa10
+[   14.210718]  do_tcp_getsockopt+0x52e/0x10e0
+[   14.210788]  ? skb_release_data+0x154/0x1a0
+[   14.210818]  ? tcp_rcv_established+0x6c3/0xc90
+[   14.210844]  tcp_getsockopt+0x33/0x40
+[   14.210878]  do_sock_getsockopt+0x3b5/0x460
+[   14.210945]  ? __sys_getsockopt+0x72/0xb0
+[   14.210954]  __sys_getsockopt+0x72/0xb0
+[   14.210966]  __x64_sys_getsockopt+0x1a/0x30
+[   14.210981]  do_syscall_64+0xf9/0x540
+[   14.210995]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   14.211082] RIP: 0033:0x7fc37acb2a6e
+[   14.211537] Code: 48 8b 0d ad 73 0d 00 f7 d8 64 89 01 48 83 c8 ff c3 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 49 89 ca b8 37 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 0a c3 66 0f 1f 84 00 00 00 00 00 48 8b 15 71
+[   14.211555] RSP: 002b:00007ffdcafae928 EFLAGS: 00000246 ORIG_RAX: 0000000000000037
+[   14.211585] RAX: ffffffffffffffda RBX: 00007ffdcafaeed8 RCX: 00007fc37acb2a6e
+[   14.211590] RDX: 0000000000000023 RSI: 0000000000000006 RDI: 000000000000000a
+[   14.211594] RBP: 00007ffdcafaec70 R08: 00007ffdcafae95c R09: 0000000000000000
+[   14.211598] R10: 00007ffdcafaeac0 R11: 0000000000000246 R12: 0000000000000003
+[   14.211602] R13: 0000000000000000 R14: 000055d3a009ce18 R15: 00007fc37ae18000
+[   14.211636]  </TASK>
+[   14.211673] ---[ end trace 0000000000000000 ]---
+[   14.211835] ------------[ cut here ]------------
+[   14.211840] cleanup rbuf bug: copied AA28C633 seq AA28C602 rcvnxt AA28C602
+[   14.211846] WARNING: net/ipv4/tcp.c:1609 at tcp_cleanup_rbuf+0x37/0x50, CPU#1: test_progs/307
+[   14.211858] Modules linked in:
+[   14.211913] CPU: 1 UID: 0 PID: 307 Comm: test_progs Tainted: G        W           7.1.0-rc5-00151-g78aa5e823bc3-dirty #237 PREEMPT(lazy) 
+[   14.211938] Tainted: [W]=WARN
+[   14.211944] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+[   14.211949] RIP: 0010:tcp_cleanup_rbuf+0x3d/0x50
+[   14.211958] Code: 85 c0 74 2b 48 8d 97 a8 00 00 00 48 39 d0 74 1f 8b 50 2c 8b b7 c8 05 00 00 39 d6 78 12 48 8d 3d b9 18 68 01 8b 8b c0 06 00 00 <67> 48 0f b9 3a 89 ee 48 89 df 5b 5d e9 e2 fe ff ff 66 90 90 90 90
+[   14.211964] RSP: 0018:ffff9c7640f4b920 EFLAGS: 00000202
+[   14.211970] RAX: ffff9b30066cc4e8 RBX: ffff9b30027c5580 RCX: 00000000aa28c602
+[   14.211974] RDX: 00000000aa28c602 RSI: 00000000aa28c633 RDI: ffffffffa3d247c0
+[   14.211978] RBP: 0000000000000000 R08: 0000000000000040 R09: ffff9c7640f4bc18
+[   14.211982] R10: 00000000ffffffcf R11: 0000000000000000 R12: 0000000000000032
+[   14.211986] R13: 0000000000000000 R14: ffff9b30027c5b48 R15: ffff9b30027c5628
+[   14.211990] FS:  00007fc37aacc140(0000) GS:ffff9b309a720000(0000) knlGS:0000000000000000
+[   14.211996] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[   14.212000] CR2: 000055d3a002a58c CR3: 000000000667a000 CR4: 00000000000006f0
+[   14.212005] Call Trace:
+[   14.212015]  <TASK>
+[   14.212019]  tcp_recvmsg_locked+0x1cf/0x9f0
+[   14.212031]  tcp_zerocopy_receive+0x4d0/0xa10
+[   14.212051]  do_tcp_getsockopt+0x52e/0x10e0
+[   14.212065]  ? skb_release_data+0x154/0x1a0
+[   14.212073]  ? tcp_rcv_established+0x6c3/0xc90
+[   14.212268]  tcp_getsockopt+0x33/0x40
+[   14.212292]  do_sock_getsockopt+0x3b5/0x460
+[   14.212309]  ? __sys_getsockopt+0x72/0xb0
+[   14.212316]  __sys_getsockopt+0x72/0xb0
+[   14.212324]  __x64_sys_getsockopt+0x1a/0x30
+[   14.212330]  do_syscall_64+0xf9/0x540
+[   14.212338]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   14.212346] RIP: 0033:0x7fc37acb2a6e
+[   14.212356] Code: 48 8b 0d ad 73 0d 00 f7 d8 64 89 01 48 83 c8 ff c3 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 49 89 ca b8 37 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 0a c3 66 0f 1f 84 00 00 00 00 00 48 8b 15 71
+[   14.212363] RSP: 002b:00007ffdcafae928 EFLAGS: 00000246 ORIG_RAX: 0000000000000037
+[   14.212373] RAX: ffffffffffffffda RBX: 00007ffdcafaeed8 RCX: 00007fc37acb2a6e
+[   14.212378] RDX: 0000000000000023 RSI: 0000000000000006 RDI: 000000000000000a
+[   14.212381] RBP: 00007ffdcafaec70 R08: 00007ffdcafae95c R09: 0000000000000000
+[   14.212385] R10: 00007ffdcafaeac0 R11: 0000000000000246 R12: 0000000000000003
+[   14.212389] R13: 0000000000000000 R14: 000055d3a009ce18 R15: 00007fc37ae18000
+[   14.212398]  </TASK>
+[   14.212402] ---[ end trace 0000000000000000 ]---
+[   15.227697] test_progs (307) used greatest stack depth: 12152 bytes left

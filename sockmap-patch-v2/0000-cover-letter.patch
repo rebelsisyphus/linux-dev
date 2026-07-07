@@ -1,0 +1,65 @@
+From 5ab3bab23412636f7e5745382c5bd0c056ccc49b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 7 Jul 2026 21:39:42 +0800
+Subject: [PATCH net v2 0/3] bpf, sockmap: fix copied_seq after partial TCP read
+
+tcp_eat_skb() assumes that an skb dequeued by the sockmap verdict path
+has not previously been consumed. However, a socket can be inserted
+into a sockmap after userspace has partially read the skb at the head of
+its receive queue.
+
+When new data invokes the verdict path, tcp_eat_skb() can advance
+copied_seq by sequence space that was already read or by sequence space
+that belongs after unread SK_PASS data already queued on ingress_msg.
+Both cases can move copied_seq beyond rcv_nxt and make later native TCP
+reads fail. TCP_ZEROCOPY_RECEIVE then triggers the tcp_recvmsg_locked()
+sequence warning reported by syzbot.
+
+TCP recvmsg seq # bug 2: copied AA28C633, seq AA28C601, rcvnxt AA28C602
+WARNING: net/ipv4/tcp.c:2745 at tcp_recvmsg_locked
+RIP: 0010:tcp_recvmsg_locked (net/ipv4/tcp.c:2745)
+Call Trace:
+<TASK>
+tcp_zerocopy_receive (net/ipv4/tcp.c:1995 net/ipv4/tcp.c:2227)
+do_tcp_getsockopt (net/ipv4/tcp.c:4771)
+tcp_getsockopt (net/ipv4/tcp.c:4869)
+do_sock_getsockopt (net/socket.c:2487)
+__sys_getsockopt (net/socket.c:2518)
+__x64_sys_getsockopt (net/socket.c:2525 net/socket.c:2522)
+do_syscall_64 (arch/x86/entry/syscall_64.c:63)
+entry_SYSCALL_64_after_hwframe (arch/x86/entry/entry_64.S:121)
+
+Patch 1 advances copied_seq only over unread sequence space when
+tcp_eat_skb() consumes a partially read skb.
+
+Patch 2 adds a deterministic regression test which reproduces the
+tcp_recvmsg_locked() warning on the unpatched kernel.
+
+Patch 3 handles the review case where SK_PASS data is queued on
+ingress_msg and a following skb is dropped or redirected before the
+SK_PASS data is read. It defers TCP sequence consumption until the
+earlier self-ingress message is fully read, trims already-read data from
+self-ingress SK_PASS, and extends the selftests to cover SK_PASS followed
+by SK_DROP, SK_REDIRECT, and SK_PASS after a partial native read.
+
+Changes since v1:
+  - Fix SK_PASS followed by SK_DROP/SK_REDIRECT sequence corruption.
+  - Fix SK_PASS after partial native TCP read duplicate delivery.
+  - Synchronize the partial-read SK_DROP regression with verdict
+    execution before deleting the sockmap entry.
+  - Add regression coverage for the new SK_PASS paths.
+
+Dong Chenchen (3):
+  bpf, sockmap: account only unread data in tcp_eat_skb
+  selftests/bpf: cover sockmap drop after partial TCP read
+  bpf, sockmap: preserve self-ingress TCP sequence space
+
+ include/linux/skmsg.h                         |   4 +-
+ net/core/skmsg.c                              |  58 ++++-
+ net/ipv4/tcp_bpf.c                            |  22 +-
+ .../selftests/bpf/prog_tests/sockmap_basic.c  | 226 ++++++++++++++++++
+ .../bpf/progs/test_sockmap_drop_prog.c        |  18 ++
+ 5 files changed, 316 insertions(+), 12 deletions(-)
+
+-- 
+2.43.0

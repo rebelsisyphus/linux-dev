@@ -1,0 +1,58 @@
+From: Codex <codex@local>
+Subject: [PATCH net 1/2] sockmap: serialize UDP sk_msg recvmsg
+
+UDP sockmap recvmsg can call sk_msg_recvmsg() concurrently from multiple
+reader threads on the same socket.  sk_msg_recvmsg() only briefly locks
+the ingress queue while peeking the first sk_msg; it then updates the
+scatterlist state and message length without a per-consumer lock.
+
+Other sockmap users serialize this path with their socket or receive
+locks.  Restore the UDP socket lock around sk_msg_recvmsg(), and drop
+it while sleeping in udp_msg_wait_data() or falling back to the native
+UDP recvmsg path.
+
+This fixes concurrent corruption that can surface as copy_page_to_iter()
+warnings from __sk_msg_recvmsg().
+
+Fixes: 9f2470fbc4cb ("skmsg: Improve udp_bpf_recvmsg() accuracy")
+Signed-off-by: YOUR NAME <YOUR.EMAIL@example.com>
+---
+ net/ipv4/udp_bpf.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+diff --git a/net/ipv4/udp_bpf.c b/net/ipv4/udp_bpf.c
+index 9f33b07b1481..f924b255cee6 100644
+--- a/net/ipv4/udp_bpf.c
++++ b/net/ipv4/udp_bpf.c
+@@ -50,7 +50,9 @@ static int udp_msg_wait_data(struct sock *sk, struct sk_psock *psock,
+ 	sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+ 	ret = udp_msg_has_data(sk, psock);
+ 	if (!ret) {
++		release_sock(sk);
+ 		wait_woken(&wait, TASK_INTERRUPTIBLE, timeo);
++		lock_sock(sk);
+ 		ret = udp_msg_has_data(sk, psock);
+ 	}
+ 	sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+@@ -79,6 +81,7 @@ static int udp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+ 		goto out;
+ 	}
+ 
++	lock_sock(sk);
+ msg_bytes_ready:
+ 	copied = sk_msg_recvmsg(sk, psock, msg, len, flags);
+ 	if (!copied) {
+@@ -90,12 +93,14 @@ static int udp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+ 		if (data) {
+ 			if (psock_has_data(psock))
+ 				goto msg_bytes_ready;
++			release_sock(sk);
+ 			ret = sk_udp_recvmsg(sk, msg, len, flags);
+ 			goto out;
+ 		}
+ 		copied = -EAGAIN;
+ 	}
+ 	ret = copied;
++	release_sock(sk);
+ out:
+ 	sk_psock_put(sk, psock);
+ 	return ret;

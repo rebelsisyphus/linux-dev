@@ -1,0 +1,59 @@
+From 21a69b2a2b8cfe00f0edbcc98dcbfea133bcdc52 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 7 Jul 2026 21:43:56 +0800
+Subject: [PATCH net v3 0/2] bpf, sockmap: fix copied_seq receive ordering
+
+tcp_eat_skb() assumes that an skb dequeued by the sockmap verdict path
+has not previously been consumed. However, a socket can be inserted into
+a sockmap after userspace has partially read the skb at the head of its
+receive queue.
+
+When new data invokes the verdict path, tcp_eat_skb() can advance
+copied_seq by sequence space that was already read or by sequence space
+that belongs after unread SK_PASS data already queued on ingress_msg.
+Both cases can move copied_seq beyond rcv_nxt and make later native TCP
+reads fail. TCP_ZEROCOPY_RECEIVE then triggers the tcp_recvmsg_locked()
+sequence warning reported by syzbot.
+
+TCP recvmsg seq # bug 2: copied AA28C633, seq AA28C601, rcvnxt AA28C602
+WARNING: net/ipv4/tcp.c:2745 at tcp_recvmsg_locked
+RIP: 0010:tcp_recvmsg_locked (net/ipv4/tcp.c:2745)
+Call Trace:
+<TASK>
+tcp_zerocopy_receive (net/ipv4/tcp.c:1995 net/ipv4/tcp.c:2227)
+do_tcp_getsockopt (net/ipv4/tcp.c:4771)
+tcp_getsockopt (net/ipv4/tcp.c:4869)
+do_sock_getsockopt (net/socket.c:2487)
+__sys_getsockopt (net/socket.c:2518)
+__x64_sys_getsockopt (net/socket.c:2525 net/socket.c:2522)
+do_syscall_64 (arch/x86/entry/syscall_64.c:63)
+entry_SYSCALL_64_after_hwframe (arch/x86/entry/entry_64.S:121)
+
+Patch 1 keeps copied_seq advancing in TCP receive order for both the
+partial-native-read case and the SK_PASS followed by SK_DROP/SK_REDIRECT
+case.
+
+Patch 2 adds deterministic selftest coverage for SK_DROP after partial
+native TCP read, SK_PASS after partial native TCP read, SK_PASS followed
+by SK_DROP, and SK_PASS followed by SK_REDIRECT.
+
+Changes since v2:
+  - Merge the old fix patches 1 and 3 so patch 1 is complete and safe to
+    apply by itself.
+  - Move all selftest changes into patch 2.
+  - Keep the verdict-count synchronization for the partial-read SK_DROP
+    regression before deleting the sockmap entry.
+
+Dong Chenchen (2):
+  bpf, sockmap: keep copied_seq in TCP receive order
+  selftests/bpf: cover sockmap TCP receive sequence handling
+
+ include/linux/skmsg.h                         |   4 +-
+ net/core/skmsg.c                              |  58 ++++-
+ net/ipv4/tcp_bpf.c                            |  22 +-
+ .../selftests/bpf/prog_tests/sockmap_basic.c  | 226 ++++++++++++++++++
+ .../bpf/progs/test_sockmap_drop_prog.c        |  18 ++
+ 5 files changed, 316 insertions(+), 12 deletions(-)
+
+-- 
+2.43.0

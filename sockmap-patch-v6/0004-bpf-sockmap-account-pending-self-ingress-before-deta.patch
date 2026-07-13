@@ -1,0 +1,89 @@
+From e1ae1cf6759b3573faf2e2c25905f164aada6f7a Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 13 Jul 2026 23:14:57 +0800
+Subject: [PATCH net v6 4/5] bpf, sockmap: account pending self-ingress before
+ detach
+
+Sockmap teardown releases ingress_msg and ingress_skb from the RCU
+destroy work. Native TCP receive can resume before that work runs after
+the psock is detached from the socket.
+
+Synchronously account pending self-ingress receive sequence before
+detaching the psock. Stop the psock, wait for backlog work, take an
+ingress_lock-protected snapshot of pending self-ingress sequence, and
+advance copied_seq before native TCP can observe the socket without
+psock.
+
+Keep the actual ingress queue release in the RCU destroy work so object
+lifetime follows the existing RCU teardown rules.
+
+Fixes: e5c6de5fa025 ("bpf, sockmap: Incorrectly handling copied_seq")
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/skmsg.c | 36 ++++++++++++++++++++++++++++++++++--
+ 1 file changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index e29e19f665fb..a3154080a032 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -890,6 +890,36 @@ static void __sk_psock_zap_ingress(struct sk_psock *psock)
+ 	__sk_psock_purge_ingress_msg(psock);
+ }
+ 
++static void sk_psock_account_ingress_seq(struct sk_psock *psock)
++{
++	struct sk_buff *skb;
++	struct sk_msg *msg;
++	u32 seq_skip = 0;
++
++	if (!sk_is_tcp(psock->sk))
++		return;
++
++	/* Take a stable snapshot before the psock is detached. */
++	spin_lock_bh(&psock->ingress_lock);
++	list_for_each_entry(msg, &psock->ingress_msg, list) {
++		if (msg->sk == psock->sk)
++			seq_skip += msg->sg.size + msg->rx_seq_skip;
++	}
++	skb_queue_walk(&psock->ingress_skb, skb) {
++		if (skb->sk == psock->sk)
++			seq_skip += tcp_skb_readable_len(psock->sk, skb, NULL);
++	}
++	spin_unlock_bh(&psock->ingress_lock);
++
++	if (seq_skip) {
++		struct tcp_sock *tcp = tcp_sk(psock->sk);
++
++		WRITE_ONCE(tcp->copied_seq, tcp->copied_seq + seq_skip);
++		tcp_rcv_space_adjust(psock->sk);
++		__tcp_cleanup_rbuf(psock->sk, seq_skip);
++	}
++}
++
+ static void sk_psock_link_destroy(struct sk_psock *psock)
+ {
+ 	struct sk_psock_link *link, *tmp;
+@@ -937,6 +967,10 @@ static void sk_psock_destroy(struct work_struct *work)
+ 
+ void sk_psock_drop(struct sock *sk, struct sk_psock *psock)
+ {
++	sk_psock_stop(psock);
++	cancel_delayed_work_sync(&psock->work);
++	sk_psock_account_ingress_seq(psock);
++
+ 	write_lock_bh(&sk->sk_callback_lock);
+ 	sk_psock_restore_proto(sk, psock);
+ 	rcu_assign_sk_user_data(sk, NULL);
+@@ -946,8 +980,6 @@ void sk_psock_drop(struct sock *sk, struct sk_psock *psock)
+ 		sk_psock_stop_verdict(sk, psock);
+ 	write_unlock_bh(&sk->sk_callback_lock);
+ 
+-	sk_psock_stop(psock);
+-
+ 	INIT_RCU_WORK(&psock->rwork, sk_psock_destroy);
+ 	queue_rcu_work(system_percpu_wq, &psock->rwork);
+ }
+-- 
+2.43.0
+

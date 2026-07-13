@@ -1,0 +1,262 @@
+From 0fae256d4637bcdc425c24e3ff562ee0182946d4 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 13 Jul 2026 23:14:13 +0800
+Subject: [PATCH net v6 3/5] bpf, sockmap: defer skipped receive sequence
+ behind SK_PASS
+
+When self-ingress SK_PASS data is queued on psock->ingress_msg, TCP
+copied_seq must not advance past that data before userspace reads it.
+
+If a later self-ingress skb is dropped or redirected first, immediate
+tcp_eat_skb() accounting jumps copied_seq over the earlier unread
+SK_PASS data. A later recvmsg() can then advance copied_seq again and
+move it beyond rcv_nxt.
+
+Track the latest self-ingress sk_msg and record skipped receive
+sequence there. Consume the skipped sequence only when that anchor
+message is fully read, keeping copied_seq advancement in receive order.
+
+Read rx_seq_skip and dequeue the completed sk_msg while holding
+ingress_lock so a concurrent deferred update cannot be lost.
+
+Fixes: e5c6de5fa025 ("bpf, sockmap: Incorrectly handling copied_seq")
+Link: https://lore.kernel.org/bpf/20260703140122.A07201F000E9@smtp.kernel.org/
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/skmsg.h | 23 +++++++++++++++---
+ net/core/skmsg.c      | 54 +++++++++++++++++++++++++++++++++++++++----
+ net/ipv4/tcp_bpf.c    |  8 ++++---
+ 3 files changed, 74 insertions(+), 11 deletions(-)
+
+diff --git a/include/linux/skmsg.h b/include/linux/skmsg.h
+index 19f4f253b4f9..4f790e31108a 100644
+--- a/include/linux/skmsg.h
++++ b/include/linux/skmsg.h
+@@ -50,6 +50,8 @@ struct sk_msg {
+ 	struct sk_buff			*skb;
+ 	struct sock			*sk_redir;
+ 	struct sock			*sk;
++	/* Receive sequence space to skip after this message is read. */
++	u32				rx_seq_skip;
+ 	struct list_head		list;
+ };
+ 
+@@ -97,6 +99,8 @@ struct sk_psock {
+ 	struct sk_buff_head		ingress_skb;
+ 	struct list_head		ingress_msg;
+ 	spinlock_t			ingress_lock;
++	/* Last self-ingress message, protected by ingress_lock. */
++	struct sk_msg			*ingress_seq_msg;
+ 	/** @msg_tot_len: Total bytes queued in ingress_msg list. */
+ 	u32				msg_tot_len;
+ 	unsigned long			state;
+@@ -144,7 +148,8 @@ int sk_msg_memcopy_from_iter(struct sock *sk, struct iov_iter *from,
+ int sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
+ 		   int len, int flags);
+ int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
+-		     int len, int flags, int *copied_from_self);
++		     int len, int flags, int *copied_from_self,
++		     int *seq_skipped_from_self);
+ bool sk_msg_is_readable(struct sock *sk);
+ 
+ static inline void sk_msg_check_to_free(struct sk_msg *msg, u32 i, u32 bytes)
+@@ -352,6 +357,8 @@ static inline bool sk_psock_queue_msg(struct sk_psock *psock,
+ 	spin_lock_bh(&psock->ingress_lock);
+ 	if (sk_psock_test_state(psock, SK_PSOCK_TX_ENABLED)) {
+ 		list_add_tail(&msg->list, &psock->ingress_msg);
++		if (msg->sk == psock->sk)
++			psock->ingress_seq_msg = msg;
+ 		sk_psock_msg_len_add_locked(psock, msg->sg.size);
+ 		ret = true;
+ 	} else {
+@@ -363,16 +370,26 @@ static inline bool sk_psock_queue_msg(struct sk_psock *psock,
+ 	return ret;
+ }
+ 
+-static inline struct sk_msg *sk_psock_dequeue_msg(struct sk_psock *psock)
++static inline struct sk_msg *sk_psock_dequeue_msg_locked(struct sk_psock *psock)
+ {
+ 	struct sk_msg *msg;
+ 
+-	spin_lock_bh(&psock->ingress_lock);
+ 	msg = list_first_entry_or_null(&psock->ingress_msg, struct sk_msg, list);
+ 	if (msg) {
+ 		list_del(&msg->list);
++		if (psock->ingress_seq_msg == msg)
++			psock->ingress_seq_msg = NULL;
+ 		sk_psock_msg_len_add_locked(psock, -msg->sg.size);
+ 	}
++	return msg;
++}
++
++static inline struct sk_msg *sk_psock_dequeue_msg(struct sk_psock *psock)
++{
++	struct sk_msg *msg;
++
++	spin_lock_bh(&psock->ingress_lock);
++	msg = sk_psock_dequeue_msg_locked(psock);
+ 	spin_unlock_bh(&psock->ingress_lock);
+ 	return msg;
+ }
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index 3ab15c93af9a..e29e19f665fb 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -410,7 +410,8 @@ int sk_msg_memcopy_from_iter(struct sock *sk, struct iov_iter *from,
+ EXPORT_SYMBOL_GPL(sk_msg_memcopy_from_iter);
+ 
+ int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
+-		     int len, int flags, int *copied_from_self)
++		     int len, int flags, int *copied_from_self,
++		     int *seq_skipped_from_self)
+ {
+ 	struct iov_iter *iter = &msg->msg_iter;
+ 	int peek = flags & MSG_PEEK;
+@@ -421,6 +422,8 @@ int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg
+ 	msg_rx = sk_psock_peek_msg(psock);
+ 	if (copied_from_self)
+ 		*copied_from_self = 0;
++	if (seq_skipped_from_self)
++		*seq_skipped_from_self = 0;
+ 
+ 	while (copied != len) {
+ 		struct scatterlist *sge;
+@@ -487,7 +490,16 @@ int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg
+ 
+ 		msg_rx->sg.start = i;
+ 		if (!sge->length && (i == msg_rx->sg.end || sg_is_last(sge))) {
+-			msg_rx = sk_psock_dequeue_msg(psock);
++			u32 rx_seq_skip = 0;
++
++			spin_lock_bh(&psock->ingress_lock);
++			if (from_self && seq_skipped_from_self)
++				rx_seq_skip = msg_rx->rx_seq_skip;
++			msg_rx = sk_psock_dequeue_msg_locked(psock);
++			spin_unlock_bh(&psock->ingress_lock);
++
++			if (from_self && seq_skipped_from_self)
++				*seq_skipped_from_self += rx_seq_skip;
+ 			kfree_sk_msg(msg_rx);
+ 		}
+ 		msg_rx = sk_psock_peek_msg(psock);
+@@ -500,7 +512,7 @@ int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg
+ int sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
+ 		   int len, int flags)
+ {
+-	return __sk_msg_recvmsg(sk, psock, msg, len, flags, NULL);
++	return __sk_msg_recvmsg(sk, psock, msg, len, flags, NULL, NULL);
+ }
+ EXPORT_SYMBOL_GPL(sk_msg_recvmsg);
+ 
+@@ -855,6 +867,7 @@ static void __sk_psock_purge_ingress_msg(struct sk_psock *psock)
+ {
+ 	struct sk_msg *msg, *tmp;
+ 
++	psock->ingress_seq_msg = NULL;
+ 	list_for_each_entry_safe(msg, tmp, &psock->ingress_msg, list) {
+ 		list_del(&msg->list);
+ 		if (!msg->skb)
+@@ -1064,6 +1077,9 @@ int sk_psock_tls_strp_read(struct sk_psock *psock, struct sk_buff *skb)
+ }
+ EXPORT_SYMBOL_GPL(sk_psock_tls_strp_read);
+ 
++static bool sk_psock_defer_tcp_eat(struct sk_psock *psock,
++				   struct sk_buff *skb);
++
+ static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
+ 				  int verdict)
+ {
+@@ -1109,20 +1125,48 @@ static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
+ 		}
+ 		break;
+ 	case __SK_REDIRECT:
+-		tcp_eat_skb(psock->sk, skb);
++		if (!sk_psock_defer_tcp_eat(psock, skb))
++			tcp_eat_skb(psock->sk, skb);
+ 		err = sk_psock_skb_redirect(psock, skb);
+ 		break;
+ 	case __SK_DROP:
+ 	default:
+ out_free:
+ 		skb_bpf_redirect_clear(skb);
+-		tcp_eat_skb(psock->sk, skb);
++		if (!sk_psock_defer_tcp_eat(psock, skb))
++			tcp_eat_skb(psock->sk, skb);
+ 		sock_drop(psock->sk, skb);
+ 	}
+ 
+ 	return err;
+ }
+ 
++static bool sk_psock_defer_tcp_eat(struct sk_psock *psock,
++				   struct sk_buff *skb)
++{
++	struct sk_msg *msg;
++	u32 copied;
++	bool deferred = false;
++
++	if (!skb || !skb->len || !sk_is_tcp(psock->sk) ||
++	    skb_bpf_strparser(skb))
++		return false;
++
++	copied = tcp_skb_readable_len(psock->sk, skb, NULL);
++	if (!copied)
++		return true;
++
++	spin_lock_bh(&psock->ingress_lock);
++	msg = psock->ingress_seq_msg;
++	if (msg) {
++		msg->rx_seq_skip += copied;
++		deferred = true;
++	}
++	spin_unlock_bh(&psock->ingress_lock);
++
++	return deferred;
++}
++
+ static void sk_psock_write_space(struct sock *sk)
+ {
+ 	struct sk_psock *psock;
+diff --git a/net/ipv4/tcp_bpf.c b/net/ipv4/tcp_bpf.c
+index 4286aa5b1d70..532f9be985ed 100644
+--- a/net/ipv4/tcp_bpf.c
++++ b/net/ipv4/tcp_bpf.c
+@@ -229,6 +229,7 @@ static int tcp_bpf_recvmsg_parser(struct sock *sk,
+ 	struct sk_psock *psock;
+ 	struct tcp_sock *tcp;
+ 	int copied_from_self = 0;
++	int seq_skipped_from_self = 0;
+ 	int copied = 0;
+ 	u32 seq;
+ 
+@@ -265,7 +266,8 @@ static int tcp_bpf_recvmsg_parser(struct sock *sk,
+ 	}
+ 
+ msg_bytes_ready:
+-	copied = __sk_msg_recvmsg(sk, psock, msg, len, flags, &copied_from_self);
++	copied = __sk_msg_recvmsg(sk, psock, msg, len, flags,
++				  &copied_from_self, &seq_skipped_from_self);
+ 	/* The typical case for EFAULT is the socket was gracefully
+ 	 * shutdown with a FIN pkt. So check here the other case is
+ 	 * some error on copy_page_to_iter which would be unexpected.
+@@ -280,7 +282,7 @@ static int tcp_bpf_recvmsg_parser(struct sock *sk,
+ 			goto out;
+ 		}
+ 	}
+-	seq += copied_from_self;
++	seq += copied_from_self + seq_skipped_from_self;
+ 	if (!copied) {
+ 		long timeo;
+ 		int data;
+@@ -326,7 +328,7 @@ static int tcp_bpf_recvmsg_parser(struct sock *sk,
+ 		WRITE_ONCE(tcp->copied_seq, seq);
+ 	tcp_rcv_space_adjust(sk);
+ 	if (copied > 0)
+-		__tcp_cleanup_rbuf(sk, copied);
++		__tcp_cleanup_rbuf(sk, copied + seq_skipped_from_self);
+ 
+ unlock:
+ 	release_sock(sk);
+-- 
+2.43.0
+

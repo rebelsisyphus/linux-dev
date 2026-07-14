@@ -1,0 +1,99 @@
+From 356268ebcb035fbef2dfa4d5f26b615ea1ac3bbc Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 13 Jul 2026 20:21:46 +0800
+Subject: [PATCH net v1 1/2] bpf, sockmap: account only unread data in
+ tcp_eat_skb
+
+tcp_eat_skb() advances copied_seq by the full skb length when a
+sockmap verdict drops or redirects an skb. This assumes none of the skb
+has previously been consumed.
+
+That assumption does not hold when userspace partially reads an skb
+before adding the socket to a sockmap. A later packet invokes the
+verdict path, which dequeues the partially consumed skb. Adding its
+full length counts the consumed prefix twice and can move copied_seq
+beyond rcv_nxt, causing subsequent native TCP reads to fail and
+triggering the tcp_recvmsg_locked() sequence warning.
+
+Add tcp_skb_readable_len() and use it to consume only the unread
+sequence range of the skb. If copied_seq already points into the skb,
+tcp_eat_skb() now advances copied_seq only over the unread suffix and
+passes that same length to __tcp_cleanup_rbuf().
+
+Fixes: e5c6de5fa025 ("bpf, sockmap: Incorrectly handling copied_seq")
+Reported-by: syzbot+06dbd397158ec0ea4983@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=06dbd397158ec0ea4983
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/net/tcp.h  | 23 +++++++++++++++++++++++
+ net/ipv4/tcp_bpf.c | 10 ++++++----
+ 2 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/include/net/tcp.h b/include/net/tcp.h
+index 98848db62894..c1d32cfbcbf9 100644
+--- a/include/net/tcp.h
++++ b/include/net/tcp.h
+@@ -2863,8 +2863,31 @@ int tcp_bpf_strp_read_sock(struct strparser *strp, read_descriptor_t *desc,
+ #endif /* CONFIG_BPF_SYSCALL */
+ 
+ #ifdef CONFIG_INET
++static inline u32 tcp_skb_readable_len(const struct sock *sk,
++				       const struct sk_buff *skb,
++				       u32 *seqp)
++{
++	u32 seq = TCP_SKB_CB(skb)->seq;
++	u32 end_seq = TCP_SKB_CB(skb)->end_seq;
++
++	if (after(tcp_sk(sk)->copied_seq, seq))
++		seq = tcp_sk(sk)->copied_seq;
++	if (!before(seq, end_seq))
++		return 0;
++	if (seqp)
++		*seqp = seq;
++	return end_seq - seq;
++}
++
+ void tcp_eat_skb(struct sock *sk, struct sk_buff *skb);
+ #else
++static inline u32 tcp_skb_readable_len(const struct sock *sk,
++				       const struct sk_buff *skb,
++				       u32 *seqp)
++{
++	return 0;
++}
++
+ static inline void tcp_eat_skb(struct sock *sk, struct sk_buff *skb)
+ {
+ }
+diff --git a/net/ipv4/tcp_bpf.c b/net/ipv4/tcp_bpf.c
+index cc0bd73f36b6..4286aa5b1d70 100644
+--- a/net/ipv4/tcp_bpf.c
++++ b/net/ipv4/tcp_bpf.c
+@@ -15,7 +15,7 @@
+ void tcp_eat_skb(struct sock *sk, struct sk_buff *skb)
+ {
+ 	struct tcp_sock *tcp;
+-	int copied;
++	u32 copied, seq;
+ 
+ 	if (!skb || !skb->len || !sk_is_tcp(sk))
+ 		return;
+@@ -24,10 +24,12 @@ void tcp_eat_skb(struct sock *sk, struct sk_buff *skb)
+ 		return;
+ 
+ 	tcp = tcp_sk(sk);
+-	copied = tcp->copied_seq + skb->len;
+-	WRITE_ONCE(tcp->copied_seq, copied);
++	copied = tcp_skb_readable_len(sk, skb, &seq);
++	if (!copied)
++		return;
++	WRITE_ONCE(tcp->copied_seq, seq + copied);
+ 	tcp_rcv_space_adjust(sk);
+-	__tcp_cleanup_rbuf(sk, skb->len);
++	__tcp_cleanup_rbuf(sk, copied);
+ }
+ 
+ static int bpf_tcp_ingress(struct sock *sk, struct sk_psock *psock,
+-- 
+2.43.0
+

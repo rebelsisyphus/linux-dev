@@ -1,0 +1,126 @@
+From 7fb962e5735a6ce28ab9f0f6b019cd2785ed85a9 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 14 Jul 2026 21:48:11 +0800
+Subject: [PATCH net v1 2/2] bpf, sockmap: trim self-ingress SK_PASS by
+ copied_seq
+
+Sockmap SK_PASS can enqueue data into psock->ingress_msg after
+userspace has already consumed part of the same TCP skb through the
+native receive path. If the skb is queued with offset zero, the
+already-consumed prefix is delivered again through sockmap recvmsg.
+
+Compute the ingress range for self-ingress TCP skbs from copied_seq
+before queuing them. Apply the same range calculation to both the direct
+ingress path and the queued backlog path so SK_PASS behaves
+consistently when direct enqueue is not possible.
+
+Do not trim redirected ingress skbs, because their target socket
+copied_seq is unrelated to the skb sequence space.
+
+Fixes: e5c6de5fa025 ("bpf, sockmap: Incorrectly handling copied_seq")
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/skmsg.c | 67 ++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 51 insertions(+), 16 deletions(-)
+
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index e1850caf1a71..3ab15c93af9a 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -655,6 +655,40 @@ static int sk_psock_handle_skb(struct sk_psock *psock, struct sk_buff *skb,
+ 	return sk_psock_skb_ingress(psock, skb, off, len);
+ }
+ 
++static bool sk_psock_skb_ingress_range(struct sk_psock *psock,
++				       struct sk_buff *skb,
++				       u32 *off, u32 *len)
++{
++	*off = 0;
++	*len = skb->len;
++
++	if (skb_bpf_strparser(skb)) {
++		struct strp_msg *stm = strp_msg(skb);
++
++		*off = stm->offset;
++		*len = stm->full_len;
++		return !!*len;
++	}
++
++	/* Only trim self-ingress TCP skbs. Redirected ingress skbs must keep
++	 * their original range because the target socket copied_seq is
++	 * unrelated.
++	 */
++	if (skb->sk == psock->sk && sk_is_tcp(psock->sk)) {
++		u32 seq, copied;
++
++		copied = tcp_skb_readable_len(psock->sk, skb, &seq);
++		if (!copied)
++			return false;
++		*off = seq - TCP_SKB_CB(skb)->seq;
++		if (*off >= skb->len)
++			return false;
++		*len = skb->len - *off;
++	}
++
++	return true;
++}
++
+ static void sk_psock_skb_state(struct sk_psock *psock,
+ 			       struct sk_psock_work_state *state,
+ 			       int len, int off)
+@@ -693,22 +727,25 @@ static void sk_psock_backlog(struct work_struct *work)
+ 		return;
+ 	mutex_lock(&psock->work_mutex);
+ 	while ((skb = skb_peek(&psock->ingress_skb))) {
+-		len = skb->len;
+-		off = 0;
+-		if (skb_bpf_strparser(skb)) {
+-			struct strp_msg *stm = strp_msg(skb);
+-
+-			off = stm->offset;
+-			len = stm->full_len;
+-		}
++		ingress = skb_bpf_ingress(skb);
+ 
+ 		/* Resume processing from previous partial state */
+ 		if (unlikely(state->len)) {
+ 			len = state->len;
+ 			off = state->off;
++		} else if (ingress) {
++			if (!sk_psock_skb_ingress_range(psock, skb,
++							&off, &len)) {
++				skb = skb_dequeue(&psock->ingress_skb);
++				skb_bpf_redirect_clear(skb);
++				kfree_skb(skb);
++				continue;
++			}
++		} else {
++			len = skb->len;
++			off = 0;
+ 		}
+ 
+-		ingress = skb_bpf_ingress(skb);
+ 		skb_bpf_redirect_clear(skb);
+ 		do {
+ 			ret = -EIO;
+@@ -1051,13 +1088,11 @@ static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
+ 		 * retrying later from workqueue.
+ 		 */
+ 		if (skb_queue_empty(&psock->ingress_skb)) {
+-			len = skb->len;
+-			off = 0;
+-			if (skb_bpf_strparser(skb)) {
+-				struct strp_msg *stm = strp_msg(skb);
+-
+-				off = stm->offset;
+-				len = stm->full_len;
++			if (!sk_psock_skb_ingress_range(psock, skb,
++							&off, &len)) {
++				consume_skb(skb);
++				err = 0;
++				break;
+ 			}
+ 			err = sk_psock_skb_ingress_self(psock, skb, off, len, false);
+ 		}
+-- 
+2.43.0

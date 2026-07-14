@@ -1,0 +1,31 @@
+From e5b99e62fecb9c2daf842fe7e64060d02fb5ab3e Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 14 Jul 2026 21:06:35 +0800
+Subject: [PATCH net v1 0/2] bpf, sockmap: fix TCP partial read handling
+
+Sockmap verdict processing can run on TCP skbs after userspace has
+already consumed part of the skb through the native receive path. The
+current code assumes the whole skb is unread, which can either advance
+copied_seq over bytes that were already read or deliver those bytes a
+second time through SK_PASS.
+
+Patch 1 makes tcp_eat_skb() account only the unread receive sequence of
+the skb.
+Patch 2 trims local SK_PASS self-ingress data by copied_seq in both the
+direct ingress path and the queued backlog path.
+
+This intentionally limits the fix to the TCP partial-read cases. It does
+not include the broader SK_PASS followed by SK_DROP/SK_REDIRECT receive
+ordering changes or teardown pending-sequence accounting.
+
+Dong Chenchen (2):
+  bpf, sockmap: account only unread data in tcp_eat_skb
+  bpf, sockmap: trim self-ingress SK_PASS by copied_seq
+
+ include/net/tcp.h  | 23 ++++++++++++++++
+ net/core/skmsg.c   | 67 ++++++++++++++++++++++++++++++++++------------
+ net/ipv4/tcp_bpf.c | 10 ++++---
+ 3 files changed, 80 insertions(+), 20 deletions(-)
+
+-- 
+2.43.0

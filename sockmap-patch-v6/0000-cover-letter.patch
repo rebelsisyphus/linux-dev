@@ -1,6 +1,6 @@
-From 7cf6b6c935fd6ada807794fdbba0c5c10808c12b Mon Sep 17 00:00:00 2001
+From f0b6f0579c3fab7082f70218292b1079cdcbed84 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
-Date: Tue, 14 Jul 2026 02:18:02 +0800
+Date: Tue, 14 Jul 2026 19:42:34 +0800
 Subject: [PATCH net v6 0/5] bpf, sockmap: fix copied_seq receive ordering
 
 Sockmap stream verdict can process TCP data after userspace has
@@ -25,10 +25,13 @@ v6:
   - Split the previous copied_seq receive-ordering patch into three
     focused patches: SK_PASS range trimming, deferred skipped-sequence
     accounting, and detach-time pending sequence accounting.
+  - Mark local SK_PASS skbs with a sockmap-private self-ingress bit, so
+    trimming and detach accounting do not depend on skb owner state.
   - Clarify that backlog range trimming only applies to self-ingress TCP
     skbs; redirected ingress skbs keep their original range.
   - Stop installed sockmap callbacks before detach-time pending sequence
     accounting, closing a race with late verdict processing.
+  - Use u32 for deferred skipped-sequence accounting.
 
 Dong Chenchen (5):
   bpf, sockmap: account only unread data in tcp_eat_skb
@@ -37,13 +40,13 @@ Dong Chenchen (5):
   bpf, sockmap: account pending self-ingress before detach
   selftests/bpf: cover sockmap TCP receive sequence handling
 
- include/linux/skmsg.h                         |  23 +-
+ include/linux/skmsg.h                         |  39 ++-
  include/net/tcp.h                             |  23 ++
- net/core/skmsg.c                              | 161 +++++++++++--
+ net/core/skmsg.c                              | 184 +++++++++++---
  net/ipv4/tcp_bpf.c                            |  18 +-
  .../selftests/bpf/prog_tests/sockmap_basic.c  | 226 ++++++++++++++++++
  .../bpf/progs/test_sockmap_drop_prog.c        |  18 ++
- 6 files changed, 434 insertions(+), 35 deletions(-)
+ 6 files changed, 462 insertions(+), 46 deletions(-)
 
 -- 
 2.43.0

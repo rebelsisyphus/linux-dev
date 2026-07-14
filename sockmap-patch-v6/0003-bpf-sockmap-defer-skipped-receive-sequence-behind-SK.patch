@@ -1,4 +1,4 @@
-From 0fae256d4637bcdc425c24e3ff562ee0182946d4 Mon Sep 17 00:00:00 2001
+From e772ead06e6ca4aad610f1e43dbf2e520795d9c0 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 13 Jul 2026 23:14:13 +0800
 Subject: [PATCH net v6 3/5] bpf, sockmap: defer skipped receive sequence
@@ -29,7 +29,7 @@ Signed-off-by: Dong Chenchen <superdcc97@163.com>
  3 files changed, 74 insertions(+), 11 deletions(-)
 
 diff --git a/include/linux/skmsg.h b/include/linux/skmsg.h
-index 19f4f253b4f9..4f790e31108a 100644
+index faaaa1c8428f..90ca487a3cb6 100644
 --- a/include/linux/skmsg.h
 +++ b/include/linux/skmsg.h
 @@ -50,6 +50,8 @@ struct sk_msg {
@@ -56,7 +56,7 @@ index 19f4f253b4f9..4f790e31108a 100644
  int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
 -		     int len, int flags, int *copied_from_self);
 +		     int len, int flags, int *copied_from_self,
-+		     int *seq_skipped_from_self);
++		     u32 *seq_skipped_from_self);
  bool sk_msg_is_readable(struct sock *sk);
  
  static inline void sk_msg_check_to_free(struct sk_msg *msg, u32 i, u32 bytes)
@@ -99,7 +99,7 @@ index 19f4f253b4f9..4f790e31108a 100644
  	return msg;
  }
 diff --git a/net/core/skmsg.c b/net/core/skmsg.c
-index 3ab15c93af9a..e29e19f665fb 100644
+index ea87381b042c..47531e180768 100644
 --- a/net/core/skmsg.c
 +++ b/net/core/skmsg.c
 @@ -410,7 +410,8 @@ int sk_msg_memcopy_from_iter(struct sock *sk, struct iov_iter *from,
@@ -108,7 +108,7 @@ index 3ab15c93af9a..e29e19f665fb 100644
  int __sk_msg_recvmsg(struct sock *sk, struct sk_psock *psock, struct msghdr *msg,
 -		     int len, int flags, int *copied_from_self)
 +		     int len, int flags, int *copied_from_self,
-+		     int *seq_skipped_from_self)
++		     u32 *seq_skipped_from_self)
  {
  	struct iov_iter *iter = &msg->msg_iter;
  	int peek = flags & MSG_PEEK;
@@ -148,7 +148,7 @@ index 3ab15c93af9a..e29e19f665fb 100644
  }
  EXPORT_SYMBOL_GPL(sk_msg_recvmsg);
  
-@@ -855,6 +867,7 @@ static void __sk_psock_purge_ingress_msg(struct sk_psock *psock)
+@@ -859,6 +871,7 @@ static void __sk_psock_purge_ingress_msg(struct sk_psock *psock)
  {
  	struct sk_msg *msg, *tmp;
  
@@ -156,7 +156,7 @@ index 3ab15c93af9a..e29e19f665fb 100644
  	list_for_each_entry_safe(msg, tmp, &psock->ingress_msg, list) {
  		list_del(&msg->list);
  		if (!msg->skb)
-@@ -1064,6 +1077,9 @@ int sk_psock_tls_strp_read(struct sk_psock *psock, struct sk_buff *skb)
+@@ -1068,6 +1081,9 @@ int sk_psock_tls_strp_read(struct sk_psock *psock, struct sk_buff *skb)
  }
  EXPORT_SYMBOL_GPL(sk_psock_tls_strp_read);
  
@@ -166,7 +166,7 @@ index 3ab15c93af9a..e29e19f665fb 100644
  static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
  				  int verdict)
  {
-@@ -1109,20 +1125,48 @@ static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
+@@ -1114,20 +1130,48 @@ static int sk_psock_verdict_apply(struct sk_psock *psock, struct sk_buff *skb,
  		}
  		break;
  	case __SK_REDIRECT:
@@ -218,14 +218,14 @@ index 3ab15c93af9a..e29e19f665fb 100644
  {
  	struct sk_psock *psock;
 diff --git a/net/ipv4/tcp_bpf.c b/net/ipv4/tcp_bpf.c
-index 4286aa5b1d70..532f9be985ed 100644
+index 4286aa5b1d70..a752a6c8a807 100644
 --- a/net/ipv4/tcp_bpf.c
 +++ b/net/ipv4/tcp_bpf.c
 @@ -229,6 +229,7 @@ static int tcp_bpf_recvmsg_parser(struct sock *sk,
  	struct sk_psock *psock;
  	struct tcp_sock *tcp;
  	int copied_from_self = 0;
-+	int seq_skipped_from_self = 0;
++	u32 seq_skipped_from_self = 0;
  	int copied = 0;
  	u32 seq;
  

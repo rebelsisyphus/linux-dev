@@ -1,4 +1,4 @@
-From d71650d691aea6dbd655df685fc453dc11231c70 Mon Sep 17 00:00:00 2001
+From b56058e6bf39d2152430fe1e6f35ac17b450b1ad Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Mon, 13 Jul 2026 23:14:57 +0800
 Subject: [PATCH net v6 4/5] bpf, sockmap: account pending self-ingress before
@@ -16,7 +16,9 @@ an ingress_lock-protected snapshot of pending self-ingress sequence.
 Account the pending sequence before restoring the native protocol and
 before making the psock invisible to the socket. This closes the window
 where a late verdict callback could update copied_seq or rx_seq_skip
-concurrently with the teardown accounting.
+concurrently with the teardown accounting. Use the sockmap self-ingress
+bit to identify pending self-ingress skbs instead of relying on skb
+ownership.
 
 Keep the actual ingress queue release in the RCU destroy work so object
 lifetime follows the existing RCU teardown rules.
@@ -28,10 +30,10 @@ Signed-off-by: Dong Chenchen <superdcc97@163.com>
  1 file changed, 36 insertions(+), 4 deletions(-)
 
 diff --git a/net/core/skmsg.c b/net/core/skmsg.c
-index e29e19f665fb..9f1e99f8f903 100644
+index 47531e180768..d52106cebab8 100644
 --- a/net/core/skmsg.c
 +++ b/net/core/skmsg.c
-@@ -890,6 +890,36 @@ static void __sk_psock_zap_ingress(struct sk_psock *psock)
+@@ -894,6 +894,36 @@ static void __sk_psock_zap_ingress(struct sk_psock *psock)
  	__sk_psock_purge_ingress_msg(psock);
  }
  
@@ -51,7 +53,7 @@ index e29e19f665fb..9f1e99f8f903 100644
 +			seq_skip += msg->sg.size + msg->rx_seq_skip;
 +	}
 +	skb_queue_walk(&psock->ingress_skb, skb) {
-+		if (skb->sk == psock->sk)
++		if (skb_bpf_self_ingress(skb))
 +			seq_skip += tcp_skb_readable_len(psock->sk, skb, NULL);
 +	}
 +	spin_unlock_bh(&psock->ingress_lock);
@@ -68,7 +70,7 @@ index e29e19f665fb..9f1e99f8f903 100644
  static void sk_psock_link_destroy(struct sk_psock *psock)
  {
  	struct sk_psock_link *link, *tmp;
-@@ -937,17 +967,19 @@ static void sk_psock_destroy(struct work_struct *work)
+@@ -941,17 +971,19 @@ static void sk_psock_destroy(struct work_struct *work)
  
  void sk_psock_drop(struct sock *sk, struct sk_psock *psock)
  {

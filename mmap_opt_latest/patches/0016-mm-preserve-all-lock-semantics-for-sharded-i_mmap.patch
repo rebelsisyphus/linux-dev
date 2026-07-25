@@ -1,0 +1,86 @@
+From cc97ce4eedb9d7d1dd0010b64b946aad930653e8 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 16:22:25 +0800
+Subject: [PATCH 16/18] mm: preserve all-lock semantics for sharded i_mmap
+
+mm_take_all_locks() promises to exclude every reverse-mapping update for
+the target mm. Holding only mapping->i_mmap_rwsem no longer provides that
+guarantee once ordinary writers use per-shard locks.
+
+After taking the central publication gate, acquire every shard write lock
+in domain and shard order with mmap_lock as the nesting lock. Drop shard
+locks in reverse order before releasing the central gate. This also makes
+the caller-locked file rmap iterator valid without recursive locking.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/mmap.c | 33 +++++++++++++++++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 032e54d979e6..7e5421159278 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -4180,6 +4180,23 @@ static void vm_lock_mapping(struct mm_struct *mm, struct address_space *mapping)
+ 		if (test_and_set_bit(AS_MM_ALL_LOCKS, &mapping->flags))
+ 			BUG();
+ 		down_write_nest_lock(&mapping->i_mmap_rwsem, &mm->mmap_lock);
++#ifdef CONFIG_I_MMAP_SHARDS
++		{
++			struct i_mmap_shards *shards;
++			unsigned int i;
++
++			shards = i_mmap_shards_load(mapping);
++			if (shards) {
++				for (i = 0; i < i_mmap_nr_shards(shards); i++) {
++					struct i_mmap_shard *shard;
++
++					shard = i_mmap_shard_at(shards, i);
++					down_write_nest_lock(&shard->rwsem,
++							     &mm->mmap_lock);
++				}
++			}
++		}
++#endif
+ 	}
+ }
+ 
+@@ -4299,13 +4316,25 @@ static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
+ 	}
+ }
+ 
+-static void vm_unlock_mapping(struct address_space *mapping)
++static void vm_unlock_mapping(struct mm_struct *mm,
++			      struct address_space *mapping)
+ {
++	mmap_assert_write_locked(mm);
+ 	if (test_bit(AS_MM_ALL_LOCKS, &mapping->flags)) {
+ 		/*
+ 		 * AS_MM_ALL_LOCKS can't change to 0 from under us
+ 		 * because we hold the mm_all_locks_mutex.
+ 		 */
++#ifdef CONFIG_I_MMAP_SHARDS
++		struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
++
++		if (shards) {
++			unsigned int i = i_mmap_nr_shards(shards);
++
++			while (i--)
++				up_write(&i_mmap_shard_at(shards, i)->rwsem);
++		}
++#endif
+ 		i_mmap_unlock_write(mapping);
+ 		if (!test_and_clear_bit(AS_MM_ALL_LOCKS,
+ 					&mapping->flags))
+@@ -4331,7 +4360,7 @@ void mm_drop_all_locks(struct mm_struct *mm)
+ 			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
+ 				vm_unlock_anon_vma(avc->anon_vma);
+ 		if (vma->vm_file && vma->vm_file->f_mapping)
+-			vm_unlock_mapping(vma->vm_file->f_mapping);
++			vm_unlock_mapping(mm, vma->vm_file->f_mapping);
+ 	}
+ 
+ 	mutex_unlock(&mm_all_locks_mutex);
+-- 
+2.43.0
+

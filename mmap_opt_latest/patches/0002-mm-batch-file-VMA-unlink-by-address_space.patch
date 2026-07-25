@@ -1,0 +1,78 @@
+From 81b1d11c3fae76ddb05e4bb6317f3216bab798c1 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 12 May 2026 22:28:02 +0800
+Subject: [PATCH 02/18] mm: batch file VMA unlink by address_space
+
+free_pgtables() batches file-backed VMA unlink operations so
+teardown can remove nearby VMAs from i_mmap under fewer i_mmap_rwsem
+acquisitions.  The batch is currently keyed by struct file, even
+though the lock and interval tree belong to file->f_mapping.
+
+Track the current address_space in struct unlink_vma_file_batch
+and flush only when the mapping changes.  This keeps the existing
+batching model and lock ordering, while allowing VMAs backed by
+different file objects for the same mapping to share one i_mmap_rwsem
+critical section.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/internal.h |  1 +
+ mm/mmap.c     | 10 +++++++---
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/mm/internal.h b/mm/internal.h
+index d9963389cbff..e9cc4d40be31 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -1479,6 +1479,7 @@ unsigned long shrink_memory(unsigned long nr_to_reclaim, bool may_swap);
+ #endif /* CONFIG_PAGE_CACHE_LIMIT */
+ 
+ struct unlink_vma_file_batch {
++	struct address_space *mapping;
+ 	int count;
+ 	struct vm_area_struct *vmas[8];
+ };
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 6d9e6ab2bb27..01bd7c2c5832 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -137,15 +137,15 @@ void unlink_file_vma(struct vm_area_struct *vma)
+ 
+ void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb)
+ {
++	vb->mapping = NULL;
+ 	vb->count = 0;
+ }
+ 
+ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ {
+-	struct address_space *mapping;
++	struct address_space *mapping = vb->mapping;
+ 	int i;
+ 
+-	mapping = vb->vmas[0]->vm_file->f_mapping;
+ 	i_mmap_lock_write(mapping);
+ 	for (i = 0; i < vb->count; i++) {
+ 		VM_WARN_ON_ONCE(vb->vmas[i]->vm_file->f_mapping != mapping);
+@@ -159,13 +159,17 @@ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+ 			       struct vm_area_struct *vma)
+ {
++	struct address_space *mapping;
++
+ 	if (vma->vm_file == NULL)
+ 		return;
+ 
+-	if ((vb->count > 0 && vb->vmas[0]->vm_file != vma->vm_file) ||
++	mapping = vma->vm_file->f_mapping;
++	if ((vb->count > 0 && vb->mapping != mapping) ||
+ 	    vb->count == ARRAY_SIZE(vb->vmas))
+ 		unlink_file_vma_batch_process(vb);
+ 
++	vb->mapping = mapping;
+ 	vb->vmas[vb->count] = vma;
+ 	vb->count++;
+ }
+-- 
+2.43.0
+

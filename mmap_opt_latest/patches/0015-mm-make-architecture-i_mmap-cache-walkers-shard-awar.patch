@@ -1,0 +1,439 @@
+From 13c6e328e0af9a9a1c087c126ec11f463b857a23 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 16:20:43 +0800
+Subject: [PATCH 15/18] mm: make architecture i_mmap cache walkers shard-aware
+
+Several aliasing-cache implementations walk mapping->i_mmap while holding
+the IRQ-safe dcache mapping lock. Replacing that lock with sleeping shard
+rwsems would be invalid, while retaining the central root would miss VMAs.
+
+Serialize shard installation with flush_dcache_mmap_lock() and add an
+iterator for callers that already hold that lock. Convert the ARM, Nios II,
+and PA-RISC cache-maintenance walkers to visit every published root without
+sleeping in their IRQ-safe sections.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ arch/arm/mm/fault-armv.c   | 53 +++++++++++++--------
+ arch/arm/mm/flush.c        | 78 +++++++++++++++++--------------
+ arch/nios2/mm/cacheflush.c | 46 ++++++++++++-------
+ arch/parisc/kernel/cache.c | 94 +++++++++++++++++++++-----------------
+ include/linux/fs.h         |  2 +
+ mm/mmap.c                  | 14 ++++++
+ 6 files changed, 174 insertions(+), 113 deletions(-)
+
+diff --git a/arch/arm/mm/fault-armv.c b/arch/arm/mm/fault-armv.c
+index 2286c2ea60ec..4b6158bef078 100644
+--- a/arch/arm/mm/fault-armv.c
++++ b/arch/arm/mm/fault-armv.c
+@@ -131,17 +131,42 @@ static int adjust_pte(struct vm_area_struct *vma, unsigned long address,
+ 	return ret;
+ }
+ 
+-static void
+-make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
+-	unsigned long addr, pte_t *ptep, unsigned long pfn)
++struct make_coherent_walk {
++	struct mm_struct *mm;
++	struct vm_area_struct *vma;
++	pgoff_t pgoff;
++	unsigned long pfn;
++	int aliases;
++};
++
++static int make_coherent_vma(struct vm_area_struct *vma, void *arg)
+ {
+-	struct mm_struct *mm = vma->vm_mm;
+-	struct vm_area_struct *mpnt;
++	struct make_coherent_walk *walk = arg;
+ 	unsigned long offset;
++
++	if (vma->vm_mm != walk->mm || vma == walk->vma)
++		return 0;
++	if (!(vma->vm_flags & VM_MAYSHARE))
++		return 0;
++
++	offset = (walk->pgoff - vma->vm_pgoff) << PAGE_SHIFT;
++	walk->aliases += adjust_pte(vma, vma->vm_start + offset, walk->pfn);
++	return 0;
++}
++
++static void make_coherent(struct address_space *mapping,
++			  struct vm_area_struct *vma, unsigned long addr,
++			  pte_t *ptep, unsigned long pfn)
++{
+ 	pgoff_t pgoff;
+-	int aliases = 0;
++	struct make_coherent_walk walk = {
++		.mm = vma->vm_mm,
++		.vma = vma,
++		.pfn = pfn,
++	};
+ 
+ 	pgoff = vma->vm_pgoff + ((addr - vma->vm_start) >> PAGE_SHIFT);
++	walk.pgoff = pgoff;
+ 
+ 	/*
+ 	 * If we have any shared mappings that are in the same mm
+@@ -149,21 +174,9 @@ make_coherent(struct address_space *mapping, struct vm_area_struct *vma,
+ 	 * cache coherency.
+ 	 */
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(mpnt, &mapping->i_mmap, pgoff, pgoff) {
+-		/*
+-		 * If this VMA is not in our MM, we can ignore it.
+-		 * Note that we intentionally mask out the VMA
+-		 * that we are fixing up.
+-		 */
+-		if (mpnt->vm_mm != mm || mpnt == vma)
+-			continue;
+-		if (!(mpnt->vm_flags & VM_MAYSHARE))
+-			continue;
+-		offset = (pgoff - mpnt->vm_pgoff) << PAGE_SHIFT;
+-		aliases += adjust_pte(mpnt, mpnt->vm_start + offset, pfn);
+-	}
++	i_mmap_walk_dcache_locked(mapping, pgoff, pgoff, make_coherent_vma, &walk);
+ 	flush_dcache_mmap_unlock(mapping);
+-	if (aliases)
++	if (walk.aliases)
+ 		do_adjust_pte(vma, addr, pfn, ptep);
+ }
+ 
+diff --git a/arch/arm/mm/flush.c b/arch/arm/mm/flush.c
+index 0749cf8a6637..95953f2f95b2 100644
+--- a/arch/arm/mm/flush.c
++++ b/arch/arm/mm/flush.c
+@@ -235,11 +235,50 @@ void __flush_dcache_folio(struct address_space *mapping, struct folio *folio)
+ 		flush_pfn_alias(folio_pfn(folio), folio_pos(folio));
+ }
+ 
+-static void __flush_dcache_aliases(struct address_space *mapping, struct folio *folio)
++struct flush_dcache_aliases_walk {
++	struct mm_struct *mm;
++	struct folio *folio;
++	pgoff_t pgoff;
++};
++
++static int __flush_dcache_aliases_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct flush_dcache_aliases_walk *walk = arg;
++	unsigned long start, offset, pfn;
++	unsigned int nr;
++
++	if (vma->vm_mm != walk->mm)
++		return 0;
++	if (!(vma->vm_flags & VM_MAYSHARE))
++		return 0;
++
++	start = vma->vm_start;
++	pfn = folio_pfn(walk->folio);
++	nr = folio_nr_pages(walk->folio);
++	offset = walk->pgoff - vma->vm_pgoff;
++	if (offset > -nr) {
++		pfn -= offset;
++		nr += offset;
++	} else {
++		start += offset * PAGE_SIZE;
++	}
++	if (start + nr * PAGE_SIZE > vma->vm_end)
++		nr = (vma->vm_end - start) / PAGE_SIZE;
++
++	flush_cache_pages(vma, start, pfn, nr);
++	return 0;
++}
++
++static void __flush_dcache_aliases(struct address_space *mapping,
++				   struct folio *folio)
+ {
+-	struct mm_struct *mm = current->active_mm;
+-	struct vm_area_struct *vma;
+-	pgoff_t pgoff, pgoff_end;
++	pgoff_t pgoff = folio->index;
++	pgoff_t pgoff_end = pgoff + folio_nr_pages(folio) - 1;
++	struct flush_dcache_aliases_walk walk = {
++		.mm = current->active_mm,
++		.folio = folio,
++		.pgoff = pgoff,
++	};
+ 
+ 	/*
+ 	 * There are possible user space mappings of this page:
+@@ -247,37 +286,8 @@ static void __flush_dcache_aliases(struct address_space *mapping, struct folio *
+ 	 *   data in the current VM view associated with this page.
+ 	 * - aliasing VIPT: we only need to find one mapping of this page.
+ 	 */
+-	pgoff = folio->index;
+-	pgoff_end = pgoff + folio_nr_pages(folio) - 1;
+-
+ 	flush_dcache_mmap_lock(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff_end) {
+-		unsigned long start, offset, pfn;
+-		unsigned int nr;
+-
+-		/*
+-		 * If this VMA is not in our MM, we can ignore it.
+-		 */
+-		if (vma->vm_mm != mm)
+-			continue;
+-		if (!(vma->vm_flags & VM_MAYSHARE))
+-			continue;
+-
+-		start = vma->vm_start;
+-		pfn = folio_pfn(folio);
+-		nr = folio_nr_pages(folio);
+-		offset = pgoff - vma->vm_pgoff;
+-		if (offset > -nr) {
+-			pfn -= offset;
+-			nr += offset;
+-		} else {
+-			start += offset * PAGE_SIZE;
+-		}
+-		if (start + nr * PAGE_SIZE > vma->vm_end)
+-			nr = (vma->vm_end - start) / PAGE_SIZE;
+-
+-		flush_cache_pages(vma, start, pfn, nr);
+-	}
++	i_mmap_walk_dcache_locked(mapping, pgoff, pgoff_end, __flush_dcache_aliases_vma, &walk);
+ 	flush_dcache_mmap_unlock(mapping);
+ }
+ 
+diff --git a/arch/nios2/mm/cacheflush.c b/arch/nios2/mm/cacheflush.c
+index 0ee9c5f02e08..ffe9f8214679 100644
+--- a/arch/nios2/mm/cacheflush.c
++++ b/arch/nios2/mm/cacheflush.c
+@@ -71,28 +71,40 @@ static void __flush_icache(unsigned long start, unsigned long end)
+ 	__asm__ __volatile(" flushp\n");
+ }
+ 
++struct flush_aliases_walk {
++	struct mm_struct *mm;
++	pgoff_t pgoff;
++	unsigned long nr;
++};
++
++static int flush_aliases_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct flush_aliases_walk *walk = arg;
++	unsigned long start;
++
++	if (vma->vm_mm != walk->mm)
++		return 0;
++	if (!(vma->vm_flags & VM_MAYSHARE))
++		return 0;
++
++	start = vma->vm_start +
++		((walk->pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++	flush_cache_range(vma, start, start + walk->nr * PAGE_SIZE);
++	return 0;
++}
++
+ static void flush_aliases(struct address_space *mapping, struct folio *folio)
+ {
+-	struct mm_struct *mm = current->active_mm;
+-	struct vm_area_struct *vma;
++	struct flush_aliases_walk walk = {
++		.mm = current->active_mm,
++		.pgoff = folio->index,
++		.nr = folio_nr_pages(folio),
++	};
++	pgoff_t last = walk.pgoff + walk.nr - 1;
+ 	unsigned long flags;
+-	pgoff_t pgoff;
+-	unsigned long nr = folio_nr_pages(folio);
+-
+-	pgoff = folio->index;
+ 
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
+-		unsigned long start;
+-
+-		if (vma->vm_mm != mm)
+-			continue;
+-		if (!(vma->vm_flags & VM_MAYSHARE))
+-			continue;
+-
+-		start = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+-		flush_cache_range(vma, start, start + nr * PAGE_SIZE);
+-	}
++	i_mmap_walk_dcache_locked(mapping, walk.pgoff, last, flush_aliases_vma, &walk);
+ 	flush_dcache_mmap_unlock_irqrestore(mapping, flags);
+ }
+ 
+diff --git a/arch/parisc/kernel/cache.c b/arch/parisc/kernel/cache.c
+index 1ccc9d3d9158..b6794b76ca72 100644
+--- a/arch/parisc/kernel/cache.c
++++ b/arch/parisc/kernel/cache.c
+@@ -466,15 +466,61 @@ static inline unsigned long get_upa(struct mm_struct *mm, unsigned long addr)
+ 	return pa;
+ }
+ 
++struct flush_dcache_folio_walk {
++	struct folio *folio;
++	pgoff_t pgoff;
++	unsigned long old_addr;
++	unsigned long count;
++};
++
++static int flush_dcache_folio_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct flush_dcache_folio_walk *walk = arg;
++	unsigned long offset = walk->pgoff - vma->vm_pgoff;
++	unsigned long pfn = folio_pfn(walk->folio);
++	unsigned long addr = vma->vm_start;
++	unsigned long nr = folio_nr_pages(walk->folio);
++	unsigned long i;
++
++	if (offset > -nr) {
++		pfn -= offset;
++		nr += offset;
++	} else {
++		addr += offset * PAGE_SIZE;
++	}
++	if (addr + nr * PAGE_SIZE > vma->vm_end)
++		nr = (vma->vm_end - addr) / PAGE_SIZE;
++
++	if (!walk->old_addr ||
++	    (walk->old_addr & (SHM_COLOUR - 1)) !=
++	    (addr & (SHM_COLOUR - 1))) {
++		for (i = 0; i < nr; i++)
++			__flush_cache_page(vma, addr + i * PAGE_SIZE,
++					   (pfn + i) * PAGE_SIZE);
++		/* Private mappings do not constrain subsequent aliases. */
++		if (!(vma->vm_flags & VM_SHARED))
++			return 0;
++		if (walk->old_addr)
++			pr_err("INEQUIVALENT ALIASES 0x%lx and 0x%lx in file %pD\n",
++			       walk->old_addr, addr, vma->vm_file);
++		if (nr == folio_nr_pages(walk->folio))
++			walk->old_addr = addr;
++	}
++	WARN_ON(++walk->count == 4096);
++	return 0;
++}
++
+ void flush_dcache_folio(struct folio *folio)
+ {
+ 	struct address_space *mapping = folio_flush_mapping(folio);
+-	struct vm_area_struct *vma;
+-	unsigned long addr, old_addr = 0;
++	struct flush_dcache_folio_walk walk = {
++		.folio = folio,
++		.pgoff = folio->index,
++	};
++	pgoff_t last = walk.pgoff + folio_nr_pages(folio) - 1;
++	unsigned long flags;
++	unsigned long i, nr;
+ 	void *kaddr;
+-	unsigned long count = 0;
+-	unsigned long i, nr, flags;
+-	pgoff_t pgoff;
+ 
+ 	if (mapping && !mapping_mapped(mapping)) {
+ 		set_bit(PG_dcache_dirty, &folio->flags);
+@@ -489,8 +535,6 @@ void flush_dcache_folio(struct folio *folio)
+ 	if (!mapping)
+ 		return;
+ 
+-	pgoff = folio->index;
+-
+ 	/*
+ 	 * We have carefully arranged in arch_get_unmapped_area() that
+ 	 * *any* mappings of a file are always congruently mapped (whether
+@@ -499,41 +543,7 @@ void flush_dcache_folio(struct folio *folio)
+ 	 * on machines that support equivalent aliasing
+ 	 */
+ 	flush_dcache_mmap_lock_irqsave(mapping, flags);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff + nr - 1) {
+-		unsigned long offset = pgoff - vma->vm_pgoff;
+-		unsigned long pfn = folio_pfn(folio);
+-
+-		addr = vma->vm_start;
+-		nr = folio_nr_pages(folio);
+-		if (offset > -nr) {
+-			pfn -= offset;
+-			nr += offset;
+-		} else {
+-			addr += offset * PAGE_SIZE;
+-		}
+-		if (addr + nr * PAGE_SIZE > vma->vm_end)
+-			nr = (vma->vm_end - addr) / PAGE_SIZE;
+-
+-		if (old_addr == 0 || (old_addr & (SHM_COLOUR - 1))
+-					!= (addr & (SHM_COLOUR - 1))) {
+-			for (i = 0; i < nr; i++)
+-				__flush_cache_page(vma,
+-					addr + i * PAGE_SIZE,
+-					(pfn + i) * PAGE_SIZE);
+-			/*
+-			 * Software is allowed to have any number
+-			 * of private mappings to a page.
+-			 */
+-			if (!(vma->vm_flags & VM_SHARED))
+-				continue;
+-			if (old_addr)
+-				pr_err("INEQUIVALENT ALIASES 0x%lx and 0x%lx in file %pD\n",
+-					old_addr, addr, vma->vm_file);
+-			if (nr == folio_nr_pages(folio))
+-				old_addr = addr;
+-		}
+-		WARN_ON(++count == 4096);
+-	}
++	i_mmap_walk_dcache_locked(mapping, walk.pgoff, last, flush_dcache_folio_vma, &walk);
+ 	flush_dcache_mmap_unlock_irqrestore(mapping, flags);
+ }
+ EXPORT_SYMBOL(flush_dcache_folio);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index d905a2929dda..235bb8cb455d 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -514,6 +514,8 @@ int i_mmap_read_walk(struct address_space *mapping, pgoff_t first,
+ 		     void *arg);
+ int i_mmap_walk_locked(struct address_space *mapping, pgoff_t first,
+ 		       pgoff_t last, i_mmap_walk_fn fn, void *arg);
++int i_mmap_walk_dcache_locked(struct address_space *mapping, pgoff_t first,
++			      pgoff_t last, i_mmap_walk_fn fn, void *arg);
+ 
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+diff --git a/mm/mmap.c b/mm/mmap.c
+index ae7d01b571c6..032e54d979e6 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -190,6 +190,7 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 	if (i_mmap_shards_load(mapping))
+ 		return false;
+ 
++	flush_dcache_mmap_lock(mapping);
+ 	for (;;) {
+ 		vma = vma_interval_tree_iter_first(&mapping->i_mmap, 0, ULONG_MAX);
+ 		if (!vma)
+@@ -201,6 +202,7 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 
+ 	/* Publish only after every interval-tree root has been populated. */
+ 	smp_store_release(&mapping->i_mmap_shards, shards);
++	flush_dcache_mmap_unlock(mapping);
+ 	return true;
+ }
+ #endif
+@@ -353,6 +355,18 @@ int i_mmap_walk_locked(struct address_space *mapping, pgoff_t first,
+ 	return i_mmap_walk_root(&mapping->i_mmap, first, last, fn, arg);
+ }
+ 
++int i_mmap_walk_dcache_locked(struct address_space *mapping, pgoff_t first,
++			      pgoff_t last, i_mmap_walk_fn fn, void *arg)
++{
++#ifdef CONFIG_I_MMAP_SHARDS
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
++
++	if (shards)
++		return i_mmap_walk_shards_locked(shards, first, last, fn, arg);
++#endif
++	return i_mmap_walk_root(&mapping->i_mmap, first, last, fn, arg);
++}
++
+ #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+ const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
+ const int mmap_rnd_bits_max = CONFIG_ARCH_MMAP_RND_BITS_MAX;
+-- 
+2.43.0
+

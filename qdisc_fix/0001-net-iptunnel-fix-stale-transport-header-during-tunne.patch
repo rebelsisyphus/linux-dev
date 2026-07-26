@@ -1,0 +1,144 @@
+From 7ba8209d425f17e4b0fd331a6c0dbce7a41f43ba Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Sat, 25 Jul 2026 10:19:06 +0800
+Subject: [PATCH net] net: iptunnel: fix stale transport header during tunnel
+ decapsulation
+
+Syzbot reported a crash in qdisc_pkt_len_segs_init() caused by a stale
+transport_header offset after tunnel decapsulation.
+
+BUG: unable to handle page fault for address: ffffed102091a42e
+Oops: Oops: 0000 [#1] SMP KASAN NOPTI
+CPU: 0 UID: 0 PID: 340 Comm: qdisc_uaf_repro Not tainted 7.2.0-rc4-00061-g248951ddc14d #256 PREEMPT(full)
+Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+RIP: 0010:__asan_load2
+<IRQ>
+qdisc_pkt_len_segs_init (net/core/dev.c:4145)
+__dev_queue_xmit (net/core/dev.c:4787)
+br_dev_queue_push_xmit (net/bridge/br_forward.c:53)
+br_handle_frame_finish (net/bridge/br_input.c:229)
+br_handle_frame (net/bridge/br_input.c:315)
+__netif_receive_skb_core.constprop.0 (net/core/dev.c:6099)
+__netif_receive_skb_list_core (net/core/dev.c:6287)
+netif_receive_skb_list_internal (net/core/dev.c:6445)
+napi_complete_done (net/core/dev.c:6813)
+gro_cell_poll (net/core/gro_cells.c:74)
+__napi_poll (net/core/dev.c:7735)
+net_rx_action (net/core/dev.c:7798 net/core/dev.c:7955)
+handle_softirqs (kernel/softirq.c:622)
+do_softirq (kernel/softirq.c:523  kernel/softirq.c:510 )
+__local_bh_enable_ip (kernel/softirq.c:450)
+tun_get_user (drivers/net/tun.c:1986 (discriminator 1))
+tun_chr_write_iter (drivers/net/tun.c:2032)
+
+The crash requires four conditions to line up:
+
+1. The incoming packet is encapsulated and carries GSO metadata.  The outer
+   transport header offset is stored in skb->transport_header while the
+   packet is still in the outer tunnel context.
+2. The tunnel receiver strips the outer headers.  skb->data is advanced to
+   the inner frame, but skb->transport_header is left pointing to the
+   now-removed outer L4 header, so it becomes a negative offset relative to
+   the new data.
+3. The inner frame is not delivered to the local IP stack.  Instead, it
+   is forwarded at L2 by a bridge or HSR, so ip_rcv_core() never runs and
+   the transport header is not reset to the inner L4 offset.
+4. The forwarding path calls __dev_queue_xmit(), which enters
+   qdisc_pkt_len_segs_init().  That function computes the GSO header length
+   from skb_transport_offset(skb).  Because the offset is negative, the
+   unsigned cast overflows and pskb_may_pull(skb, hdr_len +
+   sizeof(struct tcphdr)) reads past the end of the skb, triggering a
+   KASAN fault or page fault.
+
+A normal inner Ethernet/IPv4 frame is sufficient to satisfy all four
+conditions; the packet does not need to be malformed or flagged as
+unexpected GSO.
+
+Fix this by clearing skb->transport_header to the ~0U sentinel at the
+tunnel decapsulation boundary, after each tunnel receive function has
+finished all processing that needs the outer L4 header and before the skb
+is handed to GRO or the stack. The IP/GRO receive paths then set the
+transport header correctly when they parse the inner packet.
+
+Fixes: 7fb4c1967011 ("net: pull headers in qdisc_pkt_len_segs_init()")
+Reported-by: syzbot+83181a31faf9455499c5@syzkaller.appspotmail.com
+Closes: https://lore.kernel.org/all/69de2bee.a00a0220.475f0.0041.GAE@google.com/T/
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ drivers/net/geneve.c           | 2 ++
+ drivers/net/vxlan/vxlan_core.c | 1 +
+ include/linux/skbuff.h         | 5 +++++
+ net/ipv4/ip_tunnel.c           | 2 ++
+ net/ipv6/ip6_tunnel.c          | 2 ++
+ 5 files changed, 12 insertions(+)
+
+diff --git a/drivers/net/geneve.c b/drivers/net/geneve.c
+index 396e1a113cd4..3388ff42dece 100644
+--- a/drivers/net/geneve.c
++++ b/drivers/net/geneve.c
+@@ -699,6 +699,8 @@ static int geneve_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
+ 		goto drop;
+ 	}
+ 
++	skb_unset_transport_header(skb);
++
+ 	geneve_rx(geneve, gs, skb, geneveh);
+ 	return 0;
+ 
+diff --git a/drivers/net/vxlan/vxlan_core.c b/drivers/net/vxlan/vxlan_core.c
+index 67c367cc5662..49318ad8164a 100644
+--- a/drivers/net/vxlan/vxlan_core.c
++++ b/drivers/net/vxlan/vxlan_core.c
+@@ -1799,6 +1799,7 @@ static int vxlan_rcv(struct sock *sk, struct sk_buff *skb)
+ 
+ 	dev_dstats_rx_add(vxlan->dev, skb->len);
+ 	vxlan_vnifilter_count(vxlan, vni, vninode, VXLAN_VNI_STATS_RX, skb->len);
++	skb_unset_transport_header(skb);
+ 	gro_cells_receive(&vxlan->gro_cells, skb);
+ 
+ 	rcu_read_unlock();
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+index 22eda1d54a0e..626bbb9bae1a 100644
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -3082,6 +3082,11 @@ static inline bool skb_transport_header_was_set(const struct sk_buff *skb)
+ 	return skb->transport_header != (typeof(skb->transport_header))~0U;
+ }
+ 
++static inline void skb_unset_transport_header(struct sk_buff *skb)
++{
++	skb->transport_header = (typeof(skb->transport_header))~0U;
++}
++
+ static inline unsigned char *skb_transport_header(const struct sk_buff *skb)
+ {
+ 	DEBUG_NET_WARN_ON_ONCE(!skb_transport_header_was_set(skb));
+diff --git a/net/ipv4/ip_tunnel.c b/net/ipv4/ip_tunnel.c
+index 9d114bd575f9..5e677c86f0e3 100644
+--- a/net/ipv4/ip_tunnel.c
++++ b/net/ipv4/ip_tunnel.c
+@@ -445,6 +445,8 @@ int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
+ 	if (tun_dst)
+ 		skb_dst_set(skb, (struct dst_entry *)tun_dst);
+ 
++	skb_unset_transport_header(skb);
++
+ 	gro_cells_receive(&tunnel->gro_cells, skb);
+ 	return 0;
+ 
+diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
+index bf8e40af60b0..89b824057bc9 100644
+--- a/net/ipv6/ip6_tunnel.c
++++ b/net/ipv6/ip6_tunnel.c
+@@ -889,6 +889,8 @@ static int __ip6_tnl_rcv(struct ip6_tnl *tunnel, struct sk_buff *skb,
+ 	if (tun_dst)
+ 		skb_dst_set(skb, (struct dst_entry *)tun_dst);
+ 
++	skb_unset_transport_header(skb);
++
+ 	gro_cells_receive(&tunnel->gro_cells, skb);
+ 	return 0;
+ 
+-- 
+2.43.0
+

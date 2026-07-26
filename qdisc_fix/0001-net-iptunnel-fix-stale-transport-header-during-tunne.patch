@@ -1,4 +1,4 @@
-From 7ba8209d425f17e4b0fd331a6c0dbce7a41f43ba Mon Sep 17 00:00:00 2001
+From ab8de8e653afdab92f50e03fc949bb60c3a58120 Mon Sep 17 00:00:00 2001
 From: Dong Chenchen <superdcc97@163.com>
 Date: Sat, 25 Jul 2026 10:19:06 +0800
 Subject: [PATCH net] net: iptunnel: fix stale transport header during tunnel
@@ -65,13 +65,27 @@ Reported-by: syzbot+83181a31faf9455499c5@syzkaller.appspotmail.com
 Closes: https://lore.kernel.org/all/69de2bee.a00a0220.475f0.0041.GAE@google.com/T/
 Signed-off-by: Dong Chenchen <superdcc97@163.com>
 ---
+ drivers/net/bareudp.c          | 2 ++
  drivers/net/geneve.c           | 2 ++
  drivers/net/vxlan/vxlan_core.c | 1 +
  include/linux/skbuff.h         | 5 +++++
  net/ipv4/ip_tunnel.c           | 2 ++
  net/ipv6/ip6_tunnel.c          | 2 ++
- 5 files changed, 12 insertions(+)
+ 6 files changed, 14 insertions(+)
 
+diff --git a/drivers/net/bareudp.c b/drivers/net/bareudp.c
+index 5ef841c85526..b92652ca91ec 100644
+--- a/drivers/net/bareudp.c
++++ b/drivers/net/bareudp.c
+@@ -191,6 +191,8 @@ static int bareudp_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
+ 		}
+ 	}
+ 
++	skb_unset_transport_header(skb);
++
+ 	len = skb->len;
+ 	err = gro_cells_receive(&bareudp->gro_cells, skb);
+ 	if (likely(err == NET_RX_SUCCESS))
 diff --git a/drivers/net/geneve.c b/drivers/net/geneve.c
 index 396e1a113cd4..3388ff42dece 100644
 --- a/drivers/net/geneve.c

@@ -1,0 +1,112 @@
+From ce7204edd039eb930167a0fa61d7d0213fb1050d Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 16:11:19 +0800
+Subject: [PATCH 11/18] mm/memory-failure: walk sharded file mappings
+
+File memory-failure collection currently searches only mapping->i_mmap. A
+sharded regular-file mapping would therefore omit affected processes from
+the early-kill list.
+
+Move the task matching into an i_mmap walk callback so every published
+root is covered. Enter the RCU read-side critical section from the callback
+rather than holding it while the generic walker may sleep acquiring mapping
+locks.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/memory-failure.c | 68 +++++++++++++++++++++++++++------------------
+ 1 file changed, 41 insertions(+), 27 deletions(-)
+
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index 85d231159ebc..3cefc3fb1320 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -569,6 +569,39 @@ static void collect_procs_anon(const struct folio *folio,
+ 	anon_vma_unlock_read(av);
+ }
+ 
++struct collect_procs_file_walk {
++	const struct folio *folio;
++	const struct page *page;
++	struct list_head *to_kill;
++	int force_early;
++};
++
++static int collect_procs_file_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct collect_procs_file_walk *walk = arg;
++	struct task_struct *tsk;
++
++	/*
++	 * Send early kill signals when the VMA covers the page even if the
++	 * corrupted page is not present in its page table. Applications that
++	 * requested early notification expect all such data corruption.
++	 */
++	rcu_read_lock();
++	for_each_process(tsk) {
++		struct task_struct *t;
++		unsigned long addr;
++
++		t = task_early_kill(tsk, walk->force_early);
++		if (!t || vma->vm_mm != t->mm)
++			continue;
++		addr = page_address_in_vma(walk->folio, walk->page, vma);
++		add_to_kill_anon_file(t, walk->page, vma, walk->to_kill,
++				      addr);
++	}
++	rcu_read_unlock();
++	return 0;
++}
++
+ /*
+  * Collect processes when the error hit a file mapped page.
+  */
+@@ -576,37 +609,18 @@ static void collect_procs_file(const struct folio *folio,
+ 		const struct page *page, struct list_head *to_kill,
+ 		int force_early)
+ {
+-	struct vm_area_struct *vma;
+-	struct task_struct *tsk;
+ 	struct address_space *mapping = folio->mapping;
++	struct collect_procs_file_walk walk = {
++		.folio = folio,
++		.page = page,
++		.to_kill = to_kill,
++		.force_early = force_early,
++	};
+ 	pgoff_t pgoff;
+ 
+-	i_mmap_lock_read(mapping);
+-	rcu_read_lock();
+ 	pgoff = page_pgoff(folio, page);
+-	for_each_process(tsk) {
+-		struct task_struct *t = task_early_kill(tsk, force_early);
+-		unsigned long addr;
+-
+-		if (!t)
+-			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+-				      pgoff) {
+-			/*
+-			 * Send early kill signal to tasks where a vma covers
+-			 * the page but the corrupted page is not necessarily
+-			 * mapped in its pte.
+-			 * Assume applications who requested early kill want
+-			 * to be informed of all such data corruptions.
+-			 */
+-			if (vma->vm_mm != t->mm)
+-				continue;
+-			addr = page_address_in_vma(folio, page, vma);
+-			add_to_kill_anon_file(t, page, vma, to_kill, addr);
+-		}
+-	}
+-	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
++	i_mmap_read_walk(mapping, pgoff, pgoff, false,
++			 collect_procs_file_vma, &walk);
+ }
+ 
+ #ifdef CONFIG_FS_DAX
+-- 
+2.43.0
+

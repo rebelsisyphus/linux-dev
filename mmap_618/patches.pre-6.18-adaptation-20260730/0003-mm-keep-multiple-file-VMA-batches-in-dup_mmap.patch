@@ -1,0 +1,136 @@
+From a146514f726dbe5f1f126e401510673b698ca0d1 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 12 May 2026 23:25:09 +0800
+Subject: [PATCH 03/18] mm: keep multiple file VMA batches in dup_mmap
+
+The dup_mmap() file VMA batching path only keeps one active
+address_space batch.  It has to flush whenever the next file-backed
+VMA belongs to a different mapping, even if both mappings can be
+safely deferred until the next page-table-copy boundary.
+
+Keep a small fixed set of active batches so fork can continue
+coalescing insertions for several mappings at once.  Flush all
+pending file VMA insertions before copy_page_range() when the VMA
+requires page-table copying, and before arch_dup_mmap(), preserving
+the original ordering at those boundaries.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ kernel/fork.c | 56 ++++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 47 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 0d3f37ea2cd6..88874599bff5 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -670,6 +670,8 @@ static void dup_mm_exe_file(struct mm_struct *mm, struct mm_struct *oldmm)
+ }
+ 
+ #ifdef CONFIG_MMU
++#define DUP_MMAP_FILE_BATCH_NR	4
++
+ struct dup_mmap_file_batch {
+ 	struct address_space *mapping;
+ 	unsigned int count;
+@@ -705,15 +707,50 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *batch)
+ 	dup_mmap_file_batch_init(batch);
+ }
+ 
+-static void dup_mmap_file_batch_add(struct dup_mmap_file_batch *batch,
++static void dup_mmap_file_batch_flush_all(struct dup_mmap_file_batch *batches)
++{
++	unsigned int i;
++
++	for (i = 0; i < DUP_MMAP_FILE_BATCH_NR; i++)
++		dup_mmap_file_batch_flush(&batches[i]);
++}
++
++static void dup_mmap_file_batch_init_all(struct dup_mmap_file_batch *batches)
++{
++	unsigned int i;
++
++	for (i = 0; i < DUP_MMAP_FILE_BATCH_NR; i++)
++		dup_mmap_file_batch_init(&batches[i]);
++}
++
++static struct dup_mmap_file_batch *
++dup_mmap_file_batch_get(struct dup_mmap_file_batch *batches,
++			struct address_space *mapping)
++{
++	unsigned int i;
++
++	for (i = 0; i < DUP_MMAP_FILE_BATCH_NR; i++) {
++		if (batches[i].count && batches[i].mapping == mapping)
++			return &batches[i];
++	}
++
++	for (i = 0; i < DUP_MMAP_FILE_BATCH_NR; i++) {
++		if (!batches[i].count)
++			return &batches[i];
++	}
++
++	dup_mmap_file_batch_flush(&batches[0]);
++	return &batches[0];
++}
++
++static void dup_mmap_file_batch_add(struct dup_mmap_file_batch *batches,
+ 				    struct vm_area_struct *vma,
+ 				    struct vm_area_struct *prev)
+ {
+ 	struct address_space *mapping = vma->vm_file->f_mapping;
++	struct dup_mmap_file_batch *batch;
+ 
+-	if (batch->count && batch->mapping != mapping)
+-		dup_mmap_file_batch_flush(batch);
+-
++	batch = dup_mmap_file_batch_get(batches, mapping);
+ 	batch->mapping = mapping;
+ 	batch->vmas[batch->count] = vma;
+ 	batch->prev[batch->count] = prev;
+@@ -743,14 +780,14 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 	unsigned long charge = 0;
+ 	LIST_HEAD(uf);
+ 	VMA_ITERATOR(vmi, mm, 0);
+-	struct dup_mmap_file_batch file_batch;
++	struct dup_mmap_file_batch file_batches[DUP_MMAP_FILE_BATCH_NR];
+ 
+ 	uprobe_start_dup_mmap();
+ 	if (mmap_write_lock_killable(oldmm)) {
+ 		retval = -EINTR;
+ 		goto fail_uprobe_end;
+ 	}
+-	dup_mmap_file_batch_init(&file_batch);
++	dup_mmap_file_batch_init_all(file_batches);
+ 	flush_cache_dup_mm(oldmm);
+ 	uprobe_dup_mmap(oldmm, mm);
+ 	/*
+@@ -841,12 +878,12 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 		file = tmp->vm_file;
+ 		if (file) {
+ 			get_file(file);
+-			dup_mmap_file_batch_add(&file_batch, tmp, mpnt);
++			dup_mmap_file_batch_add(file_batches, tmp, mpnt);
+ 		}
+ 
+ 		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
+ 			if (dup_mmap_needs_page_copy(tmp, mpnt))
+-				dup_mmap_file_batch_flush(&file_batch);
++				dup_mmap_file_batch_flush_all(file_batches);
+ 			retval = copy_page_range(tmp, mpnt);
+ 		}
+ 
+@@ -856,9 +893,10 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 		}
+ 	}
+ 	/* a new mm has just been created */
++	dup_mmap_file_batch_flush_all(file_batches);
+ 	retval = arch_dup_mmap(oldmm, mm);
+ loop_out:
+-	dup_mmap_file_batch_flush(&file_batch);
++	dup_mmap_file_batch_flush_all(file_batches);
+ 	vma_iter_free(&vmi);
+ 	if (!retval) {
+ 		mt_set_in_rcu(vmi.mas.tree);
+-- 
+2.43.0
+

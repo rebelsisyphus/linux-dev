@@ -1,0 +1,116 @@
+From 18d80f27339c0cf9f8be7d06534bea9e9c40a2b7 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 15:59:25 +0800
+Subject: [PATCH 05/18] mm: allocate i_mmap shards on their NUMA nodes
+
+Allocating every i_mmap shard in one block can place all lock cachelines
+on the node that first observes contention. Writers on the remaining NUMA
+nodes then incur remote memory traffic even when their shard is otherwise
+node-private.
+
+Allocate a separate four-shard block with kzalloc_node() for every
+possible NUMA node. Initialize the complete set before it can be published
+and unwind all domain blocks on failure. Inode teardown releases each
+block after the mapping has lost its users.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/inode.c         |  6 ++++++
+ include/linux/fs.h |  3 +++
+ mm/mmap.c          | 49 ++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 58 insertions(+)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 80d0bd31e41e..ab57827e2f14 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -366,6 +366,12 @@ struct inode *alloc_inode(struct super_block *sb)
+ 
+ void __destroy_inode(struct inode *inode)
+ {
++#ifdef CONFIG_I_MMAP_SHARDS
++	struct address_space *mapping = inode->i_mapping;
++
++	i_mmap_shards_free(mapping->i_mmap_shards);
++	mapping->i_mmap_shards = NULL;
++#endif
+ 	BUG_ON(inode_has_buffers(inode));
+ 	inode_detach_wb(inode);
+ 	security_inode_free(inode);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 8dc8981586c8..c284c8029dd4 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -501,6 +501,9 @@ struct i_mmap_shards {
+ 	unsigned int		nr_domains;
+ 	struct i_mmap_domain_shards *domain[I_MMAP_MAX_DOMAINS];
+ };
++
++struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
++void i_mmap_shards_free(struct i_mmap_shards *shards);
+ #endif
+ 
+ /**
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 1fd565335258..721af82b5fa4 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -63,6 +63,55 @@
+ #define arch_mmap_check(addr, len, flags)	(0)
+ #endif
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
++{
++	struct i_mmap_domain_shards *domain;
++	struct i_mmap_shards *shards;
++	unsigned int i;
++	int nid;
++
++	if (num_possible_nodes() > I_MMAP_MAX_DOMAINS)
++		return NULL;
++
++	shards = kzalloc(sizeof(*shards), gfp);
++	if (!shards)
++		return NULL;
++
++	for_each_node_state(nid, N_POSSIBLE) {
++		domain = kzalloc_node(sizeof(*domain), gfp, nid);
++		if (!domain)
++			goto free_shards;
++
++		domain->nid = nid;
++		for (i = 0; i < I_MMAP_SHARDS_PER_DOMAIN; i++) {
++			domain->shard[i].root = RB_ROOT_CACHED;
++			init_rwsem(&domain->shard[i].rwsem);
++		}
++
++		shards->domain[shards->nr_domains++] = domain;
++	}
++
++	return shards;
++
++free_shards:
++	i_mmap_shards_free(shards);
++	return NULL;
++}
++
++void i_mmap_shards_free(struct i_mmap_shards *shards)
++{
++	unsigned int i;
++
++	if (!shards)
++		return;
++
++	for (i = 0; i < shards->nr_domains; i++)
++		kfree(shards->domain[i]);
++	kfree(shards);
++}
++#endif
++
+ #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+ const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
+ int mmap_rnd_bits_max __ro_after_init = CONFIG_ARCH_MMAP_RND_BITS_MAX;
+-- 
+2.43.0
+

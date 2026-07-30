@@ -1,0 +1,133 @@
+From 879e644fbe0f8b6ce89a42b2e2b0204caa09fd77 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 16:22:25 +0800
+Subject: [PATCH 16/18] mm: preserve all-lock semantics for sharded i_mmap
+
+mm_take_all_locks() promises to exclude every reverse-mapping update for
+the target mm. Holding only mapping->i_mmap_rwsem no longer provides that
+guarantee once ordinary writers use per-shard locks.
+
+After taking the central publication gate, acquire every shard write lock
+in domain and shard order with mmap_lock as the nesting lock. Drop shard
+locks in reverse order before releasing the central gate. This also makes
+the caller-locked file rmap iterator valid without recursive locking.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/fs.h | 12 ++++++++++++
+ mm/mmap.c          | 29 +++++++++++++++++++++++++++++
+ mm/vma.c           |  8 ++++++--
+ 3 files changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 995539373672..2e6d4c70b672 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -643,6 +643,9 @@ void i_mmap_lock_write_vma(struct address_space *mapping,
+ 			   struct i_mmap_write_lock *lock);
+ void i_mmap_unlock_write_vma(struct address_space *mapping,
+ 			     struct i_mmap_write_lock *lock);
++void i_mmap_lock_shards_write(struct address_space *mapping,
++			      struct mm_struct *mm);
++void i_mmap_unlock_shards_write(struct address_space *mapping);
+ 
+ static inline bool
+ i_mmap_write_lock_is_sharded(struct i_mmap_write_lock *lock)
+@@ -681,6 +684,15 @@ static inline void i_mmap_unlock_write_vma(struct address_space *mapping,
+ 	i_mmap_unlock_write(mapping);
+ }
+ 
++static inline void i_mmap_lock_shards_write(struct address_space *mapping,
++					    struct mm_struct *mm)
++{
++}
++
++static inline void i_mmap_unlock_shards_write(struct address_space *mapping)
++{
++}
++
+ static inline bool
+ i_mmap_write_lock_is_sharded(struct i_mmap_write_lock *lock)
+ {
+diff --git a/mm/mmap.c b/mm/mmap.c
+index ad3933df6e84..f3029193a5ec 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -234,6 +234,35 @@ static unsigned int i_mmap_nr_shards(struct i_mmap_shards *shards)
+ 	return shards->nr_domains * I_MMAP_SHARDS_PER_DOMAIN;
+ }
+ 
++void i_mmap_lock_shards_write(struct address_space *mapping,
++			      struct mm_struct *mm)
++{
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
++	unsigned int i;
++
++	if (!shards)
++		return;
++
++	for (i = 0; i < i_mmap_nr_shards(shards); i++) {
++		struct i_mmap_shard *shard = i_mmap_shard_at(shards, i);
++
++		down_write_nest_lock(&shard->rwsem, &mm->mmap_lock);
++	}
++}
++
++void i_mmap_unlock_shards_write(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards = i_mmap_shards_load(mapping);
++	unsigned int i;
++
++	if (!shards)
++		return;
++
++	i = i_mmap_nr_shards(shards);
++	while (i--)
++		up_write(&i_mmap_shard_at(shards, i)->rwsem);
++}
++
+ static int i_mmap_lock_shards_read(struct i_mmap_shards *shards,
+ 				   bool try_lock)
+ {
+diff --git a/mm/vma.c b/mm/vma.c
+index 764d1e5c76d9..15f40761e428 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -2175,6 +2175,7 @@ static void vm_lock_mapping(struct mm_struct *mm, struct address_space *mapping)
+ 		if (test_and_set_bit(AS_MM_ALL_LOCKS, &mapping->flags))
+ 			BUG();
+ 		down_write_nest_lock(&mapping->i_mmap_rwsem, &mm->mmap_lock);
++		i_mmap_lock_shards_write(mapping, mm);
+ 	}
+ }
+ 
+@@ -2294,13 +2295,16 @@ static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
+ 	}
+ }
+ 
+-static void vm_unlock_mapping(struct address_space *mapping)
++static void vm_unlock_mapping(struct mm_struct *mm,
++			      struct address_space *mapping)
+ {
++	mmap_assert_write_locked(mm);
+ 	if (test_bit(AS_MM_ALL_LOCKS, &mapping->flags)) {
+ 		/*
+ 		 * AS_MM_ALL_LOCKS can't change to 0 from under us
+ 		 * because we hold the mm_all_locks_mutex.
+ 		 */
++		i_mmap_unlock_shards_write(mapping);
+ 		i_mmap_unlock_write(mapping);
+ 		if (!test_and_clear_bit(AS_MM_ALL_LOCKS,
+ 					&mapping->flags))
+@@ -2326,7 +2330,7 @@ void mm_drop_all_locks(struct mm_struct *mm)
+ 			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
+ 				vm_unlock_anon_vma(avc->anon_vma);
+ 		if (vma->vm_file && vma->vm_file->f_mapping)
+-			vm_unlock_mapping(vma->vm_file->f_mapping);
++			vm_unlock_mapping(mm, vma->vm_file->f_mapping);
+ 	}
+ 
+ 	mutex_unlock(&mm_all_locks_mutex);
+-- 
+2.43.0
+

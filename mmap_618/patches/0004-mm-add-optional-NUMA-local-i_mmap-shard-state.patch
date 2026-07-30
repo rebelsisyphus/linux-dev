@@ -1,0 +1,160 @@
+From 9b1b55ef2b965da2bf681374a81acc67b63eb588 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 15:58:16 +0800
+Subject: [PATCH 04/18] mm: add optional NUMA-local i_mmap shard state
+
+A single address_space i_mmap_rwsem can become contended when many
+processes map or unmap the same regular files. Prepare an optional
+layout that isolates lock traffic between NUMA nodes while retaining
+several locks within each node.
+
+Add four cacheline-aligned shards for each of up to eight NUMA domains
+and record a stable home node in each mm. The upstream stable tree has
+no KABI reserve fields, so keep the new address_space and mm state
+behind CONFIG_I_MMAP_SHARDS instead. Disabled builds retain the original
+structure layouts and runtime paths.
+
+The experimental Kconfig option defaults to disabled, and no mapping
+can publish shards yet, so runtime behavior is unchanged.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/inode.c               |  5 +++++
+ include/linux/fs.h       | 30 ++++++++++++++++++++++++++++++
+ include/linux/mm_types.h |  3 +++
+ kernel/fork.c            |  4 ++++
+ mm/Kconfig               | 11 +++++++++++
+ 5 files changed, 53 insertions(+)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 2c55ec49b023..80d0bd31e41e 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -486,6 +486,11 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	INIT_LIST_HEAD(&mapping->i_private_list);
+ 	spin_lock_init(&mapping->i_private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
++#ifdef CONFIG_I_MMAP_SHARDS
++	mapping->i_mmap_shards = NULL;
++	atomic_set(&mapping->i_mmap_nr_vmas, 0);
++	atomic_set(&mapping->i_mmap_lock_contention, 0);
++#endif
+ }
+ 
+ void address_space_init_once(struct address_space *mapping)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 14f5accc97b7..8dc8981586c8 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -481,6 +481,28 @@ struct address_space_operations {
+ 
+ extern const struct address_space_operations empty_aops;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++#define I_MMAP_MAX_DOMAINS		8
++#define I_MMAP_SHARDS_PER_DOMAIN	4
++#define I_MMAP_MAX_SHARDS		(I_MMAP_MAX_DOMAINS * \
++					 I_MMAP_SHARDS_PER_DOMAIN)
++
++struct i_mmap_shard {
++	struct rb_root_cached	root;
++	struct rw_semaphore	rwsem;
++} ____cacheline_aligned_in_smp;
++
++struct i_mmap_domain_shards {
++	int			nid;
++	struct i_mmap_shard	shard[I_MMAP_SHARDS_PER_DOMAIN];
++};
++
++struct i_mmap_shards {
++	unsigned int		nr_domains;
++	struct i_mmap_domain_shards *domain[I_MMAP_MAX_DOMAINS];
++};
++#endif
++
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+  * @host: Owner, either the inode or the block_device.
+@@ -493,6 +515,9 @@ extern const struct address_space_operations empty_aops;
+  * @i_mmap_writable: Number of VM_SHARED, VM_MAYWRITE mappings.
+  * @nr_thps: Number of THPs in the pagecache (non-shmem only).
+  * @i_mmap: Tree of private and shared mappings.
++ * @i_mmap_shards: Optional NUMA-local i_mmap trees and locks.
++ * @i_mmap_nr_vmas: File VMA count kept stable while trees are migrated.
++ * @i_mmap_lock_contention: Saturating central write-lock failure count.
+  * @i_mmap_rwsem: Protects @i_mmap and @i_mmap_writable.
+  * @nrpages: Number of page entries, protected by the i_pages lock.
+  * @writeback_index: Writeback starts here.
+@@ -523,6 +548,11 @@ struct address_space {
+ 	struct list_head	i_private_list;
+ 	struct rw_semaphore	i_mmap_rwsem;
+ 	void *			i_private_data;
++#ifdef CONFIG_I_MMAP_SHARDS
++	struct i_mmap_shards	*i_mmap_shards;
++	atomic_t		i_mmap_nr_vmas;
++	atomic_t		i_mmap_lock_contention;
++#endif
+ } __attribute__((aligned(sizeof(long)))) __randomize_layout;
+ 	/*
+ 	 * On most architectures that alignment is already the case; but
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index 8b1045c51e0a..121ca8b3d5e7 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1227,6 +1227,9 @@ struct mm_struct {
+ #ifdef CONFIG_MM_ID
+ 		mm_id_t mm_id;
+ #endif /* CONFIG_MM_ID */
++#ifdef CONFIG_I_MMAP_SHARDS
++		int i_mmap_home_nid;
++#endif
+ 	} __randomize_layout;
+ 
+ 	/*
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 91f1512a1d31..70f8a4bf5301 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -77,6 +77,7 @@
+ #include <linux/freezer.h>
+ #include <linux/delayacct.h>
+ #include <linux/taskstats_kern.h>
++#include <linux/topology.h>
+ #include <linux/tty.h>
+ #include <linux/fs_struct.h>
+ #include <linux/magic.h>
+@@ -1048,6 +1049,9 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
++#ifdef CONFIG_I_MMAP_SHARDS
++	mm->i_mmap_home_nid = numa_node_id();
++#endif
+ 	spin_lock_init(&mm->page_table_lock);
+ 	spin_lock_init(&mm->arg_lock);
+ 	mm_init_cpumask(mm);
+diff --git a/mm/Kconfig b/mm/Kconfig
+index 76001e9ba04f..bf50f0af0043 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -2,6 +2,17 @@
+ 
+ menu "Memory Management options"
+ 
++config I_MMAP_SHARDS
++	bool "Experimental sharded file reverse mappings"
++	depends on MMU && SMP && NUMA && EXPERT
++	default n
++	help
++	  Split contended regular-file reverse mapping interval trees into
++	  NUMA-local shards. This is intended for machines with highly
++	  concurrent fork, exec, mmap, and exit workloads.
++
++	  This feature is experimental. If unsure, say N.
++
+ #
+ # For some reason microblaze and nios2 hard code SWAP=n.  Hopefully we can
+ # add proper SWAP support to them, in which case this can be remove.
+-- 
+2.43.0
+

@@ -1,0 +1,216 @@
+From c38a532b740071e7a96145ec6422e8f5057a1d92 Mon Sep 17 00:00:00 2001
+From: "Barry Song (Xiaomi)" <baohua@kernel.org>
+Date: Fri, 31 Jul 2026 14:47:26 +0800
+Subject: [PATCH 3/5] mm: move folio_lock_or_retry() to memory.c
+
+folio_lock_or_retry() is used only by fault paths in mm/memory.c.  Move
+it there and make it static so the generic pagemap interface no longer
+exposes a fault-specific helper.
+
+Fold __folio_lock_or_retry() into folio_lock_or_retry() while moving it.
+This also gives the swap fault path a local place for the short-wait
+policy added by the next patch.
+
+Signed-off-by: Barry Song (Xiaomi) <baohua@kernel.org>
+Link: https://lore.kernel.org/r/20260430040427.4672-4-baohua@kernel.org
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/pagemap.h | 17 ------------
+ mm/filemap.c            | 45 ------------------------------
+ mm/memory.c             | 61 ++++++++++++++++++++++++++++++++++++++---
+ 3 files changed, 57 insertions(+), 66 deletions(-)
+
+diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
+index 624712273947..117e10406efa 100644
+--- a/include/linux/pagemap.h
++++ b/include/linux/pagemap.h
+@@ -1081,7 +1081,6 @@ static inline bool wake_page_match(struct wait_page_queue *wait_page,
+ 
+ void __folio_lock(struct folio *folio);
+ int __folio_lock_killable(struct folio *folio);
+-vm_fault_t __folio_lock_or_retry(struct folio *folio, struct vm_fault *vmf);
+ void unlock_page(struct page *page);
+ void folio_unlock(struct folio *folio);
+ 
+@@ -1178,22 +1177,6 @@ static inline int folio_lock_killable(struct folio *folio)
+ 	return 0;
+ }
+ 
+-/*
+- * folio_lock_or_retry - Lock the folio, unless this would block and the
+- * caller indicated that it can handle a retry.
+- *
+- * Return value and mmap_lock implications depend on flags; see
+- * __folio_lock_or_retry().
+- */
+-static inline vm_fault_t folio_lock_or_retry(struct folio *folio,
+-					     struct vm_fault *vmf)
+-{
+-	might_sleep();
+-	if (!folio_trylock(folio))
+-		return __folio_lock_or_retry(folio, vmf);
+-	return 0;
+-}
+-
+ /*
+  * This is exported only for folio_wait_locked/folio_wait_writeback, etc.,
+  * and should not be used directly.
+diff --git a/mm/filemap.c b/mm/filemap.c
+index fadb19ff8c2b..9c7b3a1aa300 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -1670,51 +1670,6 @@ static int __folio_lock_async(struct folio *folio, struct wait_page_queue *wait)
+ 	return ret;
+ }
+ 
+-/*
+- * Return values:
+- * 0 - folio is locked.
+- * non-zero - folio is not locked.
+- *     mmap_lock or per-VMA lock has been released (mmap_read_unlock() or
+- *     vma_end_read()), unless flags had both FAULT_FLAG_ALLOW_RETRY and
+- *     FAULT_FLAG_RETRY_NOWAIT set, in which case the lock is still held.
+- *
+- * If neither ALLOW_RETRY nor KILLABLE are set, will always return 0
+- * with the folio locked and the mmap_lock/per-VMA lock is left unperturbed.
+- */
+-vm_fault_t __folio_lock_or_retry(struct folio *folio, struct vm_fault *vmf)
+-{
+-	unsigned int flags = vmf->flags;
+-
+-	if (fault_flag_allow_retry_first(flags)) {
+-		/*
+-		 * CAUTION! In this case, mmap_lock/per-VMA lock is not
+-		 * released even though returning VM_FAULT_RETRY.
+-		 */
+-		if (flags & FAULT_FLAG_RETRY_NOWAIT)
+-			return VM_FAULT_RETRY;
+-
+-		release_fault_lock(vmf);
+-		if (flags & FAULT_FLAG_KILLABLE)
+-			folio_wait_locked_killable(folio);
+-		else
+-			folio_wait_locked(folio);
+-		return VM_FAULT_RETRY;
+-	}
+-	if (flags & FAULT_FLAG_KILLABLE) {
+-		bool ret;
+-
+-		ret = __folio_lock_killable(folio);
+-		if (ret) {
+-			release_fault_lock(vmf);
+-			return VM_FAULT_RETRY;
+-		}
+-	} else {
+-		__folio_lock(folio);
+-	}
+-
+-	return 0;
+-}
+-
+ /**
+  * page_cache_next_miss() - Find the next gap in the page cache.
+  * @mapping: Mapping.
+diff --git a/mm/memory.c b/mm/memory.c
+index c1dd2c544eaf..121d9f49c1ae 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3971,6 +3971,59 @@ void unmap_mapping_range(struct address_space *mapping,
+ }
+ EXPORT_SYMBOL(unmap_mapping_range);
+ 
++/*
++ * folio_lock_or_retry - Lock the folio, unless this would block and the
++ * caller indicated that it can handle a retry.
++ *
++ * Return values:
++ * 0 - folio is locked.
++ * non-zero - folio is not locked.
++ *     mmap_lock or per-VMA lock has been released (mmap_read_unlock() or
++ *     vma_end_read()), unless flags had both FAULT_FLAG_ALLOW_RETRY and
++ *     FAULT_FLAG_RETRY_NOWAIT set, in which case the lock is still held.
++ *
++ * If neither ALLOW_RETRY nor KILLABLE are set, will always return 0
++ * with the folio locked and the mmap_lock/per-VMA lock is left unperturbed.
++ */
++static inline vm_fault_t folio_lock_or_retry(struct folio *folio,
++					     struct vm_fault *vmf)
++{
++	unsigned int flags = vmf->flags;
++
++	might_sleep();
++	if (folio_trylock(folio))
++		return 0;
++
++	if (fault_flag_allow_retry_first(flags)) {
++		/*
++		 * CAUTION! In this case, mmap_lock/per-VMA lock is not
++		 * released even though returning VM_FAULT_RETRY.
++		 */
++		if (flags & FAULT_FLAG_RETRY_NOWAIT)
++			return VM_FAULT_RETRY;
++
++		release_fault_lock(vmf);
++		if (flags & FAULT_FLAG_KILLABLE)
++			folio_wait_locked_killable(folio);
++		else
++			folio_wait_locked(folio);
++		return VM_FAULT_RETRY;
++	}
++	if (flags & FAULT_FLAG_KILLABLE) {
++		bool ret;
++
++		ret = __folio_lock_killable(folio);
++		if (ret) {
++			release_fault_lock(vmf);
++			return VM_FAULT_RETRY;
++		}
++	} else {
++		__folio_lock(folio);
++	}
++
++	return 0;
++}
++
+ /*
+  * Restore a potential device exclusive pte to a working pte entry
+  */
+@@ -5500,7 +5553,7 @@ static vm_fault_t do_shared_fault(struct vm_fault *vmf)
+  * We enter with non-exclusive mmap_lock (to exclude vma changes,
+  * but allow concurrent faults).
+  * The mmap_lock may have been released depending on flags and our
+- * return value.  See filemap_fault() and __folio_lock_or_retry().
++ * return value.  See filemap_fault() and folio_lock_or_retry().
+  * If mmap_lock is released, vma may become invalid (for example
+  * by other thread calling munmap()).
+  */
+@@ -5823,7 +5876,7 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
+  * concurrent faults).
+  *
+  * The mmap_lock may have been released depending on flags and our return value.
+- * See filemap_fault() and __folio_lock_or_retry().
++ * See filemap_fault() and folio_lock_or_retry().
+  */
+ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+ {
+@@ -5907,7 +5960,7 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
+  * On entry, we hold either the VMA lock or the mmap_lock
+  * (FAULT_FLAG_VMA_LOCK tells you which).  If VM_FAULT_RETRY is set in
+  * the result, the mmap_lock is not held on exit.  See filemap_fault()
+- * and __folio_lock_or_retry().
++ * and folio_lock_or_retry().
+  */
+ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
+ 		unsigned long address, unsigned int flags)
+@@ -6143,7 +6196,7 @@ static vm_fault_t sanitize_fault_flags(struct vm_area_struct *vma,
+  * By the time we get here, we already hold the mm semaphore
+  *
+  * The mmap_lock may have been released depending on flags and our
+- * return value.  See filemap_fault() and __folio_lock_or_retry().
++ * return value.  See filemap_fault() and folio_lock_or_retry().
+  */
+ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
+ 			   unsigned int flags, struct pt_regs *regs)
+-- 
+2.43.0
+

@@ -1,0 +1,57 @@
+From c841dfd43bd2d3fa6bd40a35eaf27ae0aa0f0c8a Mon Sep 17 00:00:00 2001
+From: "Barry Song (Xiaomi)" <baohua@kernel.org>
+Date: Fri, 31 Jul 2026 14:48:23 +0800
+Subject: [PATCH 4/5] mm/swap: keep the fault lock for short folio waits
+
+A swap fault that finds a locked folio normally drops its mmap or VMA
+fault lock, waits for the folio, and retries the entire fault.  With many
+processes faulting on the same resident folio, that retry adds fault-path
+and lock-handoff overhead without waiting for storage I/O.
+
+When the folio is already uptodate and not under writeback, retain the
+fault lock while waiting and let do_swap_page() finish in the same fault.
+Keep the existing drop-and-retry behavior for non-uptodate or writeback
+folios, and preserve FAULT_FLAG_RETRY_NOWAIT semantics.
+
+Suggested-by: Matthew Wilcox (Oracle) <willy@infradead.org>
+Signed-off-by: Barry Song (Xiaomi) <baohua@kernel.org>
+Link: https://lore.kernel.org/r/20260430040427.4672-5-baohua@kernel.org
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/memory.c | 20 ++++++++++++++------
+ 1 file changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index 121d9f49c1ae..c633645f28c9 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4002,12 +4002,20 @@ static inline vm_fault_t folio_lock_or_retry(struct folio *folio,
+ 		if (flags & FAULT_FLAG_RETRY_NOWAIT)
+ 			return VM_FAULT_RETRY;
+ 
+-		release_fault_lock(vmf);
+-		if (flags & FAULT_FLAG_KILLABLE)
+-			folio_wait_locked_killable(folio);
+-		else
+-			folio_wait_locked(folio);
+-		return VM_FAULT_RETRY;
++		/*
++		 * An uptodate folio which is not under writeback is likely
++		 * locked only while another fault installs PTEs.  Keep the
++		 * fault lock across this short wait so the caller can finish
++		 * the fault without retrying.
++		 */
++		if (!folio_test_uptodate(folio) || folio_test_writeback(folio)) {
++			release_fault_lock(vmf);
++			if (flags & FAULT_FLAG_KILLABLE)
++				folio_wait_locked_killable(folio);
++			else
++				folio_wait_locked(folio);
++			return VM_FAULT_RETRY;
++		}
+ 	}
+ 	if (flags & FAULT_FLAG_KILLABLE) {
+ 		bool ret;
+-- 
+2.43.0
+

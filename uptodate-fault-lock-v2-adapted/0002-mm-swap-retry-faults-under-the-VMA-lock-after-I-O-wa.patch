@@ -1,0 +1,64 @@
+From a402cfbd03dd39d0610123a74e077742ef684cb7 Mon Sep 17 00:00:00 2001
+From: "Barry Song (Xiaomi)" <baohua@kernel.org>
+Date: Fri, 31 Jul 2026 14:46:07 +0800
+Subject: [PATCH 2/5] mm/swap: retry faults under the VMA lock after I/O waits
+
+When do_swap_page() starts under the per-VMA lock and releases that lock
+only to wait for swap I/O, retrying under mmap_lock adds unnecessary
+serialization.
+
+Return VM_FAULT_RETRY_VMA for that case so the architecture fault handler
+can retry through lock_vma_under_rcu().  Preserve the normal retry path
+when the fault lock was not released or the fault did not originate from
+the per-VMA-lock path.
+
+Tested-by: Wang Lian <wanglian@kylinos.cn>
+Tested-by: Kunwu Chan <chentao@kylinos.cn>
+Reviewed-by: Wang Lian <lianux.mm@gmail.com>
+Reviewed-by: Kunwu Chan <kunwu.chan@gmail.com>
+Signed-off-by: Barry Song (Xiaomi) <baohua@kernel.org>
+Link: https://lore.kernel.org/r/20260430040427.4672-3-baohua@kernel.org
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/memory.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index baa55770b430..c1dd2c544eaf 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -4285,6 +4285,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
+ 	rmap_t rmap_flags = RMAP_NONE;
+ 	bool need_clear_cache = false;
+ 	bool exclusive = false;
++	bool retry_by_vma_lock = false;
+ 	swp_entry_t entry;
+ 	pte_t pte;
+ 	vm_fault_t ret = 0;
+@@ -4438,8 +4439,13 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
+ 	}
+ 
+ 	ret |= folio_lock_or_retry(folio, vmf);
+-	if (ret & VM_FAULT_RETRY)
++	if (ret & VM_FAULT_RETRY) {
++		if (fault_flag_allow_retry_first(vmf->flags) &&
++		    !(vmf->flags & FAULT_FLAG_RETRY_NOWAIT) &&
++		    (vmf->flags & FAULT_FLAG_VMA_LOCK))
++			retry_by_vma_lock = true;
+ 		goto out_release;
++	}
+ 
+ 	if (swapcache) {
+ 		/*
+@@ -4720,7 +4726,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
+ 	}
+ 	if (si)
+ 		put_swap_device(si);
+-	return ret;
++	return ret | (retry_by_vma_lock ? VM_FAULT_RETRY_VMA : 0);
+ }
+ 
+ static bool pte_range_none(pte_t *pte, int nr_pages)
+-- 
+2.43.0
+

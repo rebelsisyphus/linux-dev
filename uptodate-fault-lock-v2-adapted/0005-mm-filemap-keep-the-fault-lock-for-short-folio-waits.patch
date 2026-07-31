@@ -1,0 +1,45 @@
+From 5ddbaafe39dcd473395ddcbf9bd7f7087609da35 Mon Sep 17 00:00:00 2001
+From: "Barry Song (Xiaomi)" <baohua@kernel.org>
+Date: Fri, 31 Jul 2026 14:49:00 +0800
+Subject: [PATCH 5/5] mm/filemap: keep the fault lock for short folio waits
+
+filemap_fault() normally drops its mmap or VMA fault lock before waiting
+for a locked folio, then retries the entire fault.  With many processes
+faulting on the same resident executable or library folio, those retries
+add fault-path and lock-handoff overhead without waiting for storage I/O.
+
+When the folio is already uptodate and not under writeback, retain the
+fault lock while waiting and finish in the same fault.  Keep dropping the
+fault lock for non-uptodate or writeback folios, and preserve
+FAULT_FLAG_RETRY_NOWAIT semantics.
+
+Suggested-by: Matthew Wilcox (Oracle) <willy@infradead.org>
+Signed-off-by: Barry Song (Xiaomi) <baohua@kernel.org>
+Link: https://lore.kernel.org/r/20260430040427.4672-6-baohua@kernel.org
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/filemap.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 9c7b3a1aa300..90421aca2a4d 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -3095,7 +3095,13 @@ static int lock_folio_maybe_drop_mmap(struct vm_fault *vmf, struct folio *folio,
+ 	if (vmf->flags & FAULT_FLAG_RETRY_NOWAIT)
+ 		return 0;
+ 
+-	*fpin = maybe_unlock_mmap_for_io(vmf, *fpin);
++	/*
++	 * An uptodate folio which is not under writeback is likely locked
++	 * only while another fault installs PTEs.  Keep the fault lock across
++	 * this short wait so the caller can finish the fault without retrying.
++	 */
++	if (!folio_test_uptodate(folio) || folio_test_writeback(folio))
++		*fpin = maybe_unlock_mmap_for_io(vmf, *fpin);
+ 	if (vmf->flags & FAULT_FLAG_KILLABLE) {
+ 		if (__folio_lock_killable(folio)) {
+ 			/*
+-- 
+2.43.0
+

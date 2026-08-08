@@ -1,0 +1,53 @@
+From 7eb72c1e3984150c45f77aa4299f7c2598a68e9b Mon Sep 17 00:00:00 2001
+From: Eric Dumazet <edumazet@google.com>
+Date: Tue, 19 May 2026 20:08:36 +0000
+Subject: [PATCH] ipv4: icmp: reject broadcast/multicast routes
+
+syzbot was able to trigger ip_rt_bug() in a loop, using an IPv4 packet
+with a crafted IPOPT_SSRR option:
+
+  options: ipv4_options {
+    options: array[ipv4_option] {
+      union ipv4_option {
+        ssrr: ipv4_option_route[IPOPT_SSRR] {
+         type: const = 0x89 (1 bytes)
+         length: len = 0x7 (1 bytes)
+         pointer: int8 = 0xa2 (1 bytes)
+         data: array[ipv4_addr] {
+           union ipv4_addr {
+             broadcast: const = 0xffffffff (4 bytes)
+           }
+         }
+       }
+     }
+
+Change __icmp_send() to not send ICMP to broadcast/multicast destinations.
+
+Fixes: c378a9c019cf ("ipv4: Give backtrace in ip_rt_bug().")
+Reported-by: syzbot+c13a57c2639c2c0d03a6@syzkaller.appspotmail.com
+Closes: https://lore.kernel.org/netdev/6a0cc169.170a0220.1f6c2d.0004.GAE@google.com/T/#u
+Signed-off-by: Eric Dumazet <edumazet@google.com>
+Reviewed-by: David Ahern <dsahern@kernel.org>
+Link: https://patch.msgid.link/20260519200836.4141061-1-edumazet@google.com
+Signed-off-by: Jakub Kicinski <kuba@kernel.org>
+---
+ net/ipv4/icmp.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/net/ipv4/icmp.c b/net/ipv4/icmp.c
+index 7eeff658b467..23e921d313b3 100644
+--- a/net/ipv4/icmp.c
++++ b/net/ipv4/icmp.c
+@@ -961,6 +961,9 @@ void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
+ 	if (IS_ERR(rt))
+ 		goto out_unlock;
+ 
++	if (rt->rt_flags & (RTCF_BROADCAST | RTCF_MULTICAST))
++		goto ende;
++
+ 	/* peer icmp_ratelimit */
+ 	if (!icmpv4_xrlim_allow(net, rt, &fl4, type, code, apply_ratelimit))
+ 		goto ende;
+-- 
+2.43.0
+

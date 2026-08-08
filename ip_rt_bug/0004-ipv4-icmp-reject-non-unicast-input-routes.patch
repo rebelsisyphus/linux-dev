@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 7 Aug 2026 20:00:00 +0800
+Subject: [PATCH] ipv4: icmp: reject non-unicast input routes in
+ icmp_route_lookup
+
+icmp_route_lookup() performs multiple route lookups to find a route for
+sending ICMP error messages, with special handling for XFRM (IPsec)
+policies.  When the forward output route cannot be used, it enters the
+"reverse path" and calls ip_route_input() on fl4_dec.daddr, the original
+packet's source address.
+
+ip_route_input() only returns an error for truly invalid packets.  For
+local, broadcast, multicast and unreachable addresses it still succeeds
+and returns an input route whose dst.output is set to ip_rt_bug().  The
+existing check (added by commit 81b84de32bb2 ("xfrm: fix ip_rt_bug race
+in icmp_route_lookup reverse path")) only rejects RTN_LOCAL routes, so
+the other route types can still be returned and later used for output,
+triggering a WARN_ON_ONCE() in ip_rt_bug():
+
+ ------------[ cut here ]------------
+ WARNING: net/ipv4/route.c:1273 at ip_rt_bug+0x14/0x20, CPU#3: repro_xfrm_race/345
+ RIP: 0010:ip_rt_bug+0x14/0x20
+ Call Trace:
+  ip_push_pending_frames+0xfa/0x100
+  __icmp_send+0x905/0xf10
+  ip_options_compile+0xc0/0xd0
+  ip_rcv_finish_core+0x321/0xae0
+  ip_rcv+0x1de/0x260
+  __netif_receive_skb_one_core+0x11a/0x130
+  netif_receive_skb+0x7b/0x260
+  tun_get_user+0x11bf/0x1c10
+ ------------[ cut here ]------------
+
+This is reachable without any race: if the original source address is
+unroutable, ip_route_input() returns a RTN_UNREACHABLE input route with
+err == 0, and the ICMP reply is then sent through ip_rt_bug().
+
+Only RTN_UNICAST input routes have dst.output set to ip_output() and are
+safe to use for output.  Reject any input route that is not RTN_UNICAST.
+
+Fixes: 81b84de32bb2 ("xfrm: fix ip_rt_bug race in icmp_route_lookup reverse path")
+Cc: stable@vger.kernel.org
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/ipv4/icmp.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/net/ipv4/icmp.c b/net/ipv4/icmp.c
+index 23e921d313b3..bd207af02451 100644
+--- a/net/ipv4/icmp.c
++++ b/net/ipv4/icmp.c
+@@ -572,12 +572,15 @@ static struct rtable *icmp_route_lookup(struct net *net, struct flowi4 *fl4,
+ 		 * At this point, fl4_dec.daddr should NOT be local (we
+ 		 * checked fl4_dec.saddr above). However, a race condition
+ 		 * may occur if the address is added to the interface
+-		 * concurrently. In that case, ip_route_input() returns a
+-		 * LOCAL route with dst.output=ip_rt_bug, which must not
+-		 * be used for output.
++		 * concurrently, or if fl4_dec.daddr is otherwise unroutable.
++		 * In that case, ip_route_input() returns an input route
++		 * (RTN_LOCAL, RTN_BROADCAST, RTN_UNREACHABLE or
++		 * RTN_MULTICAST) with dst.output set to ip_rt_bug(), which
++		 * must not be used for output.
+ 		 */
+-		if (!err && rt2 && rt2->rt_type == RTN_LOCAL) {
+-			net_warn_ratelimited("detected local route for %pI4 during ICMP sending, src %pI4\n",
++		if (!err && rt2 && rt2->rt_is_input &&
++		    rt2->rt_type != RTN_UNICAST) {
++			net_warn_ratelimited("detected unusable input route for %pI4 during ICMP sending, src %pI4\n",
+ 					     &fl4_dec.daddr, &fl4_dec.saddr);
+ 			dst_release(&rt2->dst);
+ 			err = -EINVAL;
+-- 
+2.34.1

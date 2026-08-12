@@ -1,0 +1,32 @@
+From b401a1f76353d59eb7b2971e3a337adf1171bad0 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Tue, 11 Aug 2026 22:32:40 +0800
+Subject: [PATCH 4/7] ext4: mark inodes without acls in __ext4_iget()
+
+Initialize the negative ACL cache for ext4 inodes that have neither inline nor external xattrs. This lets pathname lookup remain in RCU mode from the first lookup.
+
+Backport of upstream commit 91ef18b567dae84c0cea9b996d933c856e366f52.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/ext4/inode.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index e348fd27adcd..46de7bf7306d 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -5742,7 +5742,9 @@ struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
+ 	if (ret)
+ 		goto bad_inode;
+ 	brelse(iloc.bh);
+-
++	/* Initialize the "no ACL's" state for the simple cases */
++	if (!ext4_test_inode_state(inode, EXT4_STATE_XATTR) && !ei->i_file_acl)
++		cache_no_acl(inode);
+ 	unlock_new_inode(inode);
+ 	return inode;
+ 
+-- 
+2.43.0
+

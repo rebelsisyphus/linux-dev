@@ -1,0 +1,47 @@
+From 53d8fca7c3e3a2370564db4b8b6302ed43304a4d Mon Sep 17 00:00:00 2001
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Tue, 11 Aug 2026 22:32:18 +0800
+Subject: [PATCH 3/7] fs: dodge an atomic in putname if ref == 1
+
+Avoid the final atomic decrement when a filename has a single reference. Preserve the older atomic_t filename representation and IS_ERR() contract used by this tree.
+
+Upstream measured a 3% improvement in an access() pathname lookup benchmark.
+
+Backport of upstream commit 86f40fa6a4675ecfe554c360ab022294742c9a01.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/namei.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 5e58afc0d0d9..3e22ed52c472 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -258,14 +258,19 @@ EXPORT_SYMBOL(getname_kernel);
+ 
+ void putname(struct filename *name)
+ {
++	int refcnt;
++
+ 	if (IS_ERR(name))
+ 		return;
+ 
+-	if (WARN_ON_ONCE(!atomic_read(&name->refcnt)))
+-		return;
++	refcnt = atomic_read(&name->refcnt);
++	if (refcnt != 1) {
++		if (WARN_ON_ONCE(!refcnt))
++			return;
+ 
+-	if (!atomic_dec_and_test(&name->refcnt))
+-		return;
++		if (!atomic_dec_and_test(&name->refcnt))
++			return;
++	}
+ 
+ 	if (name->name != name->iname) {
+ 		__putname(name->name);
+-- 
+2.43.0
+

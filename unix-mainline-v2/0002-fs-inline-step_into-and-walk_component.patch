@@ -1,0 +1,78 @@
+From 761996d6bebfcbe1e5084bc02aed81aadb35baf2 Mon Sep 17 00:00:00 2001
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Thu, 13 Aug 2026 19:42:18 +0800
+Subject: [PATCH 2/2] fs: inline step_into() and walk_component()
+
+Inline the common RCU path-walk handling into link_path_walk(). Handle ordinary non-mounted directories and negative dentries directly, while moving mount, symlink and reference-walk handling to step_into_slowpath().
+
+This removes two function calls per common path component and lets the compiler optimize the lookup fast path together.
+
+Backport of upstream commit 177fdbae39ecccb441d45e5e5ab146ea35b03d49.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/namei.c | 34 +++++++++++++++++++++++++++++++---
+ 1 file changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index d2de0daef76b..103823efb6f1 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -1905,8 +1905,8 @@ static const char *pick_link(struct nameidata *nd, struct path *link,
+  *
+  * NOTE: dentry must be what nd->next_seq had been sampled from.
+  */
+-static const char *step_into(struct nameidata *nd, int flags,
+-		     struct dentry *dentry)
++static noinline const char *step_into_slowpath(struct nameidata *nd, int flags,
++					       struct dentry *dentry)
+ {
+ 	struct path path;
+ 	struct inode *inode;
+@@ -1945,6 +1945,33 @@ static const char *step_into(struct nameidata *nd, int flags,
+ 	return pick_link(nd, &path, inode, flags);
+ }
+ 
++static __always_inline const char *step_into(struct nameidata *nd, int flags,
++					     struct dentry *dentry)
++{
++	/*
++	 * In the common case we are in RCU-walk and traversing a directory
++	 * which is neither a mountpoint nor a symlink.
++	 *
++	 * Handle that case, along with negative dentries, without entering the
++	 * slow path.
++	 */
++	if (likely((nd->flags & LOOKUP_RCU) &&
++		   !d_managed(dentry) && !d_is_symlink(dentry))) {
++		struct inode *inode = dentry->d_inode;
++
++		if (read_seqcount_retry(&dentry->d_seq, nd->next_seq))
++			return ERR_PTR(-ECHILD);
++		if (unlikely(!inode))
++			return ERR_PTR(-ENOENT);
++		nd->path.dentry = dentry;
++		/* nd->path.mnt is retained on purpose */
++		nd->inode = inode;
++		nd->seq = nd->next_seq;
++		return NULL;
++	}
++	return step_into_slowpath(nd, flags, dentry);
++}
++
+ static struct dentry *follow_dotdot_rcu(struct nameidata *nd)
+ {
+ 	struct dentry *parent, *old;
+@@ -2055,7 +2082,8 @@ static const char *handle_dots(struct nameidata *nd, int type)
+ 	return NULL;
+ }
+ 
+-static const char *walk_component(struct nameidata *nd, int flags)
++static __always_inline const char *walk_component(struct nameidata *nd,
++						  int flags)
+ {
+ 	struct dentry *dentry;
+ 	/*
+-- 
+2.43.0
+

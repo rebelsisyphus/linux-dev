@@ -1,0 +1,135 @@
+From ffb76b2f3fb036a4d5b2595c9980cad49a5581ee Mon Sep 17 00:00:00 2001
+Message-ID: <ffb76b2f3fb036a4d5b2595c9980cad49a5581ee.1786678766.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1786678766.git.dongchenchen2@huawei.com>
+References: <cover.1786678766.git.dongchenchen2@huawei.com>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Tue, 11 Aug 2026 22:34:36 +0800
+Subject: [PATCH openEuler-26.09 22/22] fs: speed up path lookup with cheaper handling of
+ MAY_EXEC
+
+mainline inclusion
+from mainline-6.19
+commit e631df89cd5d638a9d7c152dd9b0a92643efab3e
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+CVE: NA
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=e631df89cd5d638a9d7c152dd9b0a92643efab3e
+
+----------------------------------------------------------------------
+
+The generic inode_permission() routine does work which is known to be of
+no significance for lookup. There are checks for MAY_WRITE, while the
+requested permission is MAY_EXEC. Additionally devcgroup_inode_permission()
+is called to check for devices, but it is an invariant the inode is a
+directory.
+
+Absent a ->permission func, execution lands in generic_permission()
+which checks upfront if the requested permission is granted for
+everyone.
+
+We can elide the branches which are guaranteed to be false and cut
+straight to the check if everyone happens to be allowed MAY_EXEC on the
+inode (which holds true most of the time).
+
+Moreover, filesystems which provide their own ->permission routine can
+take advantage of the optimization by setting the IOP_FASTPERM_MAY_EXEC
+flag on their inodes, which they can legitimately do if their MAY_EXEC
+handling matches generic_permission().
+
+As a simple benchmark, as part of compilation gcc issues access(2) on
+numerous long paths, for example /usr/lib/gcc/x86_64-linux-gnu/12/crtendS.o
+
+Issuing access(2) on it in a loop on ext4 on Sapphire Rapids (ops/s):
+before: 3797556
+after:  3987789 (+5%)
+
+Note: this depends on the not-yet-landed ext4 patch to mark inodes with
+cache_no_acl()
+
+Signed-off-by: Mateusz Guzik <mjguzik@gmail.com>
+Link: https://patch.msgid.link/20251107142149.989998-2-mjguzik@gmail.com
+Reviewed-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Christian Brauner <brauner@kernel.org>
+Conflicts:
+	fs/namei.c
+	include/linux/fs.h
+[Adapt to this tree's older VFS and i_opflags layout.]
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ fs/namei.c         | 29 +++++++++++++++++++++++++++--
+ include/linux/fs.h |  1 +
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 7392b59ab236..777a9ff6c873 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -517,6 +517,9 @@ static inline int do_inode_permission(struct mnt_idmap *idmap,
+  * @mask: Right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
+  *
+  * Separate out file-system wide checks from inode-specific permission checks.
++ *
++ * Note: lookup_inode_permission_may_exec() does not call here. If you add
++ * MAY_EXEC checks, adjust it.
+  */
+ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
+ {
+@@ -579,6 +582,27 @@ int inode_permission(struct mnt_idmap *idmap,
+ }
+ EXPORT_SYMBOL(inode_permission);
+ 
++/*
++ * Check directory traversal permission while avoiding checks which cannot
++ * matter for a MAY_EXEC-only lookup.
++ */
++static __always_inline int
++lookup_inode_permission_may_exec(struct mnt_idmap *idmap,
++				 struct inode *inode, int mask)
++{
++	mask |= MAY_EXEC;
++
++	if (unlikely(!(inode->i_opflags &
++		       (IOP_FASTPERM | IOP_FASTPERM_MAY_EXEC))))
++		return inode_permission(idmap, inode, mask);
++
++	if (unlikely(((inode->i_mode & 0111) != 0111) ||
++		     !no_acl_inode(inode)))
++		return inode_permission(idmap, inode, mask);
++
++	return security_inode_permission(inode, mask);
++}
++
+ /**
+  * path_get - get a reference to a path
+  * @path: path to get the reference to
+@@ -1760,11 +1784,12 @@ static inline int may_lookup(struct mnt_idmap *idmap,
+ 			     struct nameidata *nd)
+ {
+ 	if (nd->flags & LOOKUP_RCU) {
+-		int err = inode_permission(idmap, nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
++		int err = lookup_inode_permission_may_exec(idmap, nd->inode,
++							   MAY_NOT_BLOCK);
+ 		if (err != -ECHILD || !try_to_unlazy(nd))
+ 			return err;
+ 	}
+-	return inode_permission(idmap, nd->inode, MAY_EXEC);
++	return lookup_inode_permission_may_exec(idmap, nd->inode, 0);
+ }
+ 
+ static int reserve_stack(struct nameidata *nd, struct path *link)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index ce490946deca..df6d9e0e87d7 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -829,6 +829,7 @@ is_uncached_acl(struct posix_acl *acl)
+ #define IOP_NOFOLLOW	0x0004
+ #define IOP_XATTR	0x0008
+ #define IOP_DEFAULT_READLINK	0x0010
++#define IOP_FASTPERM_MAY_EXEC	0x0020
+ 
+ struct fsnotify_mark_connector;
+ 
+-- 
+2.43.0
+

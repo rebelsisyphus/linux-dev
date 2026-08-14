@@ -1,0 +1,179 @@
+From 01a709215a13488044be6baf13ba1297cdb1484b Mon Sep 17 00:00:00 2001
+Message-ID: <01a709215a13488044be6baf13ba1297cdb1484b.1786676805.git.superdcc97@163.com>
+In-Reply-To: <cover.1786676804.git.superdcc97@163.com>
+References: <cover.1786676804.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Fri, 24 Jul 2026 16:12:37 +0800
+Subject: [PATCH v1 12/22] mm/khugepaged: find retractable mappings in all
+ shards
+
+Page-table retraction searches mapping->i_mmap for other VMAs that map
+the collapsed file offset. Once the mapping is sharded, a central-only
+search can leave stale PTE tables behind.
+
+Move the per-VMA retraction work into the common i_mmap iterator. Preserve
+the existing userfaultfd and private-mapping checks while covering every
+NUMA-local root under its read lock.
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/khugepaged.c | 131 ++++++++++++++++++++++--------------------------
+ 1 file changed, 61 insertions(+), 70 deletions(-)
+
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index ea4845c5f2b9..57b7d7d1e695 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1695,88 +1695,79 @@ int collapse_pte_mapped_thp(struct mm_struct *mm, unsigned long addr,
+ 	return result;
+ }
+ 
+-static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
++static int retract_page_tables_vma(struct vm_area_struct *vma, void *arg)
+ {
+-	struct vm_area_struct *vma;
++	pgoff_t pgoff = *(pgoff_t *)arg;
++	struct mmu_notifier_range range;
++	struct mm_struct *mm;
++	unsigned long addr;
++	pmd_t *pmd, pgt_pmd;
++	spinlock_t *pml; /* PMD lock. */
++	spinlock_t *ptl; /* PTE lock. */
++	bool skipped_uffd = false;
+ 
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-		struct mmu_notifier_range range;
+-		struct mm_struct *mm;
+-		unsigned long addr;
+-		pmd_t *pmd, pgt_pmd;
+-		spinlock_t *pml;
+-		spinlock_t *ptl;
+-		bool skipped_uffd = false;
++	/*
++	 * Exclude MAP_PRIVATE mappings that were written to. They are likely
++	 * to be split again and are not worth retracting page tables from.
++	 */
++	if (READ_ONCE(vma->anon_vma))
++		return 0;
+ 
+-		/*
+-		 * Check vma->anon_vma to exclude MAP_PRIVATE mappings that
+-		 * got written to. These VMAs are likely not worth removing
+-		 * page tables from, as PMD-mapping is likely to be split later.
+-		 */
+-		if (READ_ONCE(vma->anon_vma))
+-			continue;
++	addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
++	if (addr & ~HPAGE_PMD_MASK || vma->vm_end < addr + HPAGE_PMD_SIZE)
++		return 0;
+ 
+-		addr = vma->vm_start + ((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
+-		if (addr & ~HPAGE_PMD_MASK ||
+-		    vma->vm_end < addr + HPAGE_PMD_SIZE)
+-			continue;
++	mm = vma->vm_mm;
++	if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
++		return 0;
++	if (hpage_collapse_test_exit(mm))
++		return 0;
+ 
+-		mm = vma->vm_mm;
+-		if (find_pmd_or_thp_or_none(mm, addr, &pmd) != SCAN_SUCCEED)
+-			continue;
++	/*
++	 * A userfaultfd write-protected VMA can contain PTE markers, so its
++	 * page table cannot be recycled.
++	 */
++	if (userfaultfd_wp(vma))
++		return 0;
+ 
+-		if (hpage_collapse_test_exit(mm))
+-			continue;
+-		/*
+-		 * When a vma is registered with uffd-wp, we cannot recycle
+-		 * the page table because there may be pte markers installed.
+-		 * Other vmas can still have the same file mapped hugely, but
+-		 * skip this one: it will always be mapped in small page size
+-		 * for uffd-wp registered ranges.
+-		 */
+-		if (userfaultfd_wp(vma))
+-			continue;
++	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm, addr,
++				addr + HPAGE_PMD_SIZE);
++	mmu_notifier_invalidate_range_start(&range);
+ 
+-		/* PTEs were notified when unmapped; but now for the PMD? */
+-		mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm,
+-					addr, addr + HPAGE_PMD_SIZE);
+-		mmu_notifier_invalidate_range_start(&range);
++	pml = pmd_lock(mm, pmd);
++	ptl = pte_lockptr(mm, pmd);
++	if (ptl != pml)
++		spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
+ 
+-		pml = pmd_lock(mm, pmd);
+-		ptl = pte_lockptr(mm, pmd);
+-		if (ptl != pml)
+-			spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
++	/*
++	 * mmap_lock is not held, so recheck after taking the page-table lock
++	 * against a racing userfaultfd registration or private write.
++	 */
++	if (unlikely(vma->anon_vma || userfaultfd_wp(vma))) {
++		skipped_uffd = true;
++	} else {
++		pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
++		pmdp_get_lockless_sync();
++	}
+ 
+-		/*
+-		 * Huge page lock is still held, so normally the page table
+-		 * must remain empty; and we have already skipped anon_vma
+-		 * and userfaultfd_wp() vmas.  But since the mmap_lock is not
+-		 * held, it is still possible for a racing userfaultfd_ioctl()
+-		 * to have inserted ptes or markers.  Now that we hold ptlock,
+-		 * repeating the anon_vma check protects from one category,
+-		 * and repeating the userfaultfd_wp() check from another.
+-		 */
+-		if (unlikely(vma->anon_vma || userfaultfd_wp(vma))) {
+-			skipped_uffd = true;
+-		} else {
+-			pgt_pmd = pmdp_collapse_flush(vma, addr, pmd);
+-			pmdp_get_lockless_sync();
+-		}
++	if (ptl != pml)
++		spin_unlock(ptl);
++	spin_unlock(pml);
++	mmu_notifier_invalidate_range_end(&range);
+ 
+-		if (ptl != pml)
+-			spin_unlock(ptl);
+-		spin_unlock(pml);
++	if (!skipped_uffd) {
++		mm_dec_nr_ptes(mm);
++		page_table_check_pte_clear_range(mm, addr, pgt_pmd);
++		pte_free_defer(mm, pmd_pgtable(pgt_pmd));
++	}
+ 
+-		mmu_notifier_invalidate_range_end(&range);
++	return 0;
++}
+ 
+-		if (!skipped_uffd) {
+-			mm_dec_nr_ptes(mm);
+-			page_table_check_pte_clear_range(mm, addr, pgt_pmd);
+-			pte_free_defer(mm, pmd_pgtable(pgt_pmd));
+-		}
+-	}
+-	i_mmap_unlock_read(mapping);
++static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
++{
++	i_mmap_read_walk(mapping, pgoff, pgoff, false,
++			 retract_page_tables_vma, &pgoff);
+ }
+ 
+ /**
+-- 
+2.43.0
+

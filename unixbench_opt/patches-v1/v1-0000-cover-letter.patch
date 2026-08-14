@@ -1,0 +1,163 @@
+From ffb76b2f3fb036a4d5b2595c9980cad49a5581ee Mon Sep 17 00:00:00 2001
+Message-ID: <cover.1786678766.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 14 Aug 2026 11:39:26 +0800
+Subject: [PATCH openEuler-26.09 00/22] mm, fs, entry: improve concurrent fork/exec
+ scalability
+
+UnixBench shell, execl, and other process-heavy workloads repeatedly
+create and tear down dynamically linked processes.  At high concurrency,
+many tasks insert and remove VMAs for the same executable, dynamic loader,
+and shared libraries.  All of those file VMAs are currently serialized by
+one address_space::i_mmap_rwsem and one interval tree.  The lock therefore
+becomes a cross-CPU and cross-NUMA bottleneck even though most operations
+belong to independent mms.
+
+This series reduces both that shared write-side bottleneck and the fixed
+per-exec overhead exposed after it is relieved.  It contains a new i_mmap
+batching and sharding implementation in patches 1-19, followed by three
+selected upstream hot-path backports in patches 20-22.
+
+Patches 1-3 reduce lock traffic before introducing any new tree layout.
+dup_mmap() coalesces up to eight insertions per mapping and keeps four
+mapping batches active at once.  The teardown path similarly batches up to
+eight removals by address_space rather than struct file.
+
+Patches 4-8 add the sharded layout and route file VMA writers through it.
+A contended regular-file mapping gets four cacheline-aligned shards per
+possible NUMA node, for up to eight nodes.  Each domain block is allocated
+on its NUMA node.  A stable home node selects the domain and a hash of the
+mm selects one of its four local shards, providing both inter-node
+isolation and intra-node parallelism.
+
+Mappings start on the existing central tree.  After the fourth failed
+central write trylock, one writer allocates the full shard set, migrates
+the interval-tree nodes under the central write lock, and publishes the
+completed layout with release ordering.  Allocation or installation
+failure leaves the mapping on the central tree.  shmem, hugetlbfs, DAX,
+non-regular files, and systems with more than eight possible NUMA nodes
+continue to use the central tree.
+
+Patches 9-17 preserve the less common read-side and global-lock contracts.
+Blocking and trylock walkers acquire the complete shard lock set before
+the first callback, preventing partial callback execution on trylock
+failure.  Caller-locked rmap, mm_take_all_locks(), file-folio splitting,
+memory failure, khugepaged, pagewalk, uprobes, and the architecture cache
+walkers are converted to cover every root.  A VMA count that remains valid
+during tree migration keeps mapping_mapped() from observing a false empty
+window.
+
+Patches 18-19 connect contention-driven installation and make deployment
+opt-in.  CONFIG_I_MMAP_SHARDS is a hidden capability for MMU, SMP, NUMA
+kernels, while the feature is disabled unless i_mmap_shards=on is passed
+at early boot.  A default-false static key keeps the disabled case on the
+original central-tree path: it avoids shard pointer loads, VMA count
+atomics, contention accounting, and shard state initialization.  The
+switch is intentionally boot-only, so policy cannot change while live
+mappings may already use one of the two layouts.
+
+Patches 20-22 backport the following upstream optimizations used by this
+downstream series:
+
+  - commit e43b8bb56e53 ("entry: Inline syscall_exit_to_user_mode()")
+  - commit cb80d9074f2a ("fs: optimize acl_permission_check()")
+  - commit e631df89cd5d ("fs: speed up path lookup with cheaper handling of
+    MAY_EXEC")
+
+The two VFS patches form one unit: the ACL fast path is the prerequisite
+for the specialized MAY_EXEC directory traversal path.  A submission
+against a tree that already contains these upstream commits should omit
+patches 20-22.
+
+Performance
+===========
+
+The supplied UnixBench result compares the baseline kernel with the full
+optimized kernel.  The reported values are aggregate index scores:
+
+                         baseline    mmap-opt       change
+  1 container              1547.9      2055.5       +32.79%
+  80 containers            4201.1      4199.0        -0.05%
+  linearity                  36.8%       48.9%       +12.1 pp
+
+The single-container score improves by 32.8%, while the 80-container
+score is effectively unchanged and the reported linearity rises by 12.1
+percentage points.  The result file contains aggregate values only; it
+does not record run count or dispersion, so the 0.05% difference should
+not be interpreted as a significant regression.
+
+Scope and trade-offs
+====================
+
+Only mappings with observed write-lock contention allocate shards, and a
+mapping stays sharded until inode teardown.  This avoids steady-state
+memory and multi-root traversal costs for cold files and avoids a reverse
+migration protocol.  Once sharded, ordinary VMA writers take one local
+shard lock, while operations that require a complete reverse-mapping view
+must acquire and visit all shard locks.  The latter paths are deliberately
+kept correct rather than optimized for the common writer-heavy workload.
+
+With i_mmap_shards omitted or set to off, the sharding machinery remains
+dormant and the original central-tree performance path is retained.  The
+fork and teardown batching and the three upstream backports are independent
+of that boot-time choice.
+
+Charlie Jenkins (1):
+  entry: Inline syscall_exit_to_user_mode()
+
+Dong Chenchen (19):
+  mm: batch file VMA insertions in dup_mmap
+  mm: batch file VMA unlink by address_space
+  mm: keep multiple file VMA batches in dup_mmap
+  mm: add optional NUMA-local i_mmap shard state
+  mm: allocate i_mmap shards on their NUMA nodes
+  mm: account file VMAs independently of i_mmap layout
+  mm: add NUMA-aware i_mmap shard installation
+  mm: route file VMA updates through shard-aware locks
+  mm: add all-shard i_mmap read iteration
+  mm: make core file rmap walkers shard-aware
+  mm/memory-failure: walk sharded file mappings
+  mm/khugepaged: find retractable mappings in all shards
+  mm/pagewalk: traverse every i_mmap shard
+  uprobes: build registration maps from all i_mmap shards
+  mm: make architecture i_mmap cache walkers shard-aware
+  mm: preserve all-lock semantics for sharded i_mmap
+  mm: hold all i_mmap shards for locked file rmap
+  mm: enable NUMA-local i_mmap shards after contention
+  mm: control i_mmap shards from the command line
+
+Linus Torvalds (1):
+  fs: optimize acl_permission_check()
+
+Mateusz Guzik (1):
+  fs: speed up path lookup with cheaper handling of MAY_EXEC
+
+ .../admin-guide/kernel-parameters.txt         |   7 +
+ arch/arm/mm/fault-armv.c                      |  53 +-
+ arch/arm/mm/flush.c                           |  78 +--
+ arch/nios2/mm/cacheflush.c                    |  46 +-
+ arch/parisc/kernel/cache.c                    |  94 +--
+ fs/inode.c                                    |  15 +
+ fs/namei.c                                    |  70 ++-
+ include/linux/entry-common.h                  |  32 +-
+ include/linux/fs.h                            | 168 ++++++
+ include/linux/mm_types.h                      |   4 +
+ kernel/entry/common.c                         |  49 +-
+ kernel/events/uprobes.c                       |  87 +--
+ kernel/fork.c                                 | 133 ++++-
+ mm/Kconfig                                    |  12 +
+ mm/huge_memory.c                              |   5 +-
+ mm/internal.h                                 |   2 +
+ mm/khugepaged.c                               | 131 ++---
+ mm/mapping_dirty_helpers.c                    |   4 -
+ mm/memory-failure.c                           |  58 +-
+ mm/memory.c                                   |  62 +-
+ mm/mmap.c                                     | 535 +++++++++++++++++-
+ mm/pagewalk.c                                 |  89 +--
+ mm/rmap.c                                     |  75 +--
+ 23 files changed, 1374 insertions(+), 435 deletions(-)
+
+
+base-commit: 3d5d2ff074a215ab94b9ca8f65cc944d252ffd8d
+-- 
+2.43.0

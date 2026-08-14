@@ -1,0 +1,98 @@
+From d8f9f26028cfcae7410eff8784ed5283e22c09ea Mon Sep 17 00:00:00 2001
+Message-ID: <d8f9f26028cfcae7410eff8784ed5283e22c09ea.1786676805.git.superdcc97@163.com>
+In-Reply-To: <cover.1786676804.git.superdcc97@163.com>
+References: <cover.1786676804.git.superdcc97@163.com>
+From: Mateusz Guzik <mjguzik@gmail.com>
+Date: Tue, 11 Aug 2026 22:34:36 +0800
+Subject: [PATCH v1 22/22] fs: speed up path lookup with cheaper handling of
+ MAY_EXEC
+
+Add a dedicated directory traversal permission fast path. It avoids
+superblock write checks and device-cgroup checks that cannot affect
+MAY_EXEC lookup, while retaining LSM permission checks.
+
+Adapt the helper to this tree without the newer VFS_BUG_ON helpers and
+allocate the next free i_opflags bit. Upstream measured a 5% improvement in
+an ext4 access() pathname benchmark.
+
+Backport of commit e631df89cd5d ("fs: speed up path lookup with cheaper
+handling of MAY_EXEC").
+
+Signed-off-by: Mateusz Guzik <mjguzik@gmail.com>
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ fs/namei.c         | 29 +++++++++++++++++++++++++++--
+ include/linux/fs.h |  1 +
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 7392b59ab236..777a9ff6c873 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -517,6 +517,9 @@ static inline int do_inode_permission(struct mnt_idmap *idmap,
+  * @mask: Right to check for (%MAY_READ, %MAY_WRITE, %MAY_EXEC)
+  *
+  * Separate out file-system wide checks from inode-specific permission checks.
++ *
++ * Note: lookup_inode_permission_may_exec() does not call here. If you add
++ * MAY_EXEC checks, adjust it.
+  */
+ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
+ {
+@@ -579,6 +582,27 @@ int inode_permission(struct mnt_idmap *idmap,
+ }
+ EXPORT_SYMBOL(inode_permission);
+ 
++/*
++ * Check directory traversal permission while avoiding checks which cannot
++ * matter for a MAY_EXEC-only lookup.
++ */
++static __always_inline int
++lookup_inode_permission_may_exec(struct mnt_idmap *idmap,
++				 struct inode *inode, int mask)
++{
++	mask |= MAY_EXEC;
++
++	if (unlikely(!(inode->i_opflags &
++		       (IOP_FASTPERM | IOP_FASTPERM_MAY_EXEC))))
++		return inode_permission(idmap, inode, mask);
++
++	if (unlikely(((inode->i_mode & 0111) != 0111) ||
++		     !no_acl_inode(inode)))
++		return inode_permission(idmap, inode, mask);
++
++	return security_inode_permission(inode, mask);
++}
++
+ /**
+  * path_get - get a reference to a path
+  * @path: path to get the reference to
+@@ -1760,11 +1784,12 @@ static inline int may_lookup(struct mnt_idmap *idmap,
+ 			     struct nameidata *nd)
+ {
+ 	if (nd->flags & LOOKUP_RCU) {
+-		int err = inode_permission(idmap, nd->inode, MAY_EXEC|MAY_NOT_BLOCK);
++		int err = lookup_inode_permission_may_exec(idmap, nd->inode,
++							   MAY_NOT_BLOCK);
+ 		if (err != -ECHILD || !try_to_unlazy(nd))
+ 			return err;
+ 	}
+-	return inode_permission(idmap, nd->inode, MAY_EXEC);
++	return lookup_inode_permission_may_exec(idmap, nd->inode, 0);
+ }
+ 
+ static int reserve_stack(struct nameidata *nd, struct path *link)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index ce490946deca..df6d9e0e87d7 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -829,6 +829,7 @@ is_uncached_acl(struct posix_acl *acl)
+ #define IOP_NOFOLLOW	0x0004
+ #define IOP_XATTR	0x0008
+ #define IOP_DEFAULT_READLINK	0x0010
++#define IOP_FASTPERM_MAY_EXEC	0x0020
+ 
+ struct fsnotify_mark_connector;
+ 
+-- 
+2.43.0

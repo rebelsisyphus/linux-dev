@@ -1,0 +1,137 @@
+From b693b7dad4b85e08cfd3c71fc37b5ad3a45aeaab Mon Sep 17 00:00:00 2001
+Message-ID: <b693b7dad4b85e08cfd3c71fc37b5ad3a45aeaab.1786678766.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1786678766.git.dongchenchen2@huawei.com>
+References: <cover.1786678766.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:26:00 +0800
+Subject: [PATCH openEuler-26.09 18/22] mm: enable NUMA-local i_mmap shards after contention
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+Allocating shards for every mapping would penalize cold files, while a
+fixed global hash lets lock cachelines bounce across NUMA nodes. Enable the
+new layout only for ordinary files that repeatedly contend on the central
+write lock.
+
+On the fourth failed trylock, elect one installer with an atomic state.
+Allocate four local shards for each of up to eight NUMA nodes, migrate
+under the central gate, and publish the completed roots. Exclude shmem,
+hugetlbfs, DAX, NOMMU, and machines with more than eight possible nodes.
+Allocation failure resets the contention state and leaves the central tree
+intact.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ mm/mmap.c | 68 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 68 insertions(+)
+
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 7391751a8629..a0bfcaf31abe 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -67,6 +67,8 @@
+ #endif
+ 
+ #ifdef CONFIG_I_MMAP_SHARDS
++#define I_MMAP_SHARD_CONTENTION_THRESHOLD	4
++
+ static struct lock_class_key i_mmap_shard_lock_keys[I_MMAP_MAX_SHARDS];
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+@@ -149,16 +151,81 @@ struct i_mmap_shard *i_mmap_shard_for_vma(struct i_mmap_shards *shards,
+ 	return &domain->shard[shard_idx];
+ }
+ 
++static bool i_mmap_sharding_eligible(struct address_space *mapping,
++				     struct vm_area_struct *vma)
++{
++	struct inode *inode = mapping->host;
++
++	if (!inode || !S_ISREG(inode->i_mode))
++		return false;
++	if (!vma->vm_file || vma->vm_file->f_mapping != mapping)
++		return false;
++	if (shmem_mapping(mapping) || IS_DAX(inode))
++		return false;
++	if (is_file_hugepages(vma->vm_file))
++		return false;
++	return num_possible_nodes() <= I_MMAP_MAX_DOMAINS;
++}
++
++static bool i_mmap_claim_shard_install(struct address_space *mapping)
++{
++	atomic_t *contention = &mapping->i_mmap_lock_contention;
++	int old, new;
++
++	do {
++		old = atomic_read(contention);
++		if (old < 0)
++			return false;
++		new = old + 1;
++		if (new >= I_MMAP_SHARD_CONTENTION_THRESHOLD)
++			new = -1;
++	} while (atomic_cmpxchg(contention, old, new) != old);
++
++	return new < 0;
++}
++
++static void i_mmap_install_shards(struct address_space *mapping)
++{
++	struct i_mmap_shards *shards;
++
++	shards = i_mmap_shards_alloc(GFP_KERNEL);
++	if (!shards) {
++		atomic_set(&mapping->i_mmap_lock_contention, 0);
++		return;
++	}
++
++	i_mmap_lock_write(mapping);
++	if (i_mmap_shards_install_locked(mapping, shards))
++		shards = NULL;
++	i_mmap_unlock_write(mapping);
++	i_mmap_shards_free(shards);
++}
++
+ void i_mmap_lock_write_vma(struct address_space *mapping,
+ 			   struct vm_area_struct *vma,
+ 			   struct i_mmap_write_lock *lock)
+ {
+ 	struct i_mmap_shards *shards;
+ 
++retry:
+ 	lock->shard = NULL;
+ 	lock->root = &mapping->i_mmap;
+ 	shards = i_mmap_shards_load(mapping);
+ 	if (!shards) {
++		if (i_mmap_trylock_write(mapping)) {
++			shards = i_mmap_shards_load(mapping);
++			if (!shards)
++				return;
++			i_mmap_unlock_write(mapping);
++			goto lock_shard;
++		}
++
++		if (i_mmap_sharding_eligible(mapping, vma) &&
++		    i_mmap_claim_shard_install(mapping)) {
++			i_mmap_install_shards(mapping);
++			goto retry;
++		}
++
+ 		i_mmap_lock_write(mapping);
+ 		shards = i_mmap_shards_load(mapping);
+ 		if (!shards)
+@@ -166,6 +233,7 @@ void i_mmap_lock_write_vma(struct address_space *mapping,
+ 		i_mmap_unlock_write(mapping);
+ 	}
+ 
++lock_shard:
+ 	lock->shard = i_mmap_shard_for_vma(shards, vma);
+ 	lock->root = &lock->shard->root;
+ 	down_write(&lock->shard->rwsem);
+-- 
+2.43.0
+

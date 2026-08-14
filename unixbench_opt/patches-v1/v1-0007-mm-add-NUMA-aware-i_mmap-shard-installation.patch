@@ -1,0 +1,124 @@
+From 2edc3bdcfdf1fd3efb9c7d66d17d73e09dbdb49e Mon Sep 17 00:00:00 2001
+Message-ID: <2edc3bdcfdf1fd3efb9c7d66d17d73e09dbdb49e.1786678766.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1786678766.git.dongchenchen2@huawei.com>
+References: <cover.1786678766.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:02:02 +0800
+Subject: [PATCH openEuler-26.09 07/22] mm: add NUMA-aware i_mmap shard installation
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+The sharded layout needs one conversion point that assigns every VMA to
+the same tree that later updates will select. It must also keep partially
+initialized roots invisible to lockless observers.
+
+Select a domain from the stable mm home node and hash the mm across four
+local shards. Under the central write lock, move every interval-tree node
+and publish the completed set with release ordering. Readers use the
+matching acquire load, and an invalid home node has a deterministic
+fallback domain.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ include/linux/fs.h | 11 ++++++++++
+ mm/mmap.c          | 51 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index fe874667693a..15b767af333e 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -494,6 +494,10 @@ struct i_mmap_shards {
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
+ void i_mmap_shards_free(struct i_mmap_shards *shards);
++struct i_mmap_shard *i_mmap_shard_for_vma(struct i_mmap_shards *shards,
++					  struct vm_area_struct *vma);
++bool i_mmap_shards_install_locked(struct address_space *mapping,
++				  struct i_mmap_shards *shards);
+ #endif
+ 
+ /**
+@@ -616,6 +620,13 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+ }
+ 
+ #ifdef CONFIG_I_MMAP_SHARDS
++static inline struct i_mmap_shards *
++i_mmap_shards_load(struct address_space *mapping)
++{
++	/* Pairs with release publication after all roots are initialized. */
++	return smp_load_acquire(&mapping->i_mmap_shards);
++}
++
+ static inline void i_mmap_vma_count_add(struct address_space *mapping)
+ {
+ 	atomic_inc(&mapping->i_mmap_nr_vmas);
+diff --git a/mm/mmap.c b/mm/mmap.c
+index c0582ce3529b..4fa6201f3d27 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -113,6 +113,57 @@ void i_mmap_shards_free(struct i_mmap_shards *shards)
+ 		kfree(shards->domain[i]);
+ 	kfree(shards);
+ }
++
++struct i_mmap_shard *i_mmap_shard_for_vma(struct i_mmap_shards *shards,
++					  struct vm_area_struct *vma)
++{
++	struct i_mmap_domain_shards *domain = NULL;
++	unsigned int domain_idx;
++	unsigned int shard_idx;
++	unsigned int i;
++	int nid;
++
++	nid = READ_ONCE(vma->vm_mm->i_mmap_home_nid);
++	for (i = 0; i < shards->nr_domains; i++) {
++		if (shards->domain[i]->nid == nid) {
++			domain = shards->domain[i];
++			break;
++		}
++	}
++
++	if (unlikely(!domain)) {
++		domain_idx = hash_ptr(vma->vm_mm, 32) % shards->nr_domains;
++		domain = shards->domain[domain_idx];
++	}
++
++	shard_idx = hash_ptr(vma->vm_mm,
++			     ilog2(I_MMAP_SHARDS_PER_DOMAIN));
++	return &domain->shard[shard_idx];
++}
++
++bool i_mmap_shards_install_locked(struct address_space *mapping,
++				  struct i_mmap_shards *shards)
++{
++	struct vm_area_struct *vma;
++	struct i_mmap_shard *shard;
++
++	i_mmap_assert_write_locked(mapping);
++	if (i_mmap_shards_load(mapping))
++		return false;
++
++	for (;;) {
++		vma = vma_interval_tree_iter_first(&mapping->i_mmap, 0, ULONG_MAX);
++		if (!vma)
++			break;
++		vma_interval_tree_remove(vma, &mapping->i_mmap);
++		shard = i_mmap_shard_for_vma(shards, vma);
++		vma_interval_tree_insert(vma, &shard->root);
++	}
++
++	/* Publish only after every interval-tree root has been populated. */
++	smp_store_release(&mapping->i_mmap_shards, shards);
++	return true;
++}
+ #endif
+ 
+ #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
+-- 
+2.43.0
+

@@ -1,0 +1,6 @@
+unixbench测试结果（得分index）
+		1container	80container	linearity
+-----------------------------------------------------------
+baseline	  1547.9	  4201.1	  36.8%
+mmap-opt	  2055.5	  4199.0	  48.9%
+

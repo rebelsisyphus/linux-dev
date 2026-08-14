@@ -1,0 +1,139 @@
+From 104b6da3f11a8f0f41d2aec4ee3e258dd0c3c6c1 Mon Sep 17 00:00:00 2001
+Message-ID: <104b6da3f11a8f0f41d2aec4ee3e258dd0c3c6c1.1786678766.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1786678766.git.dongchenchen2@huawei.com>
+References: <cover.1786678766.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:15:34 +0800
+Subject: [PATCH openEuler-26.09 14/22] uprobes: build registration maps from all i_mmap
+ shards
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+Uprobe registration enumerates the inode interval tree to find every mm
+that maps a probe offset. Looking only at mapping->i_mmap silently skips
+all processes assigned to published shard roots.
+
+Run map-info construction through the common i_mmap iterator. Preserve the
+existing nonblocking allocation and retry scheme so reclaim cannot recurse
+through mapping locks while entries are collected.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ kernel/events/uprobes.c | 87 +++++++++++++++++++++++++----------------
+ 1 file changed, 54 insertions(+), 33 deletions(-)
+
+diff --git a/kernel/events/uprobes.c b/kernel/events/uprobes.c
+index 26e1a4f593ba..8ad4cfbb1063 100644
+--- a/kernel/events/uprobes.c
++++ b/kernel/events/uprobes.c
+@@ -997,49 +997,70 @@ static inline struct map_info *free_map_info(struct map_info *info)
+ 	return next;
+ }
+ 
++struct build_map_info_walk {
++	loff_t offset;
++	bool is_register;
++	struct map_info **curr;
++	struct map_info **prev;
++	int *more;
++};
++
++static int build_map_info_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct build_map_info_walk *walk = arg;
++	struct map_info *info;
++	gfp_t gfp;
++
++	if (!valid_vma(vma, walk->is_register))
++		return 0;
++
++	if (!*walk->prev && !*walk->more) {
++		/*
++		 * GFP_NOWAIT avoids i_mmap lock recursion through reclaim. A
++		 * failure is harmless because build_map_info() retries after it
++		 * allocates enough entries without holding mapping locks.
++		 */
++		gfp = GFP_NOWAIT | __GFP_NOMEMALLOC | __GFP_NOWARN;
++		*walk->prev = kmalloc(sizeof(**walk->prev), gfp);
++		if (*walk->prev)
++			(*walk->prev)->next = NULL;
++	}
++	if (!*walk->prev) {
++		(*walk->more)++;
++		return 0;
++	}
++
++	if (!mmget_not_zero(vma->vm_mm))
++		return 0;
++
++	info = *walk->prev;
++	*walk->prev = info->next;
++	info->next = *walk->curr;
++	*walk->curr = info;
++	info->mm = vma->vm_mm;
++	info->vaddr = offset_to_vaddr(vma, walk->offset);
++	return 0;
++}
++
+ static struct map_info *
+ build_map_info(struct address_space *mapping, loff_t offset, bool is_register)
+ {
+ 	unsigned long pgoff = offset >> PAGE_SHIFT;
+-	struct vm_area_struct *vma;
+ 	struct map_info *curr = NULL;
+ 	struct map_info *prev = NULL;
+ 	struct map_info *info;
++	struct build_map_info_walk walk = {
++		.offset = offset,
++		.is_register = is_register,
++		.curr = &curr,
++		.prev = &prev,
++	};
+ 	int more = 0;
+ 
++	walk.more = &more;
+  again:
+-	i_mmap_lock_read(mapping);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+-		if (!valid_vma(vma, is_register))
+-			continue;
+-
+-		if (!prev && !more) {
+-			/*
+-			 * Needs GFP_NOWAIT to avoid i_mmap_rwsem recursion through
+-			 * reclaim. This is optimistic, no harm done if it fails.
+-			 */
+-			prev = kmalloc(sizeof(struct map_info),
+-					GFP_NOWAIT | __GFP_NOMEMALLOC | __GFP_NOWARN);
+-			if (prev)
+-				prev->next = NULL;
+-		}
+-		if (!prev) {
+-			more++;
+-			continue;
+-		}
+-
+-		if (!mmget_not_zero(vma->vm_mm))
+-			continue;
+-
+-		info = prev;
+-		prev = prev->next;
+-		info->next = curr;
+-		curr = info;
+-
+-		info->mm = vma->vm_mm;
+-		info->vaddr = offset_to_vaddr(vma, offset);
+-	}
+-	i_mmap_unlock_read(mapping);
++	i_mmap_read_walk(mapping, pgoff, pgoff, false,
++			 build_map_info_vma, &walk);
+ 
+ 	if (!more)
+ 		goto out;
+-- 
+2.43.0
+

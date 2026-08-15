@@ -1,0 +1,4 @@
+[   53.317841] ip (341) used greatest stack depth: 24744 bytes left
+[   55.739541] gt1: entered promiscuous mode
+[   55.748790] veth0: entered promiscuous mode
+[   55.751512] veth1: entered promiscuous mode

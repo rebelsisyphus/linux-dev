@@ -1,0 +1,12 @@
+[   57.058619] br0: port 1(gt1) entered blocking state
+[   57.059346] br0: port 1(gt1) entered disabled state
+[   57.062246] gt1: entered allmulticast mode
+[   57.075355] gt1: entered promiscuous mode
+[   57.229524] br0: port 2(veth0) entered blocking state
+[   57.230569] br0: port 2(veth0) entered disabled state
+[   57.236143] veth0: entered allmulticast mode
+[   57.248390] veth0: entered promiscuous mode
+[   57.419722] br0: port 2(veth0) entered blocking state
+[   57.420303] br0: port 2(veth0) entered forwarding state
+[   57.422661] br0: port 1(gt1) entered blocking state
+[   57.424336] br0: port 1(gt1) entered forwarding state

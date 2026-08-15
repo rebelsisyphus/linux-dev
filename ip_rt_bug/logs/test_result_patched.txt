@@ -1,0 +1,14 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== IPv4 ICMP broadcast/multicast route reproducer ===
+Test time: Thu Aug  6 13:43:07 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82-dirty
+Running reproducer...
+Sent 20 crafted SSRR packets on veth1; waiting for ICMP reply on veth1...
+No IPv4 reply captured.
+Reproducer exit code: 0
+
+=== Checking for broadcast ICMP reply ===
+RESULT: NOT VULNERABLE (patched) - no broadcast ICMP reply emitted
+
+=== Checking dmesg for warnings ===
+No dmesg warnings.

@@ -1,0 +1,190 @@
+From mboxrd@z Thu Jan  1 00:00:00 1970
+Received: from out-182.mta1.migadu.com (out-182.mta1.migadu.com [95.215.58.182])
+	(using TLSv1.2 with cipher ECDHE-RSA-AES256-GCM-SHA384 (256/256 bits))
+	(No client certificate requested)
+	by smtp.subspace.kernel.org (Postfix) with ESMTPS id A960F2BB1D
+	for <netdev@vger.kernel.org>; Fri, 24 Apr 2026 02:04:36 +0000 (UTC)
+Authentication-Results: smtp.subspace.kernel.org; arc=none smtp.client-ip=95.215.58.182
+ARC-Seal:i=1; a=rsa-sha256; d=subspace.kernel.org; s=arc-20240116;
+	t=1776996279; cv=none; b=rgC2J6RDHg/76cgEtF8AJZ3es37ngSq8CjIRFVMo2+m25bg5KHqFXgmb6pBRcwt3EUgQcUAC3IWcvjhF5OhCUR+LxjDiEa5rJun7vmv8+Ojo+CXgqV/9JTnFFop+3IQa11rOkLJdVgxknyovbjC+qyr/a4EjKxxXDC/cXOxUWfQ=
+ARC-Message-Signature:i=1; a=rsa-sha256; d=subspace.kernel.org;
+	s=arc-20240116; t=1776996279; c=relaxed/simple;
+	bh=7S68sTCgnFyFVWeGvZ2mCNlZhm2PZzwZ1Vvf43XP3Ms=;
+	h=Message-ID:Date:MIME-Version:Subject:To:Cc:References:From:
+	 In-Reply-To:Content-Type; b=EfZ2L6nr9fROu3dLC6BoX66Y4d0eTgZL/jPGA+GtquOMwciFEhlhJynYMnxGVXRdsotdhZigKD4HbfFqEEb2hIPL8a+sAh6sed/BGw93xPHEAsIhd2Ts/C3OW9UnScqsMIE6LazAhaeZRhgikIig8OzxOSxMKiJ60SPHwBa6cr4=
+ARC-Authentication-Results:i=1; smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=linux.dev; spf=pass smtp.mailfrom=linux.dev; dkim=pass (1024-bit key) header.d=linux.dev header.i=@linux.dev header.b=Lmxug35D; arc=none smtp.client-ip=95.215.58.182
+Authentication-Results: smtp.subspace.kernel.org; dmarc=pass (p=none dis=none) header.from=linux.dev
+Authentication-Results: smtp.subspace.kernel.org; spf=pass smtp.mailfrom=linux.dev
+Authentication-Results: smtp.subspace.kernel.org;
+	dkim=pass (1024-bit key) header.d=linux.dev header.i=@linux.dev header.b="Lmxug35D"
+Message-ID: <b4405f36-9492-444d-9419-c4bb907009e6@linux.dev>
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=linux.dev; s=key1;
+	t=1776996271;
+	h=from:from:reply-to:subject:subject:date:date:message-id:message-id:
+	 to:to:cc:cc:mime-version:mime-version:content-type:content-type:
+	 content-transfer-encoding:content-transfer-encoding:
+	 in-reply-to:in-reply-to:references:references;
+	bh=U1+jFe2qzzLf9rZ/45iiA10TpzzB6MLek8JfGyrtyMU=;
+	b=Lmxug35DAi4oJjSKF0o3C92c85HvWqprWjYRu4SjWlFokv9quNFtibipsvRKTc3odRJ8/4
+	39BSDwL5qcHYPjlm89Q6gITQkNW7Epcwur44d5CaUBfN/T1SOBSMNigfibJyqbXpE7nhgz
+	kjLPvt9syYV3kZjtniAO9TOYECiB1w0=
+Date: Fri, 24 Apr 2026 10:04:22 +0800
+Precedence: bulk
+X-Mailing-List: netdev@vger.kernel.org
+List-Id: <netdev.vger.kernel.org>
+List-Subscribe: <mailto:netdev+subscribe@vger.kernel.org>
+List-Unsubscribe: <mailto:netdev+unsubscribe@vger.kernel.org>
+MIME-Version: 1.0
+Subject: Re: [PATCH net v2] net: iptunnel: fix stale transport header after
+ GRE/TEB decap
+To: Paolo Abeni <pabeni@redhat.com>, Eric Dumazet <edumazet@google.com>
+Cc: netdev@vger.kernel.org,
+ syzbot+83181a31faf9455499c5@syzkaller.appspotmail.com,
+ "David S. Miller" <davem@davemloft.net>, David Ahern <dsahern@kernel.org>,
+ Jakub Kicinski <kuba@kernel.org>, Simon Horman <horms@kernel.org>,
+ Pravin B Shelar <pshelar@nicira.com>, Tom Herbert <tom@herbertland.com>,
+ linux-kernel@vger.kernel.org
+References: <20260419090817.127334-1-jiayuan.chen@linux.dev>
+ <CANn89iKJFCw9gPdQN4hYZ94j-0Ua84N+DyYjPjwBTRLveK-j7g@mail.gmail.com>
+ <eb0683d9-617f-41b6-b535-e15ffe081a17@linux.dev>
+ <4f467b95-d135-4c1a-9f44-09138ff2d592@redhat.com>
+X-Report-Abuse: Please report any abuse attempt to abuse@migadu.com and include these headers.
+From: Jiayuan Chen <jiayuan.chen@linux.dev>
+In-Reply-To: <4f467b95-d135-4c1a-9f44-09138ff2d592@redhat.com>
+Content-Type: text/plain; charset=UTF-8; format=flowed
+Content-Transfer-Encoding: 8bit
+X-Migadu-Flow: FLOW_OUT
+
+
+On 4/23/26 4:19 PM, Paolo Abeni wrote:
+> On 4/19/26 3:01 PM, Jiayuan Chen wrote:
+>> [...]
+>>>>    +662,18 @@ static inline int iptunnel_pull_offloads(struct sk_buff *skb)
+>>>>           return 0;
+>>>>    }
+>>>>
+>>>> +static inline void iptunnel_rebuild_transport_header(struct sk_buff *skb)
+>>>> +{
+>>>> +       if (!skb_is_gso(skb))
+>>>> +               return;
+>>>> +
+>>>> +       skb->transport_header = (typeof(skb->transport_header))~0U;
+>>>> +       skb_probe_transport_header(skb);
+>>>> +
+>>>> +       if (!skb_transport_header_was_set(skb))
+>>>> +               skb_gso_reset(skb);
+>>> I do not think this makes sense.
+>>> What is a valid case for this packet being processed further?
+>>> The buggy packet must be dropped, instead of being mangled like this.
+>> Hi Eric,
+>>
+>> The reproducer builds a gre frame whose inner Ethernet header is
+>> all-zero. Tracing the skb through RX:
+>>
+>> 1. At GRE decap exit, skb_transport_offset(skb) < 0 is the rule, not the
+>> exception.
+>>
+>> It is negative for every packet leaving the tunnel, including perfectly
+>> well-formed inner IPv4 traffic
+>> because the tunnel leaves skb->transport_header at the outer L4 offset while
+>> pskb_pull() has already advanced skb->data past it.
+> Is it? the transport header is an offset on top of skb->head, pskb_pull
+> changes head only if the header is not in the linear part (and the
+> transport offset is already invalid).
+
+
+Sorry, my wording was imprecise. The point is not that `transport_header`
+itself holds a negative value — it does not — but that after GRE processing,
+`skb->data` has advanced past the outer L4 while `skb->transport_header`
+is never touched, so `skb_transport_offset(skb)` ends up negative.
+
+>> skb_transport_header_was_set() stays true, so downstream
+>> code that trusts that flag now trusts a stale, negative offset.
+>>
+>> 2. GRO repairs it — but only for protocols it knows.
+>>
+>> In dev_gro_receive(), skb->protocol is dispatched through the offload
+>> table. For ETH_P_IP,
+>> inet_gro_receive() calls skb_set_transport_header(skb,
+>> skb_gro_offset(skb)), and the offset
+>> becomes valid again. But for malformed skb, dev_gro_receive just bypass it.
+> So only malformed packets cause trouble, right?
+>
+The negative offset is produced for every packet leaving GRE, not just
+malformed ones. What differs is what happens downstream:
+
+- For well-formed inner IPv4, `inet_gro_receive()` calls
+  `skb_set_transport_header(skb, skb_gro_offset(skb))` and restores a
+  valid offset before any consumer observes it.
+- For malformed inner frames (e.g. `skb->protocol == ETH_P_802_2 or 
+other `),
+  `dev_gro_receive()` finds no ptype and just passes the skb through.
+  The stale negative offset survives into `__netif_receive_skb_core()`.
+
+So the UAF needs both conditions: GRE producing the stale offset *and*
+
+no downstream rescue.
+
+
+>> 3. Both kinds then reach __netif_receive_skb_core().
+>>
+>> So the skb that qdisc/tc/BPF segmenters later see has an
+>> invariant violation — _was_set == true but offset < 0 — that the core
+>> layer has no intention of catching for us.
+>>
+>> My reading of this is that the tunnel decap path is producing an skb
+>> that doesn't
+>> honor the contract __netif_receive_skb_core() expects from its
+>> producers, and that
+>> it doesn't really make sense to ask GRE to parse or validate the inner
+>> L4 in order
+>> to fix this.
+>>
+>> I'm thinking at the end of GRE decap, before handing the skb to
+>> gro_cells_receive(),
+>> call skb_reset_transport_header(skb).
+> My take is that you need to address the issue earlier than the current
+> patch, dropping the malformed packets.
+>
+> /P
+
+
+Dropping at tunnel decap is a reasonable option, e.g.:
+
+   if (unlikely(skb->protocol == htons(ETH_P_802_2) ||
+                skb->protocol == htons(ETH_P_802_3) ||
+                ....)) {
+       kfree_skb_reason(skb, SKB_DROP_REASON_...);
+       return 0;
+   }
+
+Two concerns about this approach, though:
+
+1.It asks GRE to decide whether an inner L2 frame is "sensible",
+  which I don't think should be GRE's responsibility — GRE is a
+  generic L2/L3 tunnel and historically stays agnostic about the
+  inner payload.
+
+2. More importantly, filtering on ETH_P_802_2 / ETH_P_802_3 only
+  covers the case where inner h_proto < ETH_P_802_3_MIN. The same
+  stale-offset condition can also be reached with any inner
+  ethertype that has no GRO receive callback resetting
+  transport_header.
+
+In my earlier reply to Eric I suggested calling
+skb_reset_transport_header(skb) at the tunnel decap exit instead.
+A few reasons I think this is a cleaner fix:
+
+1.It is inner-protocol agnostic — it normalizes the skb regardless
+of what the inner ethertype happens to be, so ARP/PPPoE/... are
+fixed by the same one-liner.
+
+2.ip_tunnel_rcv() already updates mac_header (via eth_type_trans)
+and network_header (ip_tunnel.c:414). transport_header is the
+only one of the three left pointing at the outer offset; resetting
+it here is completing what the function is already doing for the
+other two.
+
+3.Malformed frames that carry it downstream simply fail ptype_base
+dispatch and are dropped there, the same way any unknown-ethertype
+frame is dropped today.

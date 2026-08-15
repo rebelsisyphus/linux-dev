@@ -1,0 +1,7 @@
+[   76.511944] qdisc_uaf_repro_mod: loading out-of-tree module taints kernel.
+[   76.620392] qdisc_uaf_repro: loading (simulate_fix=1)
+[   76.621196] qdisc_uaf_repro: data=ffff888042eaf0e0 transport_header=ffff888042eaf0d2 offset=-14
+[   76.622115] qdisc_uaf_repro: hdr_len (unsigned) = 0xfffffff2
+[   76.622365] qdisc_uaf_repro: about to dereference skb->data + 0xfffffff2
+[   76.622488] qdisc_uaf_repro: simulate_fix: stale transport_header detected, aborting vulnerable path
+[   76.623287] qdisc_uaf_repro: survived (KASAN may have already fired)

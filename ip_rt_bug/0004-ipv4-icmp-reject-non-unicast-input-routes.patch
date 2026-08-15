@@ -11,12 +11,12 @@ policies.  When the forward output route cannot be used, it enters the
 packet's source address.
 
 ip_route_input() only returns an error for truly invalid packets.  For
-local, broadcast, multicast and unreachable addresses it still succeeds
-and returns an input route whose dst.output is set to ip_rt_bug().  The
-existing check (added by commit 81b84de32bb2 ("xfrm: fix ip_rt_bug race
-in icmp_route_lookup reverse path")) only rejects RTN_LOCAL routes, so
-the other route types can still be returned and later used for output,
-triggering a WARN_ON_ONCE() in ip_rt_bug():
+local and unreachable addresses it still succeeds and returns an input
+route whose dst.output is set to ip_rt_bug().  The existing check
+(added by commit 81b84de32bb2 ("xfrm: fix ip_rt_bug race in
+icmp_route_lookup reverse path")) only rejects RTN_LOCAL routes, so
+RTN_UNREACHABLE input routes can still be returned and later used for
+output, triggering a WARN_ON_ONCE() in ip_rt_bug():
 
  ------------[ cut here ]------------
  WARNING: net/ipv4/route.c:1273 at ip_rt_bug+0x14/0x20, CPU#3: repro_xfrm_race/345
@@ -36,8 +36,17 @@ This is reachable without any race: if the original source address is
 unroutable, ip_route_input() returns a RTN_UNREACHABLE input route with
 err == 0, and the ICMP reply is then sent through ip_rt_bug().
 
-Only RTN_UNICAST input routes have dst.output set to ip_output() and are
-safe to use for output.  Reject any input route that is not RTN_UNICAST.
+Only two input route types can be returned by ip_route_input() with
+dst.output set to ip_rt_bug(): RTN_LOCAL (local_input) and
+RTN_UNREACHABLE (no_route -> local_input).  RTN_BROADCAST input routes
+are either usable for output (broadcast forwarding, __mkroute_input()
+sets output to ip_output()) or carry RTCF_BROADCAST, which is rejected
+by commit 7eb72c1e3984 ("ipv4: icmp: reject broadcast/multicast
+routes").  RTN_MULTICAST is not reachable here because fl4_dec.daddr is
+the original source address, which is never multicast.
+
+The check sits in the reverse path where rt2 is always the route
+returned by ip_route_input(), so rt_is_input is always set.
 
 Fixes: 81b84de32bb2 ("xfrm: fix ip_rt_bug race in icmp_route_lookup reverse path")
 Cc: stable@vger.kernel.org
@@ -59,14 +68,14 @@ index 23e921d313b3..bd207af02451 100644
 -		 * be used for output.
 +		 * concurrently, or if fl4_dec.daddr is otherwise unroutable.
 +		 * In that case, ip_route_input() returns an input route
-+		 * (RTN_LOCAL, RTN_BROADCAST, RTN_UNREACHABLE or
-+		 * RTN_MULTICAST) with dst.output set to ip_rt_bug(), which
-+		 * must not be used for output.
++		 * (RTN_LOCAL or RTN_UNREACHABLE) with dst.output set to
++		 * ip_rt_bug(), which must not be used for output.
  		 */
 -		if (!err && rt2 && rt2->rt_type == RTN_LOCAL) {
 -			net_warn_ratelimited("detected local route for %pI4 during ICMP sending, src %pI4\n",
-+		if (!err && rt2 && rt2->rt_is_input &&
-+		    rt2->rt_type != RTN_UNICAST) {
++		if (!err && rt2 &&
++		    (rt2->rt_type == RTN_LOCAL ||
++		     rt2->rt_type == RTN_UNREACHABLE)) {
 +			net_warn_ratelimited("detected unusable input route for %pI4 during ICMP sending, src %pI4\n",
  					     &fl4_dec.daddr, &fl4_dec.saddr);
  			dst_release(&rt2->dst);

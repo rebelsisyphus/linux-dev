@@ -1,0 +1,24 @@
+BUG: unable to handle page fault for address: ffffed102091a42e
+Oops: Oops: 0000 [#1] SMP KASAN NOPTI
+CPU: 0 UID: 0 PID: 340 Comm: qdisc_uaf_repro Not tainted 7.2.0-rc4-00061-g248951ddc14d #256 PREEMPT(full) 
+Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+RIP: 0010:__asan_load2+0x48/0xa0
+Call Trace:
+ <IRQ>
+ qdisc_pkt_len_segs_init+0x128/0x300
+ __dev_queue_xmit+0x13a/0x1960
+ br_dev_queue_push_xmit+0x77/0x140
+ br_handle_frame_finish+0x2b6/0xae0
+ br_handle_frame+0x289/0x410
+ __netif_receive_skb_core.constprop.0+0x698/0x1440
+ __netif_receive_skb_list_core+0x1f4/0x430
+ netif_receive_skb_list_internal+0x395/0x520
+ napi_complete_done+0x11b/0x400
+ gro_cell_poll+0xcb/0xf0
+ __napi_poll+0x53/0x2c0
+ net_rx_action+0x5ad/0x690
+ handle_softirqs+0x133/0x400
+ do_softirq+0x3b/0x60
+ __local_bh_enable_ip+0x61/0x70
+ tun_get_user+0x864/0x1c10
+ tun_chr_write_iter+0xd2/0x130

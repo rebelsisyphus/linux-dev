@@ -1,0 +1,12 @@
+=== syzbot C reproducer (WARNING in ip_rt_bug) ===
+Kernel: 7.2.0-rc4-00062-g27ff6288dee7-dirty
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: REPRODUCED - ip_rt_bug or WARNING in dmesg
+[   67.645855] WARNING: net/ipv4/route.c:1273 at ip_rt_bug+0x14/0x20, CPU#2: repro_syz/441
+[   67.648797] RIP: 0010:ip_rt_bug+0x14/0x20
+[   87.436268] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   87.436458] icmp: DBG send: room=532 mtu=65535 optlen=16
+[   87.436488] icmp: DBG send: ext_skb=no data_len=0
+[   87.436508] icmp: DBG push_reply: enter daddr=255.255.255.255 saddr=172.20.20.17 len=64
+[   87.436706] icmp: DBG push_reply: pushing
+[   87.436728] DBG push_frames: enter daddr=255.255.255.255

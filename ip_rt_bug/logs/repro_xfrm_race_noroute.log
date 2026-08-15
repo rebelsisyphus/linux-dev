@@ -1,0 +1,43 @@
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Sat Aug  8 11:59:31 UTC 2026
+Kernel: 7.2.0-rc4-00062-g27ff6288dee7-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: REPRODUCED - ip_rt_bug or WARNING in dmesg
+[   55.250857] WARNING: net/ipv4/route.c:1273 at ip_rt_bug+0x14/0x20, CPU#0: repro_xfrm_race/344
+[   55.252308] RIP: 0010:ip_rt_bug+0x14/0x20
+
+=== Full dmesg tail (30 lines) ===
+[   55.254996]  ? __pfx_folio_add_lru_vma+0x10/0x10
+[   55.255028]  ? __pfx_flush_tlb_mm_range+0x10/0x10
+[   55.255061]  ? pfn_pte+0xe8/0x110
+[   55.255104]  ? __pfx_do_wp_page+0x10/0x10
+[   55.255139]  ? tun_chr_write_iter+0xd2/0x130
+[   55.255167]  tun_chr_write_iter+0xd2/0x130
+[   55.255200]  ? __pfx_tun_chr_write_iter+0x10/0x10
+[   55.255230]  vfs_write+0x449/0x6e0
+[   55.255263]  ? __pfx_vfs_write+0x10/0x10
+[   55.255302]  ? fdget_pos+0xc3/0x210
+[   55.255335]  ksys_write+0xc7/0x160
+[   55.255364]  ? __pfx_ksys_write+0x10/0x10
+[   55.255541]  do_syscall_64+0xf9/0x540
+[   55.255610]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   55.255696] RIP: 0033:0x420374
+[   55.255886] Code: 89 02 48 c7 c0 ff ff ff ff eb bd 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 80 3d ed bc 09 00 00 74 13 b8 01 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 54 c3 0f 1f 00 55 48 89 e5 48 83 ec 20 48 89
+[   55.255923] RSP: 002b:00007ffdc0672168 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[   55.255976] RAX: ffffffffffffffda RBX: 0000000000000014 RCX: 0000000000420374
+[   55.256001] RDX: 0000000000000046 RSI: 00007ffdc0674200 RDI: 0000000000000004
+[   55.256022] RBP: 00007ffdc0674200 R08: 0000000000000004 R09: 0000000000000000
+[   55.256043] R10: 000000000048e100 R11: 0000000000000202 R12: 0000000000000004
+[   55.256063] R13: 0000000000000162 R14: 000000000048fd53 R15: 00007ffdc06721a0
+[   55.256112]  </TASK>
+[   55.256160] ---[ end trace 0000000000000000 ]---
+[   56.360942] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   57.464949] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   59.675315] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   61.893010] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   62.995843] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   68.512819] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2

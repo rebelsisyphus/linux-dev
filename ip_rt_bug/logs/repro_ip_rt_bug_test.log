@@ -1,0 +1,24 @@
+=== IPv4 ICMP broadcast/multicast route reproducer ===
+Test time: Mon Aug 10 03:38:24 UTC 2026
+Kernel: 7.2.0-rc4-00062-g27ff6288dee7-dirty
+Running reproducer...
+Sent 20 crafted SSRR packets on veth1; waiting for ICMP reply on veth1...
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+Reproducer exit code: 0
+
+=== Checking for broadcast ICMP reply ===
+RESULT: VULNERABLE - kernel emits ICMP reply to 255.255.255.255
+
+=== Checking dmesg for warnings ===
+No dmesg warnings.

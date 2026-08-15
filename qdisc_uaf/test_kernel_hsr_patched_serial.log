@@ -1,0 +1,1010 @@
+c[?7l[2J[0mSeaBIOS (version 1.16.3-debian-1.16.3-2)
+
+
+iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+7EFCAB40+7EF0AB40 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...                                                                               
+
+
+Booting from ROM...
+c[?7l[2J[    0.000000] Linux version 7.2.0-rc4-00061-g248951ddc14d-dirty (root@sisyphus) (gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #255 SMP PREEMPT_DYNAMIC Fri Jul 24 10:34:05 CST 2026
+[    0.000000] Command line: console=ttyS0 root=/dev/sda rw
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000007ffdefff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000007ffdf000-0x000000007fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000080000000-0x00000000afffffff]
+[    0.000000] BIOS-e820: [mem 0x00000000b0000000-0x00000000bfffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000c0000000-0x00000000fed1bfff]
+[    0.000000] BIOS-e820: [mem 0x00000000fed1c000-0x00000000fed1ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000fed20000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI: SMBIOS 3.0.0 present.
+[    0.000000] DMI: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] tsc: Fast TSC calibration using PIT
+[    0.000000] tsc: Detected 3750.522 MHz processor
+[    0.012781] last_pfn = 0x7ffdf max_arch_pfn = 0x400000000
+[    0.013235] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.013387] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.024423] found SMP MP-table at [mem 0x000f5460-0x000f546f]
+[    0.031803] ACPI: Early table checksum verification disabled
+[    0.032194] ACPI: RSDP 0x00000000000F5250 000014 (v00 BOCHS )
+[    0.032460] ACPI: RSDT 0x000000007FFE255E 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033049] ACPI: FACP 0x000000007FFE222E 0000F4 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033596] ACPI: DSDT 0x000000007FFE0040 0021EE (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033719] ACPI: FACS 0x000000007FFE0000 000040
+[    0.033790] ACPI: APIC 0x000000007FFE2322 000090 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033851] ACPI: HPET 0x000000007FFE23B2 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033910] ACPI: SRAT 0x000000007FFE23EA 000110 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.033967] ACPI: MCFG 0x000000007FFE24FA 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.034025] ACPI: WAET 0x000000007FFE2536 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.034126] ACPI: Reserving FACP table memory at [mem 0x7ffe222e-0x7ffe2321]
+[    0.034169] ACPI: Reserving DSDT table memory at [mem 0x7ffe0040-0x7ffe222d]
+[    0.034195] ACPI: Reserving FACS table memory at [mem 0x7ffe0000-0x7ffe003f]
+[    0.034218] ACPI: Reserving APIC table memory at [mem 0x7ffe2322-0x7ffe23b1]
+[    0.034241] ACPI: Reserving HPET table memory at [mem 0x7ffe23b2-0x7ffe23e9]
+[    0.034264] ACPI: Reserving SRAT table memory at [mem 0x7ffe23ea-0x7ffe24f9]
+[    0.034287] ACPI: Reserving MCFG table memory at [mem 0x7ffe24fa-0x7ffe2535]
+[    0.034309] ACPI: Reserving WAET table memory at [mem 0x7ffe2536-0x7ffe255d]
+[    0.036797] ACPI: SRAT: Node 0 PXM 0 [mem 0x00000000-0x0009ffff]
+[    0.036857] ACPI: SRAT: Node 0 PXM 0 [mem 0x00100000-0x3fffffff]
+[    0.036887] ACPI: SRAT: Node 1 PXM 1 [mem 0x40000000-0x7fffffff]
+[    0.037239] NUMA: Node 0 [mem 0x00001000-0x0009ffff] + [mem 0x00100000-0x3fffffff] -> [mem 0x00001000-0x3fffffff]
+[    0.037721] NODE_DATA(0) allocated [mem 0x3fffc680-0x3fffffff]
+[    0.037904] NODE_DATA(1) allocated [mem 0x7ffdb680-0x7ffdefff]
+[    0.201199] KernelAddressSanitizer initialized (generic)
+[    0.201718] ACPI: PM-Timer IO Port: 0x608
+[    0.202198] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.202616] IOAPIC[0]: apic_id 0, version 32, address 0xfec00000, GSI 0-23
+[    0.202755] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.203153] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.203237] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.203318] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.203347] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.203626] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.203694] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.203999] CPU topo: Max. logical packages:   2
+[    0.204052] CPU topo: Max. logical nodes:      2
+[    0.204077] CPU topo: Num. nodes per package:  1
+[    0.204174] CPU topo: Max. logical dies:       2
+[    0.204264] CPU topo: Max. dies per package:   1
+[    0.204340] CPU topo: Max. threads per core:   1
+[    0.204492] CPU topo: Num. cores per package:     2
+[    0.204524] CPU topo: Num. threads per package:   2
+[    0.204540] CPU topo: Allowing 4 present CPUs plus 0 hotplug CPUs
+[    0.205291] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.205384] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.205519] [gap 0xc0000000-0xfed1bfff] available for PCI devices
+[    0.205611] Booting paravirtualized kernel on bare hardware
+[    0.205850] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.280880] Zone ranges:
+[    0.280943]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.281046]   DMA32    [mem 0x0000000001000000-0x000000007ffdefff]
+[    0.281075]   Normal   empty
+[    0.281100] Movable zone start for each node
+[    0.281124] Early memory node ranges
+[    0.281149]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.281277]   node   0: [mem 0x0000000000100000-0x000000003fffffff]
+[    0.281331]   node   1: [mem 0x0000000040000000-0x000000007ffdefff]
+[    0.281424] Initmem setup node 0 [mem 0x0000000000001000-0x000000003fffffff]
+[    0.281892] Initmem setup node 1 [mem 0x0000000040000000-0x000000007ffdefff]
+[    0.282476] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.284687] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.554996] On node 1, zone DMA32: 33 pages in unavailable ranges
+[    0.555350] setup_percpu: NR_CPUS:64 nr_cpumask_bits:4 nr_cpu_ids:4 nr_node_ids:2
+[    0.558896] percpu: Embedded 66 pages/cpu s233176 r8192 d28968 u1048576
+[    0.561259] Kernel command line: console=ttyS0 root=/dev/sda rw
+[    0.562265] printk: log buffer data + meta data: 262144 + 917504 = 1179648 bytes
+[    0.566790] Fallback order for Node 0: 0 1 
+[    0.566915] Fallback order for Node 1: 1 0 
+[    0.567098] Built 2 zonelists, mobility grouping on.  Total pages: 524157
+[    0.567135] Policy zone: DMA32
+[    0.567353] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.567402] stackdepot: allocating hash table via alloc_large_system_hash
+[    0.567512] stackdepot hash table entries: 1048576 (order: 12, 16777216 bytes, linear)
+[    0.578015] stackdepot: allocating space for 8192 stack pools via memblock
+[    0.681977] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=2
+[    0.692249] Dynamic Preempt: full
+[    0.700025] rcu: Preemptible hierarchical RCU implementation.
+[    0.700076] rcu: 	RCU event tracing is enabled.
+[    0.700102] rcu: 	RCU restricting CPUs from NR_CPUS=64 to nr_cpu_ids=4.
+[    0.700222] 	Trampoline variant of Tasks RCU enabled.
+[    0.700236] 	Tracing variant of Tasks RCU enabled.
+[    0.700316] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.700348] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=4
+[    0.702484] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.999946] NR_IRQS: 4352, nr_irqs: 456, preallocated irqs: 16
+[    1.011099] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    1.011772] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    1.018344] Console: colour VGA+ 80x25
+[    1.020302] printk: legacy console [ttyS0] enabled
+[    1.042596] ACPI: Core revision 20260408
+[    1.051475] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    1.057174] APIC: Switch to symmetric I/O mode setup
+[    1.064189] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    1.070077] tsc: Marking TSC unstable due to TSCs unsynchronized
+[    1.070679] Calibrating delay loop (skipped), value calculated using timer frequency.. 7501.04 BogoMIPS (lpj=3750522)
+[    1.074604] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    1.074825] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    1.075230] mitigations: Enabled attack vectors: user_kernel, user_user, SMT mitigations: auto
+[    1.075893] Spectre V2 : Mitigation: Retpolines
+[    1.076213] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    1.076546] Spectre V2 : Spectre v2 / SpectreRSB: Filling RSB on context switch and VMEXIT
+[    1.079782] x86/fpu: x87 FPU will use FXSAVE
+[    1.412795] pid_max: default: 32768 minimum: 301
+[    1.426565] SELinux:  Initializing.
+[    1.432617] LSM support for eBPF active
+[    1.441813] Dentry cache hash table entries: 262144 (order: 9, 2097152 bytes, vmalloc hugepage)
+[    1.444200] Inode-cache hash table entries: 131072 (order: 8, 1048576 bytes, vmalloc)
+[    1.445959] Mount-cache hash table entries: 4096 (order: 3, 32768 bytes, vmalloc)
+[    1.446443] Mountpoint-cache hash table entries: 4096 (order: 3, 32768 bytes, vmalloc)
+[    1.460095] VFS: Finished mounting rootfs on nullfs
+[    1.593258] smpboot: CPU0: AMD QEMU Virtual CPU version 2.5+ (family: 0xf, model: 0x6b, stepping: 0x1)
+[    1.614516] Performance Events: PMU not available due to virtualization, using software events only.
+[    1.615877] signal: max sigframe size: 1440
+[    1.618656] rcu: Hierarchical SRCU implementation.
+[    1.618857] rcu: 	Max phase no-delay instances is 400.
+[    1.622419] Timer migration: 2 hierarchy levels; 8 children per group; 1 crossnode level
+[    1.641311] smp: Bringing up secondary CPUs ...
+[    1.653872] smpboot: x86: Booting SMP configuration:
+[    1.654094] .... node  #0, CPUs:      #1
+[    1.661622] .... node  #1, CPUs:   #2 #3
+[    1.869421] smp: Brought up 2 nodes, 4 CPUs
+[    1.870008] smpboot: Total of 4 processors activated (29981.51 BogoMIPS)
+[    1.898044] Memory: 1679696K/2096628K available (32120K kernel code, 9794K rwdata, 20880K rodata, 6420K init, 908K bss, 405232K reserved, 0K cma-reserved)
+[    1.913519] devtmpfs: initialized
+[    1.960865] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, vmalloc)
+[    1.961905] futex hash table entries: 512 (32768 bytes on 2 NUMA nodes, total 64 KiB, linear).
+[    1.969075] PM: RTC time: 02:44:17, date: 2026-07-24
+[    1.991154] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    2.000935] audit: initializing netlink subsys (disabled)
+[    2.004816] audit: type=2000 audit(1784861056.945:1): state=initialized audit_enabled=0 res=1
+[    2.234949] thermal_sys: Registered thermal governor 'step_wise'
+[    2.235741] cpuidle: using governor menu
+[    2.239323] Freeing SMP alternatives memory: 60K
+[    2.246775] PCI: ECAM [mem 0xb0000000-0xbfffffff] (base 0xb0000000) for domain 0000 [bus 00-ff]
+[    2.247767] PCI: ECAM [mem 0xb0000000-0xbfffffff] reserved as E820 entry
+[    2.282609] PCI: Using configuration type 1 for base access
+[    2.283646] mtrr: your CPUs had inconsistent fixed MTRR settings
+[    2.283894] mtrr: your CPUs had inconsistent variable MTRR settings
+[    2.284070] mtrr: your CPUs had inconsistent MTRRdefType settings
+[    2.284934] mtrr: probably your BIOS does not setup all CPUs.
+[    2.285139] mtrr: corrected configuration.
+[    2.289416] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    2.306693] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    2.306987] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    2.322448] ACPI: Added _OSI(Module Device)
+[    2.322719] ACPI: Added _OSI(Processor Device)
+[    2.322866] ACPI: Added _OSI(Processor Aggregator Device)
+[    2.791002] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    2.862043] ACPI: \_SB_: platform _OSC: OS support mask [002a7eee]
+[    2.897355] ACPI: Interpreter enabled
+[    2.899775] ACPI: PM: (supports S0 S3 S4 S5)
+[    2.900041] ACPI: Using IOAPIC for interrupt routing
+[    2.903562] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    2.903904] PCI: Using E820 reservations for host bridge windows
+[    2.919486] ACPI: Enabled 2 GPEs in block 00 to 3F
+[    3.418637] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    3.419702] acpi PNP0A08:00: _OSC: OS supports [ExtendedConfig ASPM ClockPM Segments MSI HPX-Type3]
+[    3.437884] acpi PNP0A08:00: _OSC: platform does not support [LTR]
+[    3.469519] acpi PNP0A08:00: _OSC: OS now controls [PME PCIeCapability]
+[    3.479055] PCI host bridge to bus 0000:00
+[    3.479437] pci_bus 0000:00: Unknown NUMA node; performance will be reduced
+[    3.481082] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    3.481503] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    3.481762] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    3.482015] pci_bus 0000:00: root bus resource [mem 0x80000000-0xafffffff window]
+[    3.482478] pci_bus 0000:00: root bus resource [mem 0xc0000000-0xfebfffff window]
+[    3.483470] pci_bus 0000:00: root bus resource [mem 0x100000000-0x8ffffffff window]
+[    3.483888] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    3.486572] pci 0000:00:00.0: [8086:29c0] type 00 class 0x060000 conventional PCI endpoint
+[    3.502558] pci 0000:00:01.0: [1234:1111] type 00 class 0x030000 conventional PCI endpoint
+[    3.504731] pci 0000:00:01.0: BAR 0 [mem 0xfd000000-0xfdffffff pref]
+[    3.506472] pci 0000:00:01.0: BAR 2 [mem 0xfebb0000-0xfebb0fff]
+[    3.507436] pci 0000:00:01.0: ROM [mem 0xfeba0000-0xfebaffff pref]
+[    3.508592] pci 0000:00:01.0: Video device with shadowed ROM at [mem 0x000c0000-0x000dffff]
+[    3.520216] pci 0000:00:02.0: [1af4:1009] type 00 class 0x000200 conventional PCI endpoint
+[    3.522384] pci 0000:00:02.0: BAR 0 [io  0xc080-0xc09f]
+[    3.523489] pci 0000:00:02.0: BAR 1 [mem 0xfebb1000-0xfebb1fff]
+[    3.523747] pci 0000:00:02.0: BAR 4 [mem 0xfe000000-0xfe003fff 64bit pref]
+[    3.535742] pci 0000:00:03.0: [8086:100e] type 00 class 0x020000 conventional PCI endpoint
+[    3.535742] pci 0000:00:03.0: BAR 0 [mem 0xfeb80000-0xfeb9ffff]
+[    3.535742] pci 0000:00:03.0: BAR 1 [io  0xc000-0xc03f]
+[    3.537487] pci 0000:00:03.0: ROM [mem 0xfeb00000-0xfeb7ffff pref]
+[    3.549464] pci 0000:00:1f.0: [8086:2918] type 00 class 0x060100 conventional PCI endpoint
+[    3.550588] pci 0000:00:1f.0: quirk: [io  0x0600-0x067f] claimed by ICH6 ACPI/GPIO/TCO
+[    3.561113] pci 0000:00:1f.2: [8086:2922] type 00 class 0x010601 conventional PCI endpoint
+[    3.561454] pci 0000:00:1f.2: BAR 4 [io  0xc0a0-0xc0bf]
+[    3.561672] pci 0000:00:1f.2: BAR 5 [mem 0xfebb2000-0xfebb2fff]
+[    3.574149] pci 0000:00:1f.3: [8086:2930] type 00 class 0x0c0500 conventional PCI endpoint
+[    3.575456] pci 0000:00:1f.3: BAR 4 [io  0x0700-0x073f]
+[    3.622731] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    3.637955] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    3.652584] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    3.667359] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    3.682074] ACPI: PCI: Interrupt link LNKE configured for IRQ 10
+[    3.696464] ACPI: PCI: Interrupt link LNKF configured for IRQ 10
+[    3.711154] ACPI: PCI: Interrupt link LNKG configured for IRQ 11
+[    3.726272] ACPI: PCI: Interrupt link LNKH configured for IRQ 11
+[    3.730002] ACPI: PCI: Interrupt link GSIA configured for IRQ 16
+[    3.732075] ACPI: PCI: Interrupt link GSIB configured for IRQ 17
+[    3.734564] ACPI: PCI: Interrupt link GSIC configured for IRQ 18
+[    3.736599] ACPI: PCI: Interrupt link GSID configured for IRQ 19
+[    3.738726] ACPI: PCI: Interrupt link GSIE configured for IRQ 20
+[    3.740744] ACPI: PCI: Interrupt link GSIF configured for IRQ 21
+[    3.742900] ACPI: PCI: Interrupt link GSIG configured for IRQ 22
+[    3.744908] ACPI: PCI: Interrupt link GSIH configured for IRQ 23
+[    3.803240] iommu: Default domain type: Translated
+[    3.803471] iommu: DMA domain TLB invalidation policy: lazy mode
+[    3.814746] SCSI subsystem initialized
+[    3.820039] ACPI: bus type USB registered
+[    3.822084] usbcore: registered new interface driver usbfs
+[    3.823144] usbcore: registered new interface driver hub
+[    3.824025] usbcore: registered new device driver usb
+[    3.825688] pps_core: LinuxPPS API ver. 1 registered
+[    3.825859] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    3.826317] PTP clock support registered
+[    3.832301] Advanced Linux Sound Architecture Driver Initialized.
+[    3.852867] NetLabel: Initializing
+[    3.853055] NetLabel:  domain hash size = 128
+[    3.853224] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    3.855801] NetLabel:  unlabeled traffic allowed by default
+[    3.866251] PCI: Using ACPI for IRQ routing
+[    3.870497] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    3.871020] e820: register RAM buffer resource [mem 0x7ffdf000-0x7fffffff]
+[    3.874384] pci 0000:00:01.0: vgaarb: setting as boot VGA device
+[    3.874384] pci 0000:00:01.0: vgaarb: bridge control possible
+[    3.874384] pci 0000:00:01.0: vgaarb: VGA device added: decodes=io+mem,owns=io+mem,locks=none
+[    3.875456] vgaarb: loaded
+[    3.879009] hpet: 3 channels of 0 reserved for per-cpu timers
+[    3.879574] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    3.879871] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    3.887082] clocksource: Switched to clocksource hpet
+[    3.911343] VFS: Disk quotas dquot_6.6.0
+[    3.912275] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    3.931645] acpi PNP0C01:00: Reserved [mem 0xb0000000-0xbfffffff]
+[    3.933265] pnp: PnP ACPI init
+[    3.996291] pnp: PnP ACPI: found 4 devices
+[    4.182132] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    4.185547] NET: Registered PF_INET protocol family
+[    4.188915] IP idents hash table entries: 32768 (order: 6, 262144 bytes, vmalloc)
+[    4.208704] tcp_listen_portaddr_hash hash table entries: 1024 (order: 2, 16384 bytes, vmalloc)
+[    4.209515] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, vmalloc)
+[    4.210583] TCP established hash table entries: 16384 (order: 5, 131072 bytes, vmalloc)
+[    4.212184] TCP bind hash table entries: 16384 (order: 7, 524288 bytes, vmalloc)
+[    4.214019] TCP: Hash tables configured (established 16384 bind 16384)
+[    4.216896] UDP hash table entries: 1024 (order: 4, 65536 bytes, vmalloc)
+[    4.222023] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    4.235375] RPC: Registered named UNIX socket transport module.
+[    4.235659] RPC: Registered udp transport module.
+[    4.236143] RPC: Registered tcp transport module.
+[    4.236317] RPC: Registered tcp-with-tls transport module.
+[    4.236480] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    4.256496] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    4.257042] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    4.257244] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    4.257435] pci_bus 0000:00: resource 7 [mem 0x80000000-0xafffffff window]
+[    4.257621] pci_bus 0000:00: resource 8 [mem 0xc0000000-0xfebfffff window]
+[    4.258061] pci_bus 0000:00: resource 9 [mem 0x100000000-0x8ffffffff window]
+[    4.260346] PCI: CLS 0 bytes, default 64
+[    4.321014] Initialise system trusted keyrings
+[    4.330683] workingset: timestamp_bits=56 (anon: 51) max_order=19 bucket_order=0 (anon: 0)
+[    4.365969] NFS: Registering the id_resolver key type
+[    4.367080] Key type id_resolver registered
+[    4.367474] Key type id_legacy registered
+[    4.368527] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    4.369655] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    4.375052] 9p: Installing v9fs 9p2000 file system support
+[    4.395416] Key type asymmetric registered
+[    4.395679] Asymmetric key parser 'x509' registered
+[    4.397661] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+[    4.399184] io scheduler mq-deadline registered
+[    4.399393] io scheduler kyber registered
+[    4.413533] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    4.417376] ACPI: button: Power Button [PWRF]
+[    4.562193] ACPI: \_SB_.GSIG: Enabled at IRQ 22
+[    4.580203] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    4.592732] 00:03: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    4.644231] Non-volatile memory driver v1.3
+[    4.649593] ACPI: bus type drm_connector registered
+[    4.808023] loop: module loaded
+[    4.956178] ACPI: \_SB_.GSIA: Enabled at IRQ 16
+[    4.968078] ahci 0000:00:1f.2: AHCI vers 0001.0000, 32 command slots, 1.5 Gbps, SATA mode
+[    4.968443] ahci 0000:00:1f.2: 6/6 ports implemented (port mask 0x3f)
+[    4.968719] ahci 0000:00:1f.2: flags: 64bit ncq only 
+[    5.029145] scsi host0: ahci
+[    5.045329] scsi host1: ahci
+[    5.059348] scsi host2: ahci
+[    5.072288] scsi host3: ahci
+[    5.085084] scsi host4: ahci
+[    5.098624] scsi host5: ahci
+[    5.105599] ata1: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2100 irq 24 lpm-pol 1
+[    5.106343] ata2: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2180 irq 24 lpm-pol 1
+[    5.106570] ata3: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2200 irq 24 lpm-pol 1
+[    5.107042] ata4: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2280 irq 24 lpm-pol 1
+[    5.107255] ata5: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2300 irq 24 lpm-pol 1
+[    5.107505] ata6: SATA max UDMA/133 abar m4096@0xfebb2000 port 0xfebb2380 irq 24 lpm-pol 1
+[    5.166724] wireguard: WireGuard 1.0.0 loaded. See www.wireguard.com for information.
+[    5.167252] wireguard: Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+[    5.168340] MACsec IEEE 802.1AE
+[    5.180101] tun: Universal TUN/TAP device driver, 1.6
+[    5.185603] e100: Intel(R) PRO/100 Network Driver
+[    5.186957] e100: Copyright(c) 1999-2006 Intel Corporation
+[    5.187985] e1000: Intel(R) PRO/1000 Network Driver
+[    5.188153] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[    5.311658] ACPI: \_SB_.GSIH: Enabled at IRQ 23
+[    5.434612] ata3: SATA link up 1.5 Gbps (SStatus 113 SControl 300)
+[    5.439695] ata4: SATA link down (SStatus 0 SControl 300)
+[    5.442602] ata5: SATA link down (SStatus 0 SControl 300)
+[    5.445369] ata3.00: ATAPI: QEMU DVD-ROM, 2.5+, max UDMA/100
+[    5.445975] ata3.00: applying bridge limits
+[    5.447409] ata2: SATA link down (SStatus 0 SControl 300)
+[    5.448331] ata1: SATA link up 1.5 Gbps (SStatus 113 SControl 300)
+[    5.449483] ata1.00: Model 'QEMU HARDDISK', rev '2.5+', applying quirks: bridgeok
+[    5.450253] ata1.00: ATA-7: QEMU HARDDISK, 2.5+, max UDMA/100
+[    5.451311] ata1.00: 41943040 sectors, multi 16: LBA48 NCQ (depth 32)
+[    5.452448] ata6: SATA link down (SStatus 0 SControl 300)
+[    5.453911] ata3.00: configured for UDMA/100
+[    5.456312] ata1.00: configured for UDMA/100
+[    5.474227] scsi 0:0:0:0: Direct-Access     ATA      QEMU HARDDISK    2.5+ PQ: 0 ANSI: 5
+[    5.506160] sd 0:0:0:0: Attached scsi generic sg0 type 0
+[    5.514120] sd 0:0:0:0: [sda] 41943040 512-byte logical blocks: (21.5 GB/20.0 GiB)
+[    5.517103] sd 0:0:0:0: [sda] Write Protect is off
+[    5.519511] sd 0:0:0:0: [sda] Write cache: enabled, read cache: enabled, doesn't support DPO or FUA
+[    5.523455] scsi 2:0:0:0: CD-ROM            QEMU     QEMU DVD-ROM     2.5+ PQ: 0 ANSI: 5
+[    5.525038] sd 0:0:0:0: [sda] Preferred minimum I/O size 512 bytes
+[    5.553639] sr 2:0:0:0: [sr0] scsi3-mmc drive: 4x/4x cd/rw xa/form2 tray
+[    5.571487] cdrom: Uniform CD-ROM driver Revision: 3.20
+[    5.591514] sd 0:0:0:0: [sda] Attached SCSI disk
+[    5.626317] sr 2:0:0:0: Attached scsi generic sg1 type 5
+[    5.706201] e1000 0000:00:03.0 eth0: (PCI:33MHz:32-bit) 52:54:00:12:34:56
+[    5.706938] e1000 0000:00:03.0 eth0: Intel(R) PRO/1000 Network Connection
+[    5.708525] e1000e: Intel(R) PRO/1000 Network Driver
+[    5.708720] e1000e: Copyright(c) 1999 - 2015 Intel Corporation.
+[    5.710128] sky2: driver version 1.30
+[    5.725405] usbcore: registered new interface driver usblp
+[    5.726472] usbcore: registered new interface driver usb-storage
+[    5.729151] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    5.736366] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    5.739258] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    5.757303] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    5.757582] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    5.773176] rtc_cmos PNP0B00:00: registered as rtc0
+[    5.776297] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    5.790195] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    5.791108] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    5.792501] hid: raw HID events driver (C) Jiri Kosina
+[    5.802712] usbcore: registered new interface driver usbhid
+[    5.803228] usbhid: USB HID core driver
+[    5.824301] nf_conntrack_irc: The irc conntrack helper is scheduled for removal.
+[    5.824301] Please contact the netfilter-devel mailing list if you still need this.
+[    5.827454] gre: GRE over IPv4 demultiplexer driver
+[    5.827685] ip_gre: GRE over IPv4 tunneling driver
+[    5.859585] Initializing XFRM netlink socket
+[    5.861163] IPsec XFRM device driver
+[    5.864469] NET: Registered PF_INET6 protocol family
+[    5.896158] Segment Routing with IPv6
+[    5.897431] In-situ OAM (IOAM) with IPv6
+[    5.904433] i801_smbus 0000:00:1f.3: SMBus using PCI interrupt
+[    5.909591] i2c i2c-0: Memory type 0x07 not supported yet, not instantiating SPD
+[    5.916414] ip6_gre: GRE over IPv6 tunneling driver
+[    5.928648] NET: Registered PF_PACKET protocol family
+[    5.934181] 8021q: 802.1Q VLAN Support v1.8
+[    5.936092] 9pnet: Installing 9P2000 support
+[    5.950351] Key type dns_resolver registered
+[    5.958599] batman_adv: B.A.T.M.A.N. advanced 7.2.0-rc4-00061-g248951ddc14d-dirty (compatibility version 15) loaded
+[    5.965013] NET: Registered PF_VSOCK protocol family
+[    5.983166] IPI shorthand broadcast: enabled
+[    6.210725] input: ImExPS/2 Generic Explorer Mouse as /devices/platform/i8042/serio1/input/input3
+[    6.460912] registered taskstats version 1
+[    6.469285] Loading compiled-in X.509 certificates
+[    6.737367] Demotion targets for Node 0: null
+[    6.737658] Demotion targets for Node 1: null
+[    6.743659] PM:   Magic number: 2:703:713
+[    6.745420] netconsole: network logging started
+[    6.754745] cfg80211: Loading compiled-in X.509 certificates for regulatory database
+[    6.766895] kworker/u18:0 (98) used greatest stack depth: 29464 bytes left
+[    6.788176] Loaded X.509 cert 'sforshee: 00b28ddf47aef9cea7'
+[    6.793730] Loaded X.509 cert 'wens: 61c038651aabdcf94bd0ac7ff06c7248db18c600'
+[    6.796677] Unstable clock detected, switching default tracing clock to "global"
+[    6.796677] If you want to keep using the local clock, then add:
+[    6.796677]   "trace_clock=local"
+[    6.796677] on the kernel command line
+[    6.799060] faux_driver regulatory: Direct firmware load for regulatory.db failed with error -2
+[    6.799708] cfg80211: failed to load regulatory.db
+[    6.801196] ALSA device list:
+[    6.801377]   No soundcards found.
+[    6.811215] md: Waiting for all devices to be available before autodetect
+[    6.811538] md: If you don't use raid, use raid=noautodetect
+[    6.811746] md: Autodetecting RAID arrays.
+[    6.812086] md: autorun ...
+[    6.812237] md: ... autorun DONE.
+[    7.071192] EXT4-fs (sda): recovery complete
+[    7.078299] EXT4-fs (sda): mounted filesystem 007ecce7-69b9-47ee-8225-f4b654f3dfca r/w with ordered data mode. Quota mode: none.
+[    7.079701] VFS: Mounted root (ext4 filesystem) on device 8:0.
+[    7.086344] devtmpfs: mounted
+[    7.089473] VFS: Pivoted into new rootfs
+[    7.195608] Freeing unused kernel image (initmem) memory: 6420K
+[    7.196243] Write protecting the kernel read-only data: 55296k
+[    7.203287] Freeing unused kernel image (text/rodata gap) memory: 644K
+[    7.208003] Freeing unused kernel image (rodata/data gap) memory: 1648K
+[    7.563873] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    7.564530] Run /sbin/init as init process
+SELinux:  Could not open policy file <= /etc/selinux/targeted/policy/policy.35:  No such file or directory
+[    8.576505] modprobe (105) used greatest stack depth: 26312 bytes left
+[    8.629426] systemd[1]: systemd 255.4-1ubuntu8 running in system mode (+PAM +AUDIT +SELINUX +APPARMOR +IMA +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +IPTC +KMOD +LIBCRYPTSETUP +LIBFDISK +PCRE2 -PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD -BPF_FRAMEWORK -XKBCOMMON +UTMP +SYSVINIT default-hierarchy=unified)
+[    8.630596] systemd[1]: Detected virtualization qemu.
+[    8.631255] systemd[1]: Detected architecture x86-64.
+
+Welcome to [1mUbuntu 24.04 LTS[0m!
+
+[    8.656217] systemd[1]: Hostname set to <sisyphus>.
+[    8.973432] random: crng init done
+[    9.501300] systemd-cryptse (110) used greatest stack depth: 26072 bytes left
+[    9.922275] systemd-debug-g (111) used greatest stack depth: 25736 bytes left
+[    9.927567] systemd-rc-loca (116) used greatest stack depth: 25512 bytes left
+[   10.183397] udevadm (121) used greatest stack depth: 25160 bytes left
+[   11.804167] systemd[1]: Queued start job for default target graphical.target.
+[   11.855457] systemd[1]: Created slice system-modprobe.slice - Slice /system/modprobe.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-modprobe.slice[0m - Slice /system/modprobe.
+[   11.873905] systemd[1]: Created slice system-serial\x2dgetty.slice - Slice /system/serial-getty.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-serial\x2dget…slice[0m - Slice /system/serial-getty.
+[   11.885292] systemd[1]: Created slice user.slice - User and Session Slice.
+[[0;32m  OK  [0m] Created slice [0;1;39muser.slice[0m - User and Session Slice.
+[   11.892690] systemd[1]: Started systemd-ask-password-console.path - Dispatch Password Requests to Console Directory Watch.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-conso…[0mequests to Console Directory Watch.
+[   11.898106] systemd[1]: Started systemd-ask-password-wall.path - Forward Password Requests to Wall Directory Watch.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-ask-password-wall.…[0md Requests to Wall Directory Watch.
+[   11.913148] systemd[1]: Set up automount proc-sys-fs-binfmt_misc.automount - Arbitrary Executable File Formats File System Automount Point.
+[[0;32m  OK  [0m] Set up automount [0;1;39mproc-sys-fs-binfm…[0mormats File System Automount Point.
+[   11.917725] systemd[1]: Expecting device dev-ttyS0.device - /dev/ttyS0...
+         Expecting device [0;1;39mdev-ttyS0.device[0m - /dev/ttyS0...
+[   11.921275] systemd[1]: Reached target cryptsetup.target - Local Encrypted Volumes.
+[[0;32m  OK  [0m] Reached target [0;1;39mcryptsetup.target[0m - Local Encrypted Volumes.
+[   11.924161] systemd[1]: Reached target integritysetup.target - Local Integrity Protected Volumes.
+[[0;32m  OK  [0m] Reached target [0;1;39mintegritysetup.targ…[0m Local Integrity Protected Volumes.
+[   11.926616] systemd[1]: Reached target paths.target - Path Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mpaths.target[0m - Path Units.
+[   11.929301] systemd[1]: Reached target remote-fs.target - Remote File Systems.
+[[0;32m  OK  [0m] Reached target [0;1;39mremote-fs.target[0m - Remote File Systems.
+[   11.932714] systemd[1]: Reached target slices.target - Slice Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mslices.target[0m - Slice Units.
+[   11.935244] systemd[1]: Reached target swap.target - Swaps.
+[[0;32m  OK  [0m] Reached target [0;1;39mswap.target[0m - Swaps.
+[   11.937334] systemd[1]: Reached target veritysetup.target - Local Verity Protected Volumes.
+[[0;32m  OK  [0m] Reached target [0;1;39mveritysetup.target[0m - Local Verity Protected Volumes.
+[   11.947693] systemd[1]: Listening on syslog.socket - Syslog Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39msyslog.socket[0m - Syslog Socket.
+[   11.954923] systemd[1]: Listening on systemd-initctl.socket - initctl Compatibility Named Pipe.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-initctl.socke…[0m- initctl Compatibility Named Pipe.
+[   11.963466] systemd[1]: Listening on systemd-journald-dev-log.socket - Journal Socket (/dev/log).
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald-dev-…socket[0m - Journal Socket (/dev/log).
+[   11.973535] systemd[1]: Listening on systemd-journald.socket - Journal Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-journald.socket[0m - Journal Socket.
+[   11.982058] systemd[1]: Listening on systemd-networkd.socket - Network Service Netlink Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-networkd.socket[0m - Network Service Netlink Socket.
+[   11.984636] systemd[1]: systemd-pcrextend.socket - TPM2 PCR Extension (Varlink) was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   11.993172] systemd[1]: Listening on systemd-udevd-control.socket - udev Control Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-udevd-control.socket[0m - udev Control Socket.
+[   12.001987] systemd[1]: Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-udevd-kernel.socket[0m - udev Kernel Socket.
+[   12.051150] systemd[1]: Mounting dev-hugepages.mount - Huge Pages File System...
+         Mounting [0;1;39mdev-hugepages.mount[0m - Huge Pages File System...
+[   12.091397] systemd[1]: Mounting dev-mqueue.mount - POSIX Message Queue File System...
+         Mounting [0;1;39mdev-mqueue.mount[0m - POSIX Message Queue File System...
+[   12.130724] systemd[1]: Mounting sys-kernel-debug.mount - Kernel Debug File System...
+         Mounting [0;1;39msys-kernel-debug.mount[0m - Kernel Debug File System...
+[   12.186443] systemd[1]: Mounting sys-kernel-tracing.mount - Kernel Trace File System...
+         Mounting [0;1;39msys-kernel-tracing.mount[0m - Kernel Trace File System...
+[   12.283960] systemd[1]: Starting keyboard-setup.service - Set the console keyboard layout...
+         Starting [0;1;39mkeyboard-setup.service[0m - Set the console keyboard layout...
+[   12.294131] systemd[1]: kmod-static-nodes.service - Create List of Static Device Nodes was skipped because of an unmet condition check (ConditionFileNotEmpty=/lib/modules/7.2.0-rc4-00061-g248951ddc14d-dirty/modules.devname).
+[   12.389377] systemd[1]: Starting modprobe@configfs.service - Load Kernel Module configfs...
+         Starting [0;1;39mmodprobe@configfs.service[0m - Load Kernel Module configfs...
+[   12.489443] systemd[1]: Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+         Starting [0;1;39mmodprobe@dm_mod.service[0m - Load Kernel Module dm_mod...
+[   12.601150] systemd[1]: Starting modprobe@drm.service - Load Kernel Module drm...
+         Starting [0;1;39mmodprobe@drm.service[0m - Load Kernel Module drm...
+[   12.708596] systemd[1]: Starting modprobe@efi_pstore.service - Load Kernel Module efi_pstore...
+         Starting [0;1;39mmodprobe@efi_pstore.servi…[0m - Load Kernel Module efi_pstore...
+[   12.761257] systemd[1]: Starting modprobe@fuse.service - Load Kernel Module fuse...
+         Starting [0;1;39mmodprobe@fuse.service[0m - Load Kernel Module fuse...
+[   12.899350] systemd[1]: Starting modprobe@loop.service - Load Kernel Module loop...
+         Starting [0;1;39mmodprobe@loop.service[0m - Load Kernel Module loop...
+[   12.918638] systemd[1]: netplan-ovs-cleanup.service - OpenVSwitch configuration for cleanup was skipped because of an unmet condition check (ConditionFileIsExecutable=/usr/bin/ovs-vsctl).
+[   13.192182] systemd[1]: Starting systemd-journald.service - Journal Service...
+         Starting [0;1;39msystemd-journald.service[0m - Journal Service...
+[   13.293487] systemd[1]: Starting systemd-modules-load.service - Load Kernel Modules...
+         Starting [0;1;39msystemd-modules-load.service[0m - Load Kernel Modules...
+[   13.307292] systemd[1]: systemd-pcrmachine.service - TPM2 PCR Machine ID Measurement was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   13.356581] systemd[1]: Starting systemd-remount-fs.service - Remount Root and Kernel File Systems...
+         Starting [0;1;39msystemd-remount-fs.servic…[0munt Root and Kernel File Systems...
+[   13.436218] systemd[1]: Starting systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully...
+         Starting [0;1;39msystemd-tmpfiles-setup-de…[0m Device Nodes in /dev gracefully...
+[   13.449326] systemd[1]: systemd-tpm2-setup-early.service - TPM2 SRK Setup (Early) was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   13.536368] systemd[1]: Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+         Starting [0;1;39msystemd-udev-trigger.service[0m - Coldplug All udev Devices...
+[   13.741539] systemd[1]: Mounted dev-hugepages.mount - Huge Pages File System.
+[[0;32m  OK  [0m] Mounted [0;1;39mdev-hugepages.mount[0m - Huge Pages File System.
+[   13.776182] systemd[1]: Mounted dev-mqueue.mount - POSIX Message Queue File System.
+[[0;32m  OK  [0m] Mounted [0;1;39mdev-mqueue.mount[0m - POSIX Message Queue File System.
+[   13.809725] systemd[1]: Mounted sys-kernel-debug.mount - Kernel Debug File System.
+[[0;32m  OK  [0m] Mounted [0;1;39msys-kernel-debug.mount[0m - Kernel Debug File System.
+[   13.836503] systemd[1]: Mounted sys-kernel-tracing.mount - Kernel Trace File System.
+[[0;32m  OK  [0m] Mounted [0;1;39msys-kernel-tracing.mount[0m - Kernel Trace File System.
+[   13.902529] systemd[1]: modprobe@configfs.service: Deactivated successfully.
+[   13.938247] systemd[1]: Finished modprobe@configfs.service - Load Kernel Module configfs.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@configfs.service[0m - Load Kernel Module configfs.
+[   14.014346] systemd[1]: modprobe@dm_mod.service: Deactivated successfully.
+[   14.041630] systemd[1]: Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@dm_mod.service[0m - Load Kernel Module dm_mod.
+[   14.104141] systemd[1]: modprobe@drm.service: Deactivated successfully.
+[   14.137627] systemd[1]: Finished modprobe@drm.service - Load Kernel Module drm.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@drm.service[0m - Load Kernel Module drm.
+[   14.201630] systemd[1]: modprobe@efi_pstore.service: Deactivated successfully.
+[   14.216293] systemd-journald[135]: Collecting audit messages is disabled.
+[   14.222014] systemd[1]: Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@efi_pstore.service[0m - Load Kernel Module efi_pstore.
+[   14.278631] systemd[1]: modprobe@fuse.service: Deactivated successfully.
+[   14.291674] systemd[1]: Finished modprobe@fuse.service - Load Kernel Module fuse.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@fuse.service[0m - Load Kernel Module fuse.
+[   14.320665] systemd[1]: modprobe@loop.service: Deactivated successfully.
+[   14.334711] systemd[1]: Finished modprobe@loop.service - Load Kernel Module loop.
+[[0;32m  OK  [0m] Finished [0;1;39mmodprobe@loop.service[0m - Load Kernel Module loop.
+[   14.362288] systemd[1]: Finished systemd-modules-load.service - Load Kernel Modules.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-modules-load.service[0m - Load Kernel Modules.
+[   14.385653] systemd[1]: Finished systemd-remount-fs.service - Remount Root and Kernel File Systems.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-remount-fs.servic…[0mmount Root and Kernel File Systems.
+[   14.414347] systemd[1]: sys-fs-fuse-connections.mount - FUSE Control File System was skipped because of an unmet condition check (ConditionPathExists=/sys/fs/fuse/connections).
+[   14.417063] systemd[1]: sys-kernel-config.mount - Kernel Configuration File System was skipped because of an unmet condition check (ConditionPathExists=/sys/kernel/config).
+[   14.450476] systemd[1]: systemd-hwdb-update.service - Rebuild Hardware Database was skipped because of an unmet condition check (ConditionNeedsUpdate=/etc).
+[   14.455076] systemd[1]: systemd-pstore.service - Platform Persistent Storage Archival was skipped because of an unmet condition check (ConditionDirectoryNotEmpty=/sys/fs/pstore).
+[   14.543962] systemd[1]: Starting systemd-random-seed.service - Load/Save OS Random Seed...
+         Starting [0;1;39msystemd-random-seed.service[0m - Load/Save OS Random Seed...
+[   14.558598] systemd[1]: systemd-repart.service - Repartition Root Disk was skipped because no trigger condition checks were met.
+[   14.643111] systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+         Starting [0;1;39msystemd-sysctl.service[0m - Apply Kernel Variables...
+[   14.652527] systemd[1]: systemd-tpm2-setup.service - TPM2 SRK Setup was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   15.001049] systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-tmpfiles-setup-de…[0mic Device Nodes in /dev gracefully.
+[   15.047561] systemd[1]: systemd-sysusers.service - Create System Users was skipped because no trigger condition checks were met.
+[   15.142222] systemd[1]: Starting systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev...
+         Starting [0;1;39msystemd-tmpfiles-setup-de…[0meate Static Device Nodes in /dev...
+[   15.359479] systemd[1]: Finished keyboard-setup.service - Set the console keyboard layout.
+[[0;32m  OK  [0m] Finished [0;1;39mkeyboard-setup.service[0m - Set the console keyboard layout.
+[   15.408054] systemd[1]: Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-random-seed.service[0m - Load/Save OS Random Seed.
+[   15.575419] systemd[1]: Started systemd-journald.service - Journal Service.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-journald.service[0m - Journal Service.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-sysctl.service[0m - Apply Kernel Variables.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-tmpfiles-setup-de…[0mCreate Static Device Nodes in /dev.
+[[0;32m  OK  [0m] Reached target [0;1;39mlocal-fs-pre.target[0m…Preparation for Local File Systems.
+         Mounting [0;1;39mmnt-shared.mount[0m - /mnt/shared...
+         Starting [0;1;39msystemd-journal-flush.ser…[0msh Journal to Persistent Storage...
+         Starting [0;1;39msystemd-udevd.service[0m - R…ager for Device Events and Files...
+[[0;32m  OK  [0m] Mounted [0;1;39mmnt-shared.mount[0m - /mnt/shared.
+[[0;32m  OK  [0m] Reached target [0;1;39mlocal-fs.target[0m - Local File Systems.
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-sysext.socket[0m…tension Image Management (Varlink).
+         Starting [0;1;39mconsole-setup.service[0m - Set console font and keymap...
+         Starting [0;1;39msystemd-binfmt.service[0m - Set Up Additional Binary Formats...
+[[0;32m  OK  [0m] Finished [0;1;39mconsole-setup.service[0m - Set console font and keymap.
+         Mounting [0;1;39mproc-sys-fs-binfmt_misc.m…[0mcutable File Formats File System...
+[[0;32m  OK  [0m] Started [0;1;39msystemd-udevd.service[0m - Ru…anager for Device Events and Files.
+         Starting [0;1;39msystemd-networkd.service[0m - Network Configuration...
+[[0;32m  OK  [0m] Mounted [0;1;39mproc-sys-fs-binfmt_misc.mo…[0mxecutable File Formats File System.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-journal-flush.ser…[0mlush Journal to Persistent Storage.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-binfmt.service[0m - Set Up Additional Binary Formats.
+         Starting [0;1;39msystemd-tmpfiles-setup.se…[0me Volatile Files and Directories...
+[[0;32m  OK  [0m] Started [0;1;39msystemd-networkd.service[0m - Network Configuration.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-tmpfiles-setup.se…[0mate Volatile Files and Directories.
+         Starting [0;1;39msystemd-resolved.service[0m - Network Name Resolution...
+         Starting [0;1;39msystemd-timesyncd.service[0m - Network Time Synchronization...
+         Starting [0;1;39msystemd-update-utmp.servi…[0mord System Boot/Shutdown in UTMP...
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-update-utmp.servi…[0mecord System Boot/Shutdown in UTMP.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-timesyncd.service[0m - Network Time Synchronization.
+[[0;32m  OK  [0m] Reached target [0;1;39mtime-set.target[0m - System Time Set.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-resolved.service[0m - Network Name Resolution.
+[[0;32m  OK  [0m] Reached target [0;1;39mnss-lookup.target[0m - Host and Network Name Lookups.
+[[0m[0;31m*     [0m] (1 of 2) Job systemd-udev-trigger.s…ice/start running (12s / no limit)
+M[K[[0;1;31m*[0m[0;31m*    [0m] (1 of 2) Job systemd-udev-trigger.s…ice/start running (12s / no limit)
+M[K[[0;32m  OK  [0m] Finished [0;1;39msystemd-udev-trigger.service[0m - Coldplug All udev Devices.
+[K[[0;32m  OK  [0m] Found device [0;1;39mdev-ttyS0.device[0m - /dev/ttyS0.
+[[0;32m  OK  [0m] Reached target [0;1;39msysinit.target[0m - System Initialization.
+[[0;32m  OK  [0m] Started [0;1;39mapt-daily.timer[0m - Daily apt download activities.
+[[0;32m  OK  [0m] Started [0;1;39mapt-daily-upgrade.timer[0m - …y apt upgrade and clean activities.
+[[0;32m  OK  [0m] Started [0;1;39mdpkg-db-backup.timer[0m - Daily dpkg database backup timer.
+[[0;32m  OK  [0m] Started [0;1;39me2scrub_all.timer[0m - Period…Metadata Check for All Filesystems.
+[[0;32m  OK  [0m] Started [0;1;39mfstrim.timer[0m - Discard unused filesystem blocks once a week.
+[[0;32m  OK  [0m] Started [0;1;39mlogrotate.timer[0m - Daily rotation of log files.
+[[0;32m  OK  [0m] Started [0;1;39mmotd-news.timer[0m - Message of the Day.
+[[0;32m  OK  [0m] Started [0;1;39msystemd-tmpfiles-clean.tim…[0my Cleanup of Temporary Directories.
+[[0;32m  OK  [0m] Reached target [0;1;39mtimers.target[0m - Timer Units.
+[[0;32m  OK  [0m] Listening on [0;1;39mdbus.socket[0m - D-Bus System Message Bus Socket.
+[[0;32m  OK  [0m] Listening on [0;1;39mssh.socket[0m - OpenBSD Secure Shell server socket.
+[[0;32m  OK  [0m] Reached target [0;1;39msockets.target[0m - Socket Units.
+[[0;32m  OK  [0m] Reached target [0;1;39mbasic.target[0m - Basic System.
+         Starting [0;1;39msystemd-logind.service[0m - User Login Management...
+[[0;32m  OK  [0m] Started [0;1;39mcron.service[0m - Regular background program processing daemon.
+         Starting [0;1;39mdbus.service[0m - D-Bus System Message Bus...
+[[0;32m  OK  [0m] Started [0;1;39mdmesg.service[0m - Save initial kernel messages after boot.
+         Starting [0;1;39me2scrub_reap.service[0m - Re…ne ext4 Metadata Check Snapshots...
+         Starting [0;1;39mrsyslog.service[0m - System Logging Service...
+         Starting [0;1;39msetup-net.service[0m - Setup Network...
+[[0;32m  OK  [0m] Listening on [0;1;39msystemd-rfkill.socket[0m…ll Switch Status /dev/rfkill Watch.
+         Starting [0;1;39mdpkg-db-backup.service[0m - …ily dpkg database backup service...
+         Starting [0;1;39mlogrotate.service[0m - Rotate log files...
+[[0;32m  OK  [0m] Started [0;1;39mdbus.service[0m - D-Bus System Message Bus.
+[[0;32m  OK  [0m] Finished [0;1;39msetup-net.service[0m - Setup Network.
+[[0;32m  OK  [0m] Reached target [0;1;39mnetwork.target[0m - Network.
+         Starting [0;1;39mssh.service[0m - OpenBSD Secure Shell server...
+         Starting [0;1;39msystemd-user-sessions.service[0m - Permit User Sessions...
+[[0;32m  OK  [0m] Started [0;1;39msystemd-logind.service[0m - User Login Management.
+[[0;32m  OK  [0m] Finished [0;1;39msystemd-user-sessions.service[0m - Permit User Sessions.
+[[0;32m  OK  [0m] Finished [0;1;39mdpkg-db-backup.service[0m - Daily dpkg database backup service.
+[[0;32m  OK  [0m] Started [0;1;39mserial-getty@ttyS0.service[0m - Serial Getty on ttyS0.
+         Starting [0;1;39msetvtrgb.service[0m - Set console scheme...
+[[0;32m  OK  [0m] Started [0;1;39mrsyslog.service[0m - System Logging Service.
+[[0;32m  OK  [0m] Started [0;1;39mssh.service[0m - OpenBSD Secure Shell server.
+         Starting [0;1;39mdebug-ssh.service[0m - Debug SSH Service...
+[[0;32m  OK  [0m] Finished [0;1;39msetvtrgb.service[0m - Set console scheme.
+[[0;32m  OK  [0m] Created slice [0;1;39msystem-getty.slice[0m - Slice /system/getty.
+[[0;32m  OK  [0m] Started [0;1;39mgetty@tty1.service[0m - Getty on tty1.
+[[0;32m  OK  [0m] Reached target [0;1;39mgetty.target[0m - Login Prompts.
+[[0;32m  OK  [0m] Finished [0;1;39me2scrub_reap.service[0m - Re…line ext4 Metadata Check Snapshots.
+[[0;32m  OK  [0m] Finished [0;1;39mlogrotate.service[0m - Rotate log files.
+
+Ubuntu 24.04 LTS sisyphus ttyS0
+
+sisyphus login: [   46.554146] gt1: entered promiscuous mode
+[   46.566496] veth0: entered promiscuous mode
+[   46.569491] veth1: entered promiscuous mode
+=== Network Interfaces ===
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: bond0: <BROADCAST,MULTICAST,MASTER> mtu 1500 qdisc noop state DOWN group default qlen 1000
+    link/ether 7e:7c:4e:8f:3b:c7 brd ff:ff:ff:ff:ff:ff
+3: dummy0: <BROADCAST,NOARP> mtu 1500 qdisc noop state DOWN group default qlen 1000
+    link/ether ca:57:71:0f:ee:aa brd ff:ff:ff:ff:ff:ff
+4: enp0s3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.2.15/24 metric 100 brd 10.0.2.255 scope global dynamic enp0s3
+       valid_lft 86379sec preferred_lft 86379sec
+    inet6 fec0::5054:ff:fe12:3456/64 scope site dynamic mngtmpaddr noprefixroute 
+       valid_lft 86380sec preferred_lft 14380sec
+    inet6 fe80::5054:ff:fe12:3456/64 scope link 
+       valid_lft forever preferred_lft forever
+5: gre0@NONE: <NOARP> mtu 1476 qdisc noop state DOWN group default qlen 1000
+    link/gre 0.0.0.0 brd 0.0.0.0
+6: gretap0@NONE: <BROADCAST,MULTICAST> mtu 1462 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+7: erspan0@NONE: <BROADCAST,MULTICAST> mtu 1450 qdisc noop state DOWN group default qlen 1000
+    link/ether 00:00:00:00:00:00 brd ff:ff:ff:ff:ff:ff
+8: ip6tnl0@NONE: <NOARP> mtu 1452 qdisc noop state DOWN group default qlen 1000
+    link/tunnel6 :: brd :: permaddr 2e1c:b605:72ae::
+9: ip6gre0@NONE: <NOARP> mtu 1448 qdisc noop state DOWN group default qlen 1000
+    link/gre6 :: brd :: permaddr fe38:3dcf:1590::
+11: gt1@if10: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master hsr0 state UNKNOWN group default qlen 1000
+    link/ether 5e:1d:e7:fd:97:79 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::5c1d:e7ff:fefd:9779/64 scope link 
+       valid_lft forever preferred_lft forever
+12: veth1@veth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master hsr0 state UP group default qlen 1000
+    link/ether 1e:cb:31:1f:ff:05 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::1ccb:31ff:fe1f:ff05/64 scope link 
+       valid_lft forever preferred_lft forever
+13: veth0@veth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master hsr0 state UP group default qlen 1000
+    link/ether 22:be:83:e2:db:de brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::20be:83ff:fee2:dbde/64 scope link 
+       valid_lft forever preferred_lft forever
+14: hsr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1494 qdisc noqueue state UP group default qlen 1000
+    link/ether 5e:1d:e7:fd:97:79 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::5c1d:e7ff:fefd:9779/64 scope link 
+       valid_lft forever preferred_lft forever
+
+=== Listening Ports ===
+[   53.251641] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   53.254340] ip6_tunnel: gt1 xmit: Local address not yet configured!
+State     Recv-Q    Send-Q       Local Address:Port        Peer Address:Port    Process                                                                         
+LISTEN    0         0               127.0.0.54:53               0.0.0.0:*        users:(("systemd-resolve",pid=189,fd=16))                                      
+LISTEN    0         0               127.0.0.53:53               0.0.0.0:*        users:(("systemd-resolve",pid=189,fd=14))                                      
+LISTEN    0         0                        *:22                     *:*        users:(("sshd",pid=252,fd=3),("systemd",pid=1,fd=69))                          
+
+=== SSH Process ===
+root         252  2.7  0.4  12024  8088 ?        Ss   02:44   0:00 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+root         329  1.8  0.4  14936  8480 ?        Ss   02:44   0:00 sshd: root@notty
+root         423 61.5  0.1   4096  2116 ?        S    02:45   0:00 grep sshd
+
+=== SSH Config Check ===
+Debug info completed
+[   55.300372] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   57.348068] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   59.396211] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   60.419905] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   61.443587] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   62.468380] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   63.491647] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   65.539727] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   67.587695] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   69.636018] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   71.684132] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   73.731771] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   75.781138] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   76.803742] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   77.828019] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   79.875511] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   79.878322] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   81.924179] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   83.972104] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   86.019810] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   88.067639] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   90.115738] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   92.164224] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   94.212075] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   96.259857] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   98.308087] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  100.355599] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  102.403703] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  104.452585] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  106.500067] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  108.549047] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  109.060920] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  110.596544] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  112.644281] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  112.644491] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  114.691841] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  116.739730] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  118.787639] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  120.835655] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  122.884698] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  124.932364] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  126.979643] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  129.029190] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  131.076362] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  133.124135] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  135.171804] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  137.220012] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  139.268120] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  141.315943] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  143.365003] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  145.412246] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  147.459642] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  149.507702] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  151.555543] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  153.603860] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  155.651990] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  157.700544] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  159.748006] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  161.795662] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  162.018393] systemd-journald[135]: Time jumped backwards, rotating.
+[  163.844025] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  165.891946] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  167.939663] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  169.988076] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  172.036321] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  174.084170] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  176.132561] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  178.179810] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  178.180192] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  180.228032] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  182.275885] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  182.276112] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  184.323802] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  186.371743] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  188.420236] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  190.467826] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  192.515880] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  194.563606] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  196.611997] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  198.660194] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  200.707708] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  202.756220] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  204.804249] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  206.851796] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  208.900235] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  210.948071] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  212.996207] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  215.043978] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  217.092120] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  219.139737] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  221.188004] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  223.236210] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  225.284023] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  227.331587] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  229.380362] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  231.428375] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  233.476002] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  235.525403] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  237.572581] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  239.620263] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  241.669103] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  243.716752] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  245.763823] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  247.811809] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  249.860139] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  251.908489] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  253.955843] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  256.005224] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  258.052555] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  260.100017] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  262.149357] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  264.196952] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  266.244458] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  268.293161] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  270.340258] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  272.388308] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  274.435874] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  276.485060] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  278.531843] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  280.579928] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  282.628142] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  284.676484] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  286.723793] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  288.772944] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  290.820638] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  291.260267] systemd-journald[135]: Time jumped backwards, rotating.
+[  292.867769] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  294.917152] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  296.964519] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  299.012294] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  301.059543] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  303.107941] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  305.155940] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  307.203740] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  309.253127] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  311.299838] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  313.348032] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  315.396225] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  317.443935] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  317.444013] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  317.444013] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  319.491523] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  321.540271] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  323.588042] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  325.636144] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  327.683894] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  329.732439] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  331.780403] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  333.828249] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  335.876803] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  337.923835] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  339.971741] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  342.020183] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  344.067802] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  346.115587] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  348.164597] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  350.212668] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  352.259788] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  354.307748] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  356.356068] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  358.404008] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  360.451805] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  362.500189] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  364.547865] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  366.595849] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  368.644295] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  370.691968] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  372.739878] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  374.787427] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  376.835512] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  378.884008] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  380.931570] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  382.979731] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  385.028055] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  387.075512] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  389.124067] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  391.172069] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  393.219525] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  395.267747] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  397.316303] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  399.364258] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  401.411788] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  403.460745] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  405.508188] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  407.555833] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  409.603763] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  411.651949] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  413.699677] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  415.748922] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  417.796057] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  419.844200] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  421.892324] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  423.940266] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  425.988295] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  428.035959] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  430.084221] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  432.132036] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  434.179907] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  436.229165] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  438.276266] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  440.323764] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  442.372011] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  444.419936] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  446.467772] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  448.516055] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  450.564069] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  452.612085] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  454.660059] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  456.707902] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  458.756043] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  460.803918] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  462.852011] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  464.899982] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  466.947875] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  468.996354] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  471.044266] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  473.091960] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  475.140077] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  477.188313] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  479.236001] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  481.284195] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  483.331995] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  485.379933] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  485.729278] systemd-journald[135]: Time jumped backwards, rotating.
+[  487.427981] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  489.476080] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  491.523992] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  493.571910] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  495.620032] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  497.668112] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  499.715988] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  501.764150] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  503.811971] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  505.859915] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  507.908184] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  509.956119] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  512.004774] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  514.052122] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  516.100989] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  518.148496] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  520.195969] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  522.243570] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  524.291365] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  526.339721] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  528.388173] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  530.436101] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  532.484071] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  534.532199] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  536.579919] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  538.627819] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  540.675598] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  542.723787] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  544.771990] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  546.819894] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  548.867720] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  550.915723] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  552.963626] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  555.012072] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  557.060584] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  559.107969] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  561.157501] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  563.204447] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  565.251930] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  567.301225] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  569.347755] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  571.395837] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  573.443430] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  575.492756] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  577.540068] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  579.587765] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  581.635642] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  583.683772] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  585.731511] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  587.779827] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  589.827801] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  591.875920] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  593.923900] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  595.971859] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  595.972174] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  595.972174] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[  598.020228] ip6_tunnel: gt1 xmit: Local address not yet configured!
+qemu-system-x86_64: terminating on signal 15 from pid 3359 (opencode)

@@ -1,0 +1,1 @@
+savedcmd_qdisc_uaf_repro_mod.ko := ld -r -m elf_x86_64 --fatal-warnings -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /home/sisyphus/code/linux/scripts/module.lds -o qdisc_uaf_repro_mod.ko qdisc_uaf_repro_mod.o qdisc_uaf_repro_mod.mod.o .module-common.o

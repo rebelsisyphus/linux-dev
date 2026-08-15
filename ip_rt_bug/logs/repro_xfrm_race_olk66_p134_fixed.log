@@ -1,0 +1,41 @@
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Fri Aug 14 13:46:11 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: NOT REPRODUCED - no ip_rt_bug/WARNING in dmesg
+
+=== Full dmesg tail (30 lines) ===
+[   32.745971] systemd[1]: systemd-repart.service - Repartition Root Disk was skipped because no trigger condition checks were met.
+[   32.945918] systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+[   32.963210] systemd[1]: systemd-tpm2-setup.service - TPM2 SRK Setup was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   33.402808] systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+[   33.478878] systemd[1]: systemd-sysusers.service - Create System Users was skipped because no trigger condition checks were met.
+[   33.699360] systemd[1]: Starting systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev...
+[   34.107102] systemd[1]: Finished keyboard-setup.service - Set the console keyboard layout.
+[   34.441352] systemd[1]: Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[   34.882791] systemd[1]: Finished systemd-sysctl.service - Apply Kernel Variables.
+[   35.360783] systemd[1]: Finished systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev.
+[   35.385921] systemd[1]: Reached target local-fs-pre.target - Preparation for Local File Systems.
+[   35.486777] systemd[1]: Mounting mnt-shared.mount - /mnt/shared...
+[   35.626049] systemd[1]: Starting systemd-udevd.service - Rule-based Manager for Device Events and Files...
+[   35.661299] systemd[1]: Started systemd-journald.service - Journal Service.
+[   39.288761] systemd-journald[129]: Received client request to flush runtime journal.
+[   39.336063] systemd-journald[129]: File /var/log/journal/b08520f55475445db6de717c0cb76229/system.journal corrupted or uncleanly shut down, renaming and replacing.
+[   54.245684] e1000 0000:00:03.0 enp0s3: renamed from eth0
+[   69.889094] e1000: enp0s3 NIC Link is Up 1000 Mbps Full Duplex, Flow Control: RX
+[   69.940061] 8021q: adding VLAN 0 to HW filter on device enp0s3
+[  104.041301] tun0: entered promiscuous mode
+[  104.756039] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  104.862940] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  104.968345] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.079937] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.187181] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.295298] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.399271] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.502598] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.609099] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.713941] icmp: detected unusable input route for 10.0.0.100 during ICMP sending, src 192.168.141.2

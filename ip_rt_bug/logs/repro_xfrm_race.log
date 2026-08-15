@@ -1,0 +1,41 @@
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Fri Aug  7 03:32:51 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: NOT REPRODUCED - no ip_rt_bug/WARNING in dmesg
+
+=== Full dmesg tail (30 lines) ===
+[   28.073394] systemd[1]: systemd-tpm2-setup.service - TPM2 SRK Setup was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   28.173649] systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+[   28.250730] systemd[1]: systemd-sysusers.service - Create System Users was skipped because no trigger condition checks were met.
+[   28.401708] systemd[1]: Starting systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev...
+[   29.243038] systemd[1]: Finished keyboard-setup.service - Set the console keyboard layout.
+[   29.426577] systemd[1]: Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[   29.985424] systemd[1]: Finished systemd-sysctl.service - Apply Kernel Variables.
+[   30.103740] systemd[1]: Finished systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev.
+[   30.125992] systemd[1]: Reached target local-fs-pre.target - Preparation for Local File Systems.
+[   30.233686] systemd[1]: Mounting mnt-shared.mount - /mnt/shared...
+[   30.376717] systemd[1]: Starting systemd-udevd.service - Rule-based Manager for Device Events and Files...
+[   30.419490] systemd[1]: Started systemd-journald.service - Journal Service.
+[   33.976663] systemd-journald[131]: Received client request to flush runtime journal.
+[   34.305652] systemd-journald[131]: /var/log/journal/b08520f55475445db6de717c0cb76229/system.journal: Journal file uses a different sequence number ID, rotating.
+[   34.306597] systemd-journald[131]: Rotating system journal.
+[   48.509394] e1000 0000:00:03.0 enp0s3: renamed from eth0
+[   55.845979] e1000: enp0s3 NIC Link is Up 1000 Mbps Full Duplex, Flow Control: RX
+[   55.851262] 8021q: adding VLAN 0 to HW filter on device enp0s3
+[   85.795285] tun0: entered promiscuous mode
+[   87.728213] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   89.987086] hrtimer: interrupt took 3725130 ns
+[   92.256468] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   93.381534] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   96.742174] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  100.105417] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  103.484628] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  105.713402] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  106.828356] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  107.940476] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[  109.059326] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2

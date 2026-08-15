@@ -1,0 +1,62 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Fri Aug  7 03:38:37 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: REPRODUCED - ip_rt_bug or WARNING in dmesg
+[   94.142863] WARNING: CPU: 2 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[   94.144835] RIP: 0010:ip_rt_bug+0x12/0x20
+[   95.295106] WARNING: CPU: 2 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[   95.296513] RIP: 0010:ip_rt_bug+0x12/0x20
+[   97.550983] WARNING: CPU: 0 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[   97.551776] RIP: 0010:ip_rt_bug+0x12/0x20
+[   98.680540] WARNING: CPU: 1 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[   98.680841] RIP: 0010:ip_rt_bug+0x12/0x20
+[   99.802946] WARNING: CPU: 3 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[   99.803792] RIP: 0010:ip_rt_bug+0x12/0x20
+[  100.927997] WARNING: CPU: 3 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  100.929023] RIP: 0010:ip_rt_bug+0x12/0x20
+[  104.300649] WARNING: CPU: 2 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  104.300953] RIP: 0010:ip_rt_bug+0x12/0x20
+[  106.537732] WARNING: CPU: 3 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  106.538108] RIP: 0010:ip_rt_bug+0x12/0x20
+[  107.669113] WARNING: CPU: 2 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  107.669977] RIP: 0010:ip_rt_bug+0x12/0x20
+[  108.797896] WARNING: CPU: 2 PID: 343 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  108.798734] RIP: 0010:ip_rt_bug+0x12/0x20
+
+=== Full dmesg tail (30 lines) ===
+[  109.938092]  ? __pfx_tun_get_user+0x10/0x10
+[  109.938559]  ? tun_get+0xaa/0x190
+[  109.938708]  ? hrtimer_try_to_cancel+0x19/0x1f0
+[  109.938858]  ? selinux_file_permission+0x248/0x280
+[  109.939062]  tun_chr_write_iter+0x75/0xe0
+[  109.939482]  vfs_write+0x57b/0x770
+[  109.939672]  ? __pfx_vfs_write+0x10/0x10
+[  109.939819]  ? rcu_is_watching+0x23/0x50
+[  109.939991]  ? __fget_light+0x99/0xf0
+[  109.940585]  ksys_write+0xcf/0x170
+[  109.940690]  ? __pfx_ksys_write+0x10/0x10
+[  109.940754]  ? mark_held_locks+0x1a/0x90
+[  109.940798]  ? mark_held_locks+0x1a/0x90
+[  109.940920]  do_syscall_64+0xc6/0x180
+[  109.940998]  entry_SYSCALL_64_after_hwframe+0x79/0xe3
+[  109.941051] RIP: 0033:0x420374
+[  109.941110] Code: 89 02 48 c7 c0 ff ff ff ff eb bd 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 80 3d ed bc 09 00 00 74 13 b8 01 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 54 c3 0f 1f 00 55 48 89 e5 48 83 ec 20 48 89
+[  109.941455] RSP: 002b:00007ffc2e92a188 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[  109.941551] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 0000000000420374
+[  109.941591] RDX: 0000000000000046 RSI: 00007ffc2e92c220 RDI: 0000000000000004
+[  109.941626] RBP: 00007ffc2e92c220 R08: 0000000000000004 R09: 0000000000000000
+[  109.941661] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[  109.941695] R13: 0000000000000161 R14: 000000000048fd53 R15: 00007ffc2e92a1c0
+[  109.942020]  </TASK>
+[  109.942435] irq event stamp: 58810
+[  109.942494] hardirqs last  enabled at (58816): [<ffffffff8afe0227>] console_unlock+0x167/0x180
+[  109.942566] hardirqs last disabled at (58821): [<ffffffff8afe020c>] console_unlock+0x14c/0x180
+[  109.942695] softirqs last  enabled at (56198): [<ffffffff8bf806a2>] tun_get_user+0x1702/0x2360
+[  109.942764] softirqs last disabled at (56200): [<ffffffff8bf7c0d9>] tun_rx_batched+0x2a9/0x3e0
+[  109.942813] ---[ end trace 0000000000000000 ]---

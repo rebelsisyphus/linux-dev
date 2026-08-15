@@ -1,0 +1,44 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Fri Aug  7 04:45:18 UTC 2026
+Kernel: 7.2.0-rc4-00062-g27ff6288dee7-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: REPRODUCED - ip_rt_bug or WARNING in dmesg
+[   65.613338] WARNING: net/ipv4/route.c:1273 at ip_rt_bug+0x14/0x20, CPU#3: repro_xfrm_race/345
+[   65.614687] RIP: 0010:ip_rt_bug+0x14/0x20
+
+=== Full dmesg tail (30 lines) ===
+[   65.617891]  ? hrtimer_start_range_ns_user+0xaa/0x380
+[   65.617922]  ? hrtimer_active+0x5d/0xb0
+[   65.617969]  ? tun_chr_write_iter+0xd2/0x130
+[   65.619112]  tun_chr_write_iter+0xd2/0x130
+[   65.619183]  ? __pfx_tun_chr_write_iter+0x10/0x10
+[   65.619217]  vfs_write+0x449/0x6e0
+[   65.619257]  ? __pfx_vfs_write+0x10/0x10
+[   65.619337]  ? __pfx_hrtimer_wakeup+0x10/0x10
+[   65.619429]  ? fdget_pos+0xc3/0x210
+[   65.619472]  ksys_write+0xc7/0x160
+[   65.619506]  ? __pfx_ksys_write+0x10/0x10
+[   65.619582]  do_syscall_64+0xf9/0x540
+[   65.619700]  entry_SYSCALL_64_after_hwframe+0x77/0x7f
+[   65.619877] RIP: 0033:0x420374
+[   65.620387] Code: 89 02 48 c7 c0 ff ff ff ff eb bd 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 80 3d ed bc 09 00 00 74 13 b8 01 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 54 c3 0f 1f 00 55 48 89 e5 48 83 ec 20 48 89
+[   65.620439] RSP: 002b:00007fff3b9c21a8 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[   65.620503] RAX: ffffffffffffffda RBX: 0000000000000010 RCX: 0000000000420374
+[   65.620526] RDX: 0000000000000046 RSI: 00007fff3b9c4240 RDI: 0000000000000004
+[   65.620548] RBP: 00007fff3b9c4240 R08: 0000000000000004 R09: 0000000000000000
+[   65.620568] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[   65.620588] R13: 0000000000000163 R14: 000000000048fd53 R15: 00007fff3b9c21e0
+[   65.620640]  </TASK>
+[   65.620695] ---[ end trace 0000000000000000 ]---
+[   66.725520] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   67.855444] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   70.074685] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   71.180918] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   74.502783] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   75.620474] icmp: detected local route for 10.0.0.100 during ICMP sending, src 192.168.141.2
+[   82.418597] repro_xfrm_race (345) used greatest stack depth: 24728 bytes left

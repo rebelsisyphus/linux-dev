@@ -1,0 +1,4 @@
+=== syzbot C reproducer (WARNING in ip_rt_bug) ===
+Test time: Fri Aug 14 10:24:55 UTC 2026
+Kernel: 7.2.0-rc7-00010-gd58772d8520c
+Running reproducer (30s timeout)...

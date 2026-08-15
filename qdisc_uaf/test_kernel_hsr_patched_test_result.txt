@@ -1,0 +1,41 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== qdisc_uaf HSR reproducer test ===
+Running HSR reproducer...
+11: gt1@syzq0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master hsr0 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 5e:1d:e7:fd:97:79 brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+         10860      10      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+           346       5      0       0       0       0 
+13: veth0@veth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master hsr0 state UP mode DEFAULT group default qlen 1000
+    link/ether 22:be:83:e2:db:de brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+           356       4      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+           542       7      0       1       0       0 
+packet_len: 1400
+write_len: 1414
+topology: tun(syzq0) -> ip6gretap(gt1) -> hsrv0(hsr0) -> veth0/veth1 (interlink)
+outer: IPv6/dst-opts(256)/GRE(TEB)
+inner: Ethernet/IPv4/TCP
+sending via /dev/net/tun bound to syzq0...
+write[0] ok
+write[1] ok
+write[2] ok
+write[3] ok
+write[4] ok
+write[5] ok
+write[6] ok
+write[7] ok
+write[8] ok
+write[9] ok
+linger: 5 seconds
+Reproducer exit: 0
+
+=== dmesg ===
+[   46.554146] gt1: entered promiscuous mode
+[   46.566496] veth0: entered promiscuous mode
+[   46.569491] veth1: entered promiscuous mode
+[   53.251641] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   53.254340] ip6_tunnel: gt1 xmit: Local address not yet configured!
+[   55.300372] ip6_tunnel: gt1 xmit: Local address not yet configured!

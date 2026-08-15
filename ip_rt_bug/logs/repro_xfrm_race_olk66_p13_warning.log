@@ -1,0 +1,61 @@
+=== xfrm reverse-path race reproducer (ip_options_compile -> __icmp_send) ===
+Test time: Fri Aug 14 13:40:34 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82-dirty
+Running reproducer...
+
+Reproducer exit code: 0
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: REPRODUCED - ip_rt_bug or WARNING in dmesg
+[  133.973008] WARNING: CPU: 0 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  133.978792] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.102877] WARNING: CPU: 0 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.106702] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.347595] WARNING: CPU: 1 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.347891] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.469505] WARNING: CPU: 3 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.470866] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.592652] WARNING: CPU: 3 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.593479] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.823412] WARNING: CPU: 2 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.823893] RIP: 0010:ip_rt_bug+0x12/0x20
+[  134.946622] WARNING: CPU: 2 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  134.947397] RIP: 0010:ip_rt_bug+0x12/0x20
+[  135.492329] WARNING: CPU: 2 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  135.492862] RIP: 0010:ip_rt_bug+0x12/0x20
+[  135.612398] WARNING: CPU: 2 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  135.612854] RIP: 0010:ip_rt_bug+0x12/0x20
+[  135.946533] WARNING: CPU: 3 PID: 383 at net/ipv4/route.c:1283 ip_rt_bug+0x12/0x20
+[  135.946867] RIP: 0010:ip_rt_bug+0x12/0x20
+
+=== Full dmesg tail (30 lines) ===
+[  136.198640]  ? __pfx_tun_get_user+0x10/0x10
+[  136.198759]  ? tun_get+0xaa/0x190
+[  136.198840]  ? hrtimer_try_to_cancel+0x19/0x1f0
+[  136.199438]  ? selinux_file_permission+0x248/0x280
+[  136.199667]  tun_chr_write_iter+0x75/0xe0
+[  136.199822]  vfs_write+0x57b/0x770
+[  136.199992]  ? __pfx_vfs_write+0x10/0x10
+[  136.200182]  ? rcu_is_watching+0x23/0x50
+[  136.200314]  ? __fget_light+0x99/0xf0
+[  136.200941]  ksys_write+0xcf/0x170
+[  136.201402]  ? __pfx_ksys_write+0x10/0x10
+[  136.201513]  ? mark_held_locks+0x1a/0x90
+[  136.201637]  ? mark_held_locks+0x1a/0x90
+[  136.201825]  do_syscall_64+0xc6/0x180
+[  136.202334]  entry_SYSCALL_64_after_hwframe+0x79/0xe3
+[  136.202430] RIP: 0033:0x420374
+[  136.202498] Code: 89 02 48 c7 c0 ff ff ff ff eb bd 66 2e 0f 1f 84 00 00 00 00 00 90 f3 0f 1e fa 80 3d ed bc 09 00 00 74 13 b8 01 00 00 00 0f 05 <48> 3d 00 f0 ff ff 77 54 c3 0f 1f 00 55 48 89 e5 48 83 ec 20 48 89
+[  136.202552] RSP: 002b:00007ffef87bb728 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[  136.202634] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 0000000000420374
+[  136.202673] RDX: 0000000000000046 RSI: 00007ffef87bd7c0 RDI: 0000000000000004
+[  136.202709] RBP: 00007ffef87bd7c0 R08: 0000000000000004 R09: 0000000000000000
+[  136.202747] R10: 0000000000000000 R11: 0000000000000202 R12: 0000000000000004
+[  136.202840] R13: 0000000000000189 R14: 000000000048fd53 R15: 00007ffef87bb760
+[  136.203795]  </TASK>
+[  136.203896] irq event stamp: 18618
+[  136.204598] hardirqs last  enabled at (18626): [<ffffffff88be0227>] console_unlock+0x167/0x180
+[  136.204764] hardirqs last disabled at (18631): [<ffffffff88be020c>] console_unlock+0x14c/0x180
+[  136.204866] softirqs last  enabled at (18024): [<ffffffff89b806a2>] tun_get_user+0x1702/0x2360
+[  136.205410] softirqs last disabled at (18026): [<ffffffff89b7c0d9>] tun_rx_batched+0x2a9/0x3e0
+[  136.205538] ---[ end trace 0000000000000000 ]---

@@ -1,0 +1,61 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== syzbot C reproducer (WARNING in ip_rt_bug) ===
+Test time: Sat Aug  8 08:38:50 UTC 2026
+Kernel: 7.2.0-rc4-00062-g27ff6288dee7-dirty
+Running reproducer (30s timeout)...
+--- reproducer output (first 20 lines) ---
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+executing program
+
+=== Checking dmesg for ip_rt_bug / WARNING ===
+RESULT: NOT REPRODUCED - no ip_rt_bug/WARNING in dmesg
+
+=== Full dmesg tail (30 lines) ===
+[   85.595081] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.595422] icmp: DBG send: patch1 intercept
+[   85.631947] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.632097] icmp: DBG send: patch1 intercept
+[   85.659761] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.659952] icmp: DBG send: patch1 intercept
+[   85.694589] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.694757] icmp: DBG send: patch1 intercept
+[   85.725797] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.725955] icmp: DBG send: patch1 intercept
+[   85.763694] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.763919] icmp: DBG send: patch1 intercept
+[   85.809127] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.809588] icmp: DBG send: patch1 intercept
+[   85.844655] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.844806] icmp: DBG send: patch1 intercept
+[   85.875075] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.875419] icmp: DBG send: patch1 intercept
+[   85.909904] icmp: DBG send: rt type=3 flags=0x90000000 dev=lo daddr=255.255.255.255
+[   85.910104] icmp: DBG send: patch1 intercept
+[   86.038805] netdevsim netdevsim0 netdevsim3 (unregistering): unset [1, 0] type 2 family 0 port 6081 - 0
+[   86.087969] netdevsim netdevsim0 netdevsim2 (unregistering): unset [1, 0] type 2 family 0 port 6081 - 0
+[   86.138452] netdevsim netdevsim0 netdevsim1 (unregistering): unset [1, 0] type 2 family 0 port 6081 - 0
+[   86.206479] netdevsim netdevsim0 netdevsim0 (unregistering): unset [1, 0] type 2 family 0 port 6081 - 0
+[   86.385416] bridge_slave_1: left allmulticast mode
+[   86.386918] bridge_slave_1: left promiscuous mode
+[   86.388349] bridge0: port 2(bridge_slave_1) entered disabled state
+[   86.408691] bridge_slave_0: left allmulticast mode
+[   86.408860] bridge_slave_0: left promiscuous mode
+[   86.409830] bridge0: port 1(bridge_slave_0) entered disabled state

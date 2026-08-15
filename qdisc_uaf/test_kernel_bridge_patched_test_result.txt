@@ -1,0 +1,49 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== qdisc_uaf bridge reproducer test ===
+Running bridge reproducer...
+11: gt1@syzq0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 5e:1d:e7:fd:97:79 brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+         10860      10      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+           356       5      0       0       0       0 
+13: veth0@veth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether 22:be:83:e2:db:de brd ff:ff:ff:ff:ff:ff
+    RX:  bytes packets errors dropped  missed   mcast           
+           266       3      0       0       0       0 
+    TX:  bytes packets errors dropped carrier collsns           
+         11356      14      0       0       0       0 
+packet_len: 1400
+write_len: 1414
+topology: tun(syzq0) -> ip6gretap(gt1) -> bridge(br0) -> veth0
+outer: IPv6/dst-opts(256)/GRE(TEB)
+inner: Ethernet(broadcast)/non-IP (0x88FB)
+sending via /dev/net/tun bound to syzq0...
+write[0] ok
+write[1] ok
+write[2] ok
+write[3] ok
+write[4] ok
+write[5] ok
+write[6] ok
+write[7] ok
+write[8] ok
+write[9] ok
+linger: 5 seconds
+Reproducer exit: 0
+
+=== dmesg ===
+[   46.201663] ip (376) used greatest stack depth: 24296 bytes left
+[   47.264727] br0: port 1(gt1) entered blocking state
+[   47.265130] br0: port 1(gt1) entered disabled state
+[   47.269031] gt1: entered allmulticast mode
+[   47.278038] gt1: entered promiscuous mode
+[   47.417166] br0: port 2(veth0) entered blocking state
+[   47.417859] br0: port 2(veth0) entered disabled state
+[   47.418274] veth0: entered allmulticast mode
+[   47.426153] veth0: entered promiscuous mode
+[   47.600216] br0: port 2(veth0) entered blocking state
+[   47.602632] br0: port 2(veth0) entered forwarding state
+[   47.604217] br0: port 1(gt1) entered blocking state
+[   47.605861] br0: port 1(gt1) entered forwarding state
+[   53.458732] ip6_tunnel: gt1 xmit: Local address not yet configured!

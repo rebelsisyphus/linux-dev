@@ -1,0 +1,25 @@
+Warning: Permanently added '[localhost]:2222' (ED25519) to the list of known hosts.
+=== IPv4 ICMP broadcast/multicast route reproducer ===
+Test time: Thu Aug  6 15:22:57 UTC 2026
+Kernel: 6.6.0-42099-gfa9c8dd6de82
+Running reproducer...
+Sent 20 crafted SSRR packets on veth1; waiting for ICMP reply on veth1...
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+reply: 10.0.0.1 -> 255.255.255.255 TTL=64 proto=1 ihl=9
+REPRODUCED: ICMP reply sent to 255.255.255.255
+Reproducer exit code: 0
+
+=== Checking for broadcast ICMP reply ===
+RESULT: VULNERABLE - kernel emits ICMP reply to 255.255.255.255
+
+=== Checking dmesg for warnings ===
+No dmesg warnings.

@@ -1,0 +1,612 @@
+From 8fed5017daf29d2cbe059a0f11062463d91ac626 Mon Sep 17 00:00:00 2001
+Message-ID: <8fed5017daf29d2cbe059a0f11062463d91ac626.1787813260.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1787813260.git.dongchenchen2@huawei.com>
+References: <cover.1787813260.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 7 Aug 2026 14:20:33 +0800
+Subject: [PATCH openEuler-26.09 19/25] mm: control i_mmap optimizations from
+ the command line
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+The preceding patches optimize file-backed VMA insertion and removal by
+batching i_mmap updates, then split contended reverse-mapping trees into
+NUMA-local shards. Enabling those changes unconditionally makes it harder
+to compare with the original path and prevents deployments from selecting
+the conservative behavior without building another kernel.
+
+Keep CONFIG_I_MMAP_SHARDS as a build-time capability, but disable it by
+default and enable it in the arm64 openEuler defconfig. Leave the x86
+openEuler defconfig disabled; local x86 testing can enable the capability
+in .config. Add the boot-only i_mmap_opt=<bool> parameter and enable the
+optimized paths only with i_mmap_opt=on. A boot-only policy also avoids
+changing the tree layout or batching semantics while mappings are live.
+
+When the option is off, retain the original paths:
+
+  - dup_mmap() inserts each file VMA directly under the central i_mmap
+    lock;
+  - exit_mmap() retains its original batching by struct file rather than
+    grouping VMAs by address_space;
+  - shard pointer access, VMA accounting, contention tracking, allocation,
+    publication, and NUMA home-node state are skipped.
+
+Use a default-false static key for the boot-time dispatch. Keep dup_mmap()
+as a single function and select its batch storage through a local pointer;
+the disabled branch performs the original direct insertion. The shard
+writer wrappers similarly fall through to the central lock when disabled.
+
+With i_mmap_opt=on, retain the batched fork and exit paths and allow
+dynamic NUMA-local shard installation after lock contention.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ .../admin-guide/kernel-parameters.txt         |  9 +-
+ arch/arm64/configs/openeuler_defconfig        |  1 +
+ fs/inode.c                                    | 14 ++-
+ include/linux/fs.h                            | 69 ++++++++++---
+ kernel/fork.c                                 | 98 ++++++++++++-------
+ mm/Kconfig                                    | 13 +--
+ mm/internal.h                                 |  1 -
+ mm/mmap.c                                     | 71 ++++++++++----
+ 8 files changed, 196 insertions(+), 80 deletions(-)
+
+diff --git a/Documentation/admin-guide/kernel-parameters.txt b/Documentation/admin-guide/kernel-parameters.txt
+index 90aae84c850a..17160ad5aefe 100644
+--- a/Documentation/admin-guide/kernel-parameters.txt
++++ b/Documentation/admin-guide/kernel-parameters.txt
+@@ -1914,6 +1914,14 @@
+ 
+ 	i810=		[HW,DRM]
+ 
++	i_mmap_opt=	[KNL]
++			Format: <bool>
++			Control file VMA batching and NUMA-local sharding of
++			regular-file reverse mapping trees. This option is
++			available when CONFIG_I_MMAP_SHARDS=y and defaults to
++			off. Specify on to enable batching and dynamic sharding
++			after lock contention.
++
+ 	i915.invert_brightness=
+ 			[DRM] Invert the sense of the variable that is used to
+ 			set the brightness of the panel backlight. Normally a
+@@ -7524,4 +7532,3 @@
+ 				memory, and other data can't be written using
+ 				xmon commands.
+ 			off	xmon is disabled.
+-
+diff --git a/arch/arm64/configs/openeuler_defconfig b/arch/arm64/configs/openeuler_defconfig
+index 9e7bc82cba3a..37bf1ab04f6d 100644
+--- a/arch/arm64/configs/openeuler_defconfig
++++ b/arch/arm64/configs/openeuler_defconfig
+@@ -1124,6 +1124,7 @@ CONFIG_COREDUMP=y
+ #
+ # Memory Management options
+ #
++CONFIG_I_MMAP_SHARDS=y
+ CONFIG_ZPOOL=y
+ CONFIG_SWAP=y
+ CONFIG_ZSWAP=y
+diff --git a/fs/inode.c b/fs/inode.c
+index 7f6a23549e38..66f24e2d25ad 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -284,8 +284,10 @@ void __destroy_inode(struct inode *inode)
+ #ifdef CONFIG_I_MMAP_SHARDS
+ 	struct address_space *mapping = inode->i_mapping;
+ 
+-	i_mmap_shards_free(mapping->i_mmap_shards);
+-	mapping->i_mmap_shards = NULL;
++	if (i_mmap_opt_enabled()) {
++		i_mmap_shards_free(mapping->i_mmap_shards);
++		mapping->i_mmap_shards = NULL;
++	}
+ #endif
+ 	BUG_ON(inode_has_buffers(inode));
+ 	inode_detach_wb(inode);
+@@ -408,9 +410,11 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	spin_lock_init(&mapping->private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
+ #ifdef CONFIG_I_MMAP_SHARDS
+-	mapping->i_mmap_shards = NULL;
+-	atomic_set(&mapping->i_mmap_nr_vmas, 0);
+-	atomic_set(&mapping->i_mmap_lock_contention, 0);
++	if (i_mmap_opt_enabled()) {
++		mapping->i_mmap_shards = NULL;
++		atomic_set(&mapping->i_mmap_nr_vmas, 0);
++		atomic_set(&mapping->i_mmap_lock_contention, 0);
++	}
+ #endif
+ }
+ 
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index a135c440c56d..01972295f724 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -16,6 +16,7 @@
+ #include <linux/xarray.h>
+ #include <linux/rbtree.h>
+ #include <linux/init.h>
++#include <linux/jump_label.h>
+ #include <linux/pid.h>
+ #include <linux/bug.h>
+ #include <linux/mutex.h>
+@@ -492,6 +493,13 @@ struct i_mmap_shards {
+ 	struct i_mmap_domain_shards *domain[I_MMAP_MAX_DOMAINS];
+ };
+ 
++DECLARE_STATIC_KEY_FALSE(i_mmap_opt_enabled_key);
++
++static inline bool i_mmap_opt_enabled(void)
++{
++	return static_branch_unlikely(&i_mmap_opt_enabled_key);
++}
++
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp);
+ void i_mmap_shards_free(struct i_mmap_shards *shards);
+ struct i_mmap_shard *i_mmap_shard_for_vma(struct i_mmap_shards *shards,
+@@ -502,9 +510,6 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 
+ struct i_mmap_write_lock {
+ 	struct rb_root_cached	*root;
+-#ifdef CONFIG_I_MMAP_SHARDS
+-	struct i_mmap_shard	*shard;
+-#endif
+ };
+ 
+ struct i_mmap_read_lock {
+@@ -648,35 +653,71 @@ static inline void i_mmap_assert_write_locked(struct address_space *mapping)
+ }
+ 
+ #ifdef CONFIG_I_MMAP_SHARDS
+-void i_mmap_lock_write_vma(struct address_space *mapping,
+-			   struct vm_area_struct *vma,
+-			   struct i_mmap_write_lock *lock);
+-void i_mmap_unlock_write_vma(struct address_space *mapping,
++void __i_mmap_lock_write_vma(struct address_space *mapping,
++			     struct vm_area_struct *vma,
+ 			     struct i_mmap_write_lock *lock);
++void __i_mmap_unlock_write_vma(struct address_space *mapping,
++			       struct i_mmap_write_lock *lock);
++
++static inline void i_mmap_lock_write_vma(struct address_space *mapping,
++					 struct vm_area_struct *vma,
++					 struct i_mmap_write_lock *lock)
++{
++	if (i_mmap_opt_enabled()) {
++		__i_mmap_lock_write_vma(mapping, vma, lock);
++		return;
++	}
++
++	i_mmap_lock_write(mapping);
++	lock->root = &mapping->i_mmap;
++}
++
++static inline void i_mmap_unlock_write_vma(struct address_space *mapping,
++					   struct i_mmap_write_lock *lock)
++{
++	if (i_mmap_opt_enabled()) {
++		__i_mmap_unlock_write_vma(mapping, lock);
++		return;
++	}
++
++	i_mmap_unlock_write(mapping);
++}
+ 
+ static inline bool
+-i_mmap_write_lock_is_sharded(struct i_mmap_write_lock *lock)
++i_mmap_write_lock_is_sharded(struct address_space *mapping,
++			     struct i_mmap_write_lock *lock)
+ {
+-	return lock->shard;
++	return i_mmap_opt_enabled() &&
++		lock->root != &mapping->i_mmap;
+ }
+ 
+ static inline struct i_mmap_shards *
+ i_mmap_shards_load(struct address_space *mapping)
+ {
++	if (!i_mmap_opt_enabled())
++		return NULL;
++
+ 	/* Pairs with release publication after all roots are initialized. */
+ 	return smp_load_acquire(&mapping->i_mmap_shards);
+ }
+ 
+ static inline void i_mmap_vma_count_add(struct address_space *mapping)
+ {
+-	atomic_inc(&mapping->i_mmap_nr_vmas);
++	if (i_mmap_opt_enabled())
++		atomic_inc(&mapping->i_mmap_nr_vmas);
+ }
+ 
+ static inline void i_mmap_vma_count_sub(struct address_space *mapping)
+ {
+-	atomic_dec(&mapping->i_mmap_nr_vmas);
++	if (i_mmap_opt_enabled())
++		atomic_dec(&mapping->i_mmap_nr_vmas);
+ }
+ #else
++static inline bool i_mmap_opt_enabled(void)
++{
++	return false;
++}
++
+ static inline void i_mmap_lock_write_vma(struct address_space *mapping,
+ 					 struct vm_area_struct *vma,
+ 					 struct i_mmap_write_lock *lock)
+@@ -692,7 +733,8 @@ static inline void i_mmap_unlock_write_vma(struct address_space *mapping,
+ }
+ 
+ static inline bool
+-i_mmap_write_lock_is_sharded(struct i_mmap_write_lock *lock)
++i_mmap_write_lock_is_sharded(struct address_space *mapping,
++			     struct i_mmap_write_lock *lock)
+ {
+ 	return false;
+ }
+@@ -712,7 +754,8 @@ static inline void i_mmap_vma_count_sub(struct address_space *mapping)
+ static inline int mapping_mapped(struct address_space *mapping)
+ {
+ #ifdef CONFIG_I_MMAP_SHARDS
+-	if (atomic_read(&mapping->i_mmap_nr_vmas) > 0)
++	if (i_mmap_opt_enabled() &&
++	    atomic_read(&mapping->i_mmap_nr_vmas) > 0)
+ 		return true;
+ #endif
+ 	return	!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root);
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 82f33c7bfd83..dfd34b43b6ef 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -700,7 +700,7 @@ static void dup_mmap_file_batch_flush(struct dup_mmap_file_batch *batch)
+ 	for (i = 0; i < batch->count; i++) {
+ 		if (batch->vmas[i]->vm_flags & VM_SHARED)
+ 			mapping_allow_writable(mapping);
+-		if (i_mmap_write_lock_is_sharded(&lock))
++		if (i_mmap_write_lock_is_sharded(mapping, &lock))
+ 			vma_interval_tree_insert(batch->vmas[i], lock.root);
+ 		else
+ 			vma_interval_tree_insert_after(batch->vmas[i],
+@@ -725,24 +725,34 @@ static bool dup_mmap_needs_page_copy(struct vm_area_struct *dst_vma,
+ 	return src_vma->anon_vma;
+ }
+ 
+-static __latent_entropy int dup_mmap(struct mm_struct *mm,
+-					struct mm_struct *oldmm)
++static __latent_entropy int
++dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ {
++	struct dup_mmap_file_batch *file_batches = NULL;
++#ifdef CONFIG_I_MMAP_SHARDS
++	struct dup_mmap_file_batch file_batch_storage[DUP_MMAP_FILE_BATCH_NR];
++#endif
+ 	struct vm_area_struct *mpnt, *tmp;
+ 	int retval;
+ 	unsigned long charge = 0;
+ 	LIST_HEAD(uf);
+ 	VMA_ITERATOR(vmi, mm, 0);
+-	struct dup_mmap_file_batch file_batches[DUP_MMAP_FILE_BATCH_NR];
+ 	unsigned int batch_idx;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++	if (i_mmap_opt_enabled())
++		file_batches = file_batch_storage;
++#endif
+ 	uprobe_start_dup_mmap();
+ 	if (mmap_write_lock_killable(oldmm)) {
+ 		retval = -EINTR;
+ 		goto fail_uprobe_end;
+ 	}
+-	for (batch_idx = 0; batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
+-		dup_mmap_file_batch_init(&file_batches[batch_idx]);
++	if (file_batches) {
++		for (batch_idx = 0;
++		     batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
++			dup_mmap_file_batch_init(&file_batches[batch_idx]);
++	}
+ 	flush_cache_dup_mm(oldmm);
+ 	uprobe_dup_mmap(oldmm, mm);
+ 	/*
+@@ -836,40 +846,49 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 			struct dup_mmap_file_batch *batch = NULL;
+ 
+ 			get_file(file);
+-			for (batch_idx = 0;
+-			     batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++) {
+-				if (file_batches[batch_idx].count &&
+-				    file_batches[batch_idx].mapping == mapping) {
+-					batch = &file_batches[batch_idx];
+-					break;
+-				}
+-			}
+-			if (!batch) {
++			if (file_batches) {
+ 				for (batch_idx = 0;
+ 				     batch_idx < DUP_MMAP_FILE_BATCH_NR;
+ 				     batch_idx++) {
+-					if (!file_batches[batch_idx].count) {
+-						batch = &file_batches[batch_idx];
+-						break;
++					struct dup_mmap_file_batch *candidate;
++
++					candidate = file_batches + batch_idx;
++					if (candidate->count) {
++						if (candidate->mapping == mapping) {
++							batch = candidate;
++							break;
++						}
++					} else if (!batch) {
++						batch = candidate;
+ 					}
+ 				}
+-			}
+-			if (!batch) {
+-				batch = &file_batches[0];
+-				dup_mmap_file_batch_flush(batch);
+-			}
+-
+-			batch->mapping = mapping;
+-			batch->vmas[batch->count] = tmp;
+-			batch->prev[batch->count] = mpnt;
+-			batch->count++;
++				if (!batch) {
++					batch = &file_batches[0];
++					dup_mmap_file_batch_flush(batch);
++				}
+ 
+-			if (batch->count == ARRAY_SIZE(batch->vmas))
+-				dup_mmap_file_batch_flush(batch);
++				batch->mapping = mapping;
++				batch->vmas[batch->count] = tmp;
++				batch->prev[batch->count] = mpnt;
++				batch->count++;
++
++				if (batch->count == ARRAY_SIZE(batch->vmas))
++					dup_mmap_file_batch_flush(batch);
++			} else {
++				i_mmap_lock_write(mapping);
++				if (tmp->vm_flags & VM_SHARED)
++					mapping_allow_writable(mapping);
++				flush_dcache_mmap_lock(mapping);
++				vma_interval_tree_insert_after(tmp, mpnt,
++							       &mapping->i_mmap);
++				flush_dcache_mmap_unlock(mapping);
++				i_mmap_unlock_write(mapping);
++			}
+ 		}
+ 
+ 		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
+-			if (dup_mmap_needs_page_copy(tmp, mpnt)) {
++			if (file_batches &&
++			    dup_mmap_needs_page_copy(tmp, mpnt)) {
+ 				for (batch_idx = 0;
+ 				     batch_idx < DUP_MMAP_FILE_BATCH_NR;
+ 				     batch_idx++)
+@@ -885,12 +904,18 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
+ 		}
+ 	}
+ 	/* a new mm has just been created */
+-	for (batch_idx = 0; batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
+-		dup_mmap_file_batch_flush(&file_batches[batch_idx]);
++	if (file_batches) {
++		for (batch_idx = 0;
++		     batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
++			dup_mmap_file_batch_flush(&file_batches[batch_idx]);
++	}
+ 	retval = arch_dup_mmap(oldmm, mm);
+ loop_out:
+-	for (batch_idx = 0; batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
+-		dup_mmap_file_batch_flush(&file_batches[batch_idx]);
++	if (file_batches) {
++		for (batch_idx = 0;
++		     batch_idx < DUP_MMAP_FILE_BATCH_NR; batch_idx++)
++			dup_mmap_file_batch_flush(&file_batches[batch_idx]);
++	}
+ 	vma_iter_free(&vmi);
+ 	if (!retval) {
+ 		mt_set_in_rcu(vmi.mas.tree);
+@@ -1457,7 +1482,8 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
+ #ifdef CONFIG_I_MMAP_SHARDS
+-	mm->i_mmap_home_nid = numa_node_id();
++	if (i_mmap_opt_enabled())
++		mm->i_mmap_home_nid = numa_node_id();
+ #endif
+ 	reliable_clear_page_counter(mm);
+ 	spin_lock_init(&mm->page_table_lock);
+diff --git a/mm/Kconfig b/mm/Kconfig
+index 29c7df3f2dc2..b99e90efcc2c 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -3,15 +3,16 @@
+ menu "Memory Management options"
+ 
+ config I_MMAP_SHARDS
+-	bool "Experimental sharded file reverse mappings"
+-	depends on MMU && SMP && NUMA && EXPERT
++	bool "File VMA batching and NUMA-local i_mmap shards"
++	depends on MMU && SMP && NUMA
+ 	default n
+ 	help
+-	  Split contended regular-file reverse mapping interval trees into
+-	  NUMA-local shards. This is intended for machines with highly
+-	  concurrent fork, exec, mmap, and exit workloads.
++	  Build support for batching file VMA updates and splitting contended
++	  regular-file reverse mapping interval trees into NUMA-local shards.
+ 
+-	  This feature is experimental. If unsure, say N.
++	  Selecting this option only builds the capability. The optimizations
++	  remain disabled unless i_mmap_opt=on is specified on the kernel
++	  command line. If unsure, say N.
+ 
+ #
+ # For some reason microblaze and nios2 hard code SWAP=n.  Hopefully we can
+diff --git a/mm/internal.h b/mm/internal.h
+index e01c54d199fd..5e34fa90eb39 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -1480,7 +1480,6 @@ unsigned long shrink_memory(unsigned long nr_to_reclaim, bool may_swap);
+ #endif /* CONFIG_PAGE_CACHE_LIMIT */
+ 
+ struct unlink_vma_file_batch {
+-	struct address_space *mapping;
+ 	int count;
+ 	struct vm_area_struct *vmas[8];
+ };
+diff --git a/mm/mmap.c b/mm/mmap.c
+index a0bfcaf31abe..f19b45f59463 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -37,6 +37,7 @@
+ #include <linux/perf_event.h>
+ #include <linux/audit.h>
+ #include <linux/khugepaged.h>
++#include <linux/kstrtox.h>
+ #include <linux/uprobes.h>
+ #include <linux/notifier.h>
+ #include <linux/memory.h>
+@@ -69,6 +70,25 @@
+ #ifdef CONFIG_I_MMAP_SHARDS
+ #define I_MMAP_SHARD_CONTENTION_THRESHOLD	4
+ 
++DEFINE_STATIC_KEY_FALSE_RO(i_mmap_opt_enabled_key);
++EXPORT_SYMBOL_GPL(i_mmap_opt_enabled_key);
++
++static int __init i_mmap_opt_setup(char *str)
++{
++	bool enabled;
++	int ret;
++
++	ret = kstrtobool(str, &enabled);
++	if (ret)
++		return ret;
++	if (enabled)
++		static_branch_enable(&i_mmap_opt_enabled_key);
++	else
++		static_branch_disable(&i_mmap_opt_enabled_key);
++	return 0;
++}
++early_param("i_mmap_opt", i_mmap_opt_setup);
++
+ static struct lock_class_key i_mmap_shard_lock_keys[I_MMAP_MAX_SHARDS];
+ 
+ struct i_mmap_shards *i_mmap_shards_alloc(gfp_t gfp)
+@@ -201,14 +221,14 @@ static void i_mmap_install_shards(struct address_space *mapping)
+ 	i_mmap_shards_free(shards);
+ }
+ 
+-void i_mmap_lock_write_vma(struct address_space *mapping,
+-			   struct vm_area_struct *vma,
+-			   struct i_mmap_write_lock *lock)
++void __i_mmap_lock_write_vma(struct address_space *mapping,
++			     struct vm_area_struct *vma,
++			     struct i_mmap_write_lock *lock)
+ {
+ 	struct i_mmap_shards *shards;
++	struct i_mmap_shard *shard;
+ 
+ retry:
+-	lock->shard = NULL;
+ 	lock->root = &mapping->i_mmap;
+ 	shards = i_mmap_shards_load(mapping);
+ 	if (!shards) {
+@@ -234,18 +254,23 @@ void i_mmap_lock_write_vma(struct address_space *mapping,
+ 	}
+ 
+ lock_shard:
+-	lock->shard = i_mmap_shard_for_vma(shards, vma);
+-	lock->root = &lock->shard->root;
+-	down_write(&lock->shard->rwsem);
++	shard = i_mmap_shard_for_vma(shards, vma);
++	lock->root = &shard->root;
++	down_write(&shard->rwsem);
+ }
+ 
+-void i_mmap_unlock_write_vma(struct address_space *mapping,
+-			     struct i_mmap_write_lock *lock)
++void __i_mmap_unlock_write_vma(struct address_space *mapping,
++			       struct i_mmap_write_lock *lock)
+ {
+-	if (lock->shard)
+-		up_write(&lock->shard->rwsem);
+-	else
++	struct i_mmap_shard *shard;
++
++	if (lock->root == &mapping->i_mmap) {
+ 		i_mmap_unlock_write(mapping);
++		return;
++	}
++
++	shard = container_of(lock->root, struct i_mmap_shard, root);
++	up_write(&shard->rwsem);
+ }
+ 
+ bool i_mmap_shards_install_locked(struct address_space *mapping,
+@@ -255,7 +280,7 @@ bool i_mmap_shards_install_locked(struct address_space *mapping,
+ 	struct i_mmap_shard *shard;
+ 
+ 	i_mmap_assert_write_locked(mapping);
+-	if (i_mmap_shards_load(mapping))
++	if (!i_mmap_opt_enabled() || i_mmap_shards_load(mapping))
+ 		return false;
+ 
+ 	flush_dcache_mmap_lock(mapping);
+@@ -550,16 +575,16 @@ void unlink_file_vma(struct vm_area_struct *vma)
+ 
+ void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb)
+ {
+-	vb->mapping = NULL;
+ 	vb->count = 0;
+ }
+ 
+ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ {
+-	struct address_space *mapping = vb->mapping;
++	struct address_space *mapping;
+ 	struct i_mmap_write_lock lock;
+ 	int i;
+ 
++	mapping = vb->vmas[0]->vm_file->f_mapping;
+ 	i_mmap_lock_write_vma(mapping, vb->vmas[0], &lock);
+ 	for (i = 0; i < vb->count; i++) {
+ 		VM_WARN_ON_ONCE(vb->vmas[i]->vm_file->f_mapping != mapping);
+@@ -573,17 +598,27 @@ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+ 			       struct vm_area_struct *vma)
+ {
++	struct file *file;
+ 	struct address_space *mapping;
++	bool mapping_changed = false;
+ 
+ 	if (vma->vm_file == NULL)
+ 		return;
+ 
+-	mapping = vma->vm_file->f_mapping;
+-	if ((vb->count > 0 && vb->mapping != mapping) ||
++	file = vma->vm_file;
++	mapping = file->f_mapping;
++	if (vb->count > 0) {
++		if (i_mmap_opt_enabled())
++			mapping_changed =
++				vb->vmas[0]->vm_file->f_mapping != mapping;
++		else
++			mapping_changed = vb->vmas[0]->vm_file != file;
++	}
++
++	if (mapping_changed ||
+ 	    vb->count == ARRAY_SIZE(vb->vmas))
+ 		unlink_file_vma_batch_process(vb);
+ 
+-	vb->mapping = mapping;
+ 	vb->vmas[vb->count] = vma;
+ 	vb->count++;
+ }
+-- 
+2.43.0
+

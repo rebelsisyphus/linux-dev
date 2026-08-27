@@ -1,0 +1,173 @@
+From 82f2257ff83940295d5c5286b805da559aea0ed3 Mon Sep 17 00:00:00 2001
+Message-ID: <82f2257ff83940295d5c5286b805da559aea0ed3.1787813260.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1787813260.git.dongchenchen2@huawei.com>
+References: <cover.1787813260.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:13:45 +0800
+Subject: [PATCH openEuler-26.09 13/25] mm/pagewalk: traverse every i_mmap
+ shard
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+walk_page_mapping() assumes that every file VMA is reachable from the
+central interval tree and that callers hold its rwsem. Neither assumption
+holds after regular-file mappings can publish NUMA-local roots.
+
+Move VMA clipping and page-table walking into an i_mmap callback and let
+walk_page_mapping() acquire the complete mapping read-lock set itself. Drop
+the now-redundant central locking from the dirty-tracking callers.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ mm/mapping_dirty_helpers.c |  4 --
+ mm/pagewalk.c              | 89 +++++++++++++++++++++-----------------
+ 2 files changed, 49 insertions(+), 44 deletions(-)
+
+diff --git a/mm/mapping_dirty_helpers.c b/mm/mapping_dirty_helpers.c
+index 2f8829b3541a..d55752380746 100644
+--- a/mm/mapping_dirty_helpers.c
++++ b/mm/mapping_dirty_helpers.c
+@@ -265,10 +265,8 @@ unsigned long wp_shared_mapping_range(struct address_space *mapping,
+ {
+ 	struct wp_walk wpwalk = { .total = 0 };
+ 
+-	i_mmap_lock_read(mapping);
+ 	WARN_ON(walk_page_mapping(mapping, first_index, nr, &wp_walk_ops,
+ 				  &wpwalk));
+-	i_mmap_unlock_read(mapping);
+ 
+ 	return wpwalk.total;
+ }
+@@ -326,10 +324,8 @@ unsigned long clean_record_shared_mapping_range(struct address_space *mapping,
+ 		.end = none_set ? 0 : *end,
+ 	};
+ 
+-	i_mmap_lock_read(mapping);
+ 	WARN_ON(walk_page_mapping(mapping, first_index, nr, &clean_walk_ops,
+ 				  &cwalk.base));
+-	i_mmap_unlock_read(mapping);
+ 
+ 	*start = cwalk.start;
+ 	*end = cwalk.end;
+diff --git a/mm/pagewalk.c b/mm/pagewalk.c
+index 0ee2ff6eac2b..e9b35d58008f 100644
+--- a/mm/pagewalk.c
++++ b/mm/pagewalk.c
+@@ -623,9 +623,9 @@ int walk_page_vma(struct vm_area_struct *vma, const struct mm_walk_ops *ops,
+  *
+  * Locking:
+  *   This function can't require that the struct mm_struct::mmap_lock is held,
+- *   since @mapping may be mapped by multiple processes. Instead
+- *   @mapping->i_mmap_rwsem must be held. This might have implications in the
+- *   callbacks, and it's up tho the caller to ensure that the
++ *   since @mapping may be mapped by multiple processes. It takes the mapping
++ *   interval-tree read locks internally. This might have implications in the
++ *   callbacks, and it is up to the caller to ensure that the
+  *   struct mm_struct::mmap_lock is not needed.
+  *
+  *   Also this means that a caller can't rely on the struct
+@@ -636,51 +636,60 @@ int walk_page_vma(struct vm_area_struct *vma, const struct mm_walk_ops *ops,
+  * Return: 0 on success, negative error code on failure, positive number on
+  * caller defined premature termination.
+  */
+-int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
+-		      pgoff_t nr, const struct mm_walk_ops *ops,
+-		      void *private)
++struct walk_page_mapping_args {
++	struct mm_walk walk;
++	pgoff_t first_index;
++	pgoff_t nr;
++	int err;
++};
++
++static int walk_page_mapping_vma(struct vm_area_struct *vma, void *arg)
+ {
+-	struct mm_walk walk = {
+-		.ops		= ops,
+-		.private	= private,
+-	};
+-	struct vm_area_struct *vma;
++	struct walk_page_mapping_args *walk = arg;
+ 	pgoff_t vba, vea, cba, cea;
+ 	unsigned long start_addr, end_addr;
+-	int err = 0;
+-
+-	lockdep_assert_held(&mapping->i_mmap_rwsem);
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap, first_index,
+-				  first_index + nr - 1) {
+-		/* Clip to the vma */
+-		vba = vma->vm_pgoff;
+-		vea = vba + vma_pages(vma);
+-		cba = first_index;
+-		cba = max(cba, vba);
+-		cea = first_index + nr;
+-		cea = min(cea, vea);
+-
+-		start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
+-		end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
+-		if (start_addr >= end_addr)
+-			continue;
+ 
+-		walk.vma = vma;
+-		walk.mm = vma->vm_mm;
++	vba = vma->vm_pgoff;
++	vea = vba + vma_pages(vma);
++	cba = max(walk->first_index, vba);
++	cea = min(walk->first_index + walk->nr, vea);
+ 
+-		err = walk_page_test(vma->vm_start, vma->vm_end, &walk);
+-		if (err > 0) {
+-			err = 0;
+-			break;
+-		} else if (err < 0)
+-			break;
++	start_addr = ((cba - vba) << PAGE_SHIFT) + vma->vm_start;
++	end_addr = ((cea - vba) << PAGE_SHIFT) + vma->vm_start;
++	if (start_addr >= end_addr)
++		return 0;
+ 
+-		err = __walk_page_range(start_addr, end_addr, &walk);
+-		if (err)
+-			break;
++	walk->walk.vma = vma;
++	walk->walk.mm = vma->vm_mm;
++	walk->err = walk_page_test(vma->vm_start, vma->vm_end,
++				   &walk->walk);
++	if (walk->err > 0) {
++		walk->err = 0;
++		return 1;
+ 	}
++	if (walk->err < 0)
++		return 1;
+ 
+-	return err;
++	walk->err = __walk_page_range(start_addr, end_addr, &walk->walk);
++	return walk->err ? 1 : 0;
++}
++
++int walk_page_mapping(struct address_space *mapping, pgoff_t first_index,
++		      pgoff_t nr, const struct mm_walk_ops *ops,
++		      void *private)
++{
++	struct walk_page_mapping_args walk = {
++		.walk = {
++			.ops = ops,
++			.private = private,
++		},
++		.first_index = first_index,
++		.nr = nr,
++	};
++
++	i_mmap_read_walk(mapping, first_index, first_index + nr - 1, false,
++			 walk_page_mapping_vma, &walk);
++	return walk.err;
+ }
+ 
+ /**
+-- 
+2.43.0
+

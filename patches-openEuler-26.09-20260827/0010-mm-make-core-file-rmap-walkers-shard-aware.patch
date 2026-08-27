@@ -1,0 +1,222 @@
+From 5fd38d341f6a1831bc7299e7461b9c840f28cdb9 Mon Sep 17 00:00:00 2001
+Message-ID: <5fd38d341f6a1831bc7299e7461b9c840f28cdb9.1787813260.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1787813260.git.dongchenchen2@huawei.com>
+References: <cover.1787813260.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:09:47 +0800
+Subject: [PATCH openEuler-26.09 10/25] mm: make core file rmap walkers
+ shard-aware
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+Core reverse-mapping and unmap paths would miss every VMA after an
+address_space moves its interval nodes out of the central tree. The locked
+rmap variant must also avoid reacquiring locks already held by its caller.
+
+Run file rmap and unmap_mapping_pages() traversal through the common
+i_mmap iterator. Use caller-locked iteration for rmap_walk_locked(), and
+propagate an all-shard trylock failure through rwc->contended without
+executing partial callbacks.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ mm/memory.c | 62 +++++++++++++++++++++++++------------------
+ mm/rmap.c   | 75 ++++++++++++++++++++++++++++++-----------------------
+ 2 files changed, 80 insertions(+), 57 deletions(-)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index d5932b924e08..baa55770b430 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3838,25 +3838,27 @@ static void unmap_mapping_range_vma(struct vm_area_struct *vma,
+ 	zap_page_range_single(vma, start_addr, end_addr - start_addr, details);
+ }
+ 
+-static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
+-					    pgoff_t first_index,
+-					    pgoff_t last_index,
+-					    struct zap_details *details)
++struct unmap_mapping_walk {
++	pgoff_t first_index;
++	pgoff_t last_index;
++	struct zap_details *details;
++};
++
++static int unmap_mapping_range_vma_walk(struct vm_area_struct *vma, void *arg)
+ {
+-	struct vm_area_struct *vma;
++	struct unmap_mapping_walk *walk = arg;
++	unsigned long start_addr, end_addr;
+ 	pgoff_t vba, vea, zba, zea;
+ 
+-	vma_interval_tree_foreach(vma, root, first_index, last_index) {
+-		vba = vma->vm_pgoff;
+-		vea = vba + vma_pages(vma) - 1;
+-		zba = max(first_index, vba);
+-		zea = min(last_index, vea);
++	vba = vma->vm_pgoff;
++	vea = vba + vma_pages(vma) - 1;
++	zba = max(walk->first_index, vba);
++	zea = min(walk->last_index, vea);
++	start_addr = ((zba - vba) << PAGE_SHIFT) + vma->vm_start;
++	end_addr = ((zea - vba + 1) << PAGE_SHIFT) + vma->vm_start;
++	unmap_mapping_range_vma(vma, start_addr, end_addr, walk->details);
+ 
+-		unmap_mapping_range_vma(vma,
+-			((zba - vba) << PAGE_SHIFT) + vma->vm_start,
+-			((zea - vba + 1) << PAGE_SHIFT) + vma->vm_start,
+-				details);
+-	}
++	return 0;
+ }
+ 
+ /**
+@@ -3886,11 +3888,16 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.single_folio = folio;
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	{
++		struct unmap_mapping_walk walk = {
++			.first_index = first_index,
++			.last_index = last_index,
++			.details = &details,
++		};
++
++		i_mmap_read_walk(mapping, first_index, last_index, false,
++				 unmap_mapping_range_vma_walk, &walk);
++	}
+ }
+ 
+ /**
+@@ -3916,11 +3923,16 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 	if (last_index < first_index)
+ 		last_index = ULONG_MAX;
+ 
+-	i_mmap_lock_read(mapping);
+-	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+-		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+-					 last_index, &details);
+-	i_mmap_unlock_read(mapping);
++	{
++		struct unmap_mapping_walk walk = {
++			.first_index = first_index,
++			.last_index = last_index,
++			.details = &details,
++		};
++
++		i_mmap_read_walk(mapping, first_index, last_index, false,
++				 unmap_mapping_range_vma_walk, &walk);
++	}
+ }
+ EXPORT_SYMBOL_GPL(unmap_mapping_pages);
+ 
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 2fea90f048af..6058dd9406b3 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -2662,12 +2662,45 @@ static void rmap_walk_anon(struct folio *folio,
+  * Find all the mappings of a folio using the mapping pointer and the vma chains
+  * contained in the address_space struct it points to.
+  */
++struct rmap_walk_file_arg {
++	struct folio *folio;
++	struct rmap_walk_control *rwc;
++};
++
++static int rmap_walk_file_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct rmap_walk_file_arg *walk = arg;
++	struct rmap_walk_control *rwc = walk->rwc;
++	unsigned long address;
++
++	address = vma_address(&walk->folio->page, vma);
++	if (unlikely(address == -EFAULT)) {
++		VM_WARN_ON_ONCE(true);
++		return 0;
++	}
++	cond_resched();
++
++	if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++		return 0;
++
++	if (!rwc->rmap_one(walk->folio, vma, address, rwc->arg))
++		return 1;
++	if (rwc->done && rwc->done(walk->folio))
++		return 1;
++
++	return 0;
++}
++
+ static void rmap_walk_file(struct folio *folio,
+ 		struct rmap_walk_control *rwc, bool locked)
+ {
+ 	struct address_space *mapping = folio_mapping(folio);
+ 	pgoff_t pgoff_start, pgoff_end;
+-	struct vm_area_struct *vma;
++	struct rmap_walk_file_arg walk = {
++		.folio = folio,
++		.rwc = rwc,
++	};
++	int ret;
+ 
+ 	/*
+ 	 * The page lock not only makes sure that page->mapping cannot
+@@ -2682,37 +2715,15 @@ static void rmap_walk_file(struct folio *folio,
+ 
+ 	pgoff_start = folio_pgoff(folio);
+ 	pgoff_end = pgoff_start + folio_nr_pages(folio) - 1;
+-	if (!locked) {
+-		if (i_mmap_trylock_read(mapping))
+-			goto lookup;
+-
+-		if (rwc->try_lock) {
+-			rwc->contended = true;
+-			return;
+-		}
+-
+-		i_mmap_lock_read(mapping);
+-	}
+-lookup:
+-	vma_interval_tree_foreach(vma, &mapping->i_mmap,
+-			pgoff_start, pgoff_end) {
+-		unsigned long address = vma_address(&folio->page, vma);
+-
+-		VM_BUG_ON_VMA(address == -EFAULT, vma);
+-		cond_resched();
+-
+-		if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
+-			continue;
+-
+-		if (!rwc->rmap_one(folio, vma, address, rwc->arg))
+-			goto done;
+-		if (rwc->done && rwc->done(folio))
+-			goto done;
+-	}
+-
+-done:
+-	if (!locked)
+-		i_mmap_unlock_read(mapping);
++	if (locked)
++		ret = i_mmap_walk_locked(mapping, pgoff_start, pgoff_end,
++					 rmap_walk_file_vma, &walk);
++	else
++		ret = i_mmap_read_walk(mapping, pgoff_start, pgoff_end,
++				       rwc->try_lock, rmap_walk_file_vma,
++				       &walk);
++	if (ret == -EAGAIN)
++		rwc->contended = true;
+ }
+ 
+ void rmap_walk(struct folio *folio, struct rmap_walk_control *rwc)
+-- 
+2.43.0
+

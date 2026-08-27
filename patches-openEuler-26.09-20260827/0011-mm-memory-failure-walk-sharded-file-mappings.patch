@@ -1,0 +1,109 @@
+From e4932e426742b14a9cc7ff94e6890e5bed4479ff Mon Sep 17 00:00:00 2001
+Message-ID: <e4932e426742b14a9cc7ff94e6890e5bed4479ff.1787813260.git.dongchenchen2@huawei.com>
+In-Reply-To: <cover.1787813260.git.dongchenchen2@huawei.com>
+References: <cover.1787813260.git.dongchenchen2@huawei.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:11:19 +0800
+Subject: [PATCH openEuler-26.09 11/25] mm/memory-failure: walk sharded file
+ mappings
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+File memory-failure collection currently searches only mapping->i_mmap. A
+sharded regular-file mapping would therefore omit affected processes from
+the early-kill list.
+
+Move the task matching into an i_mmap walk callback so every published
+root is covered. Enter the RCU read-side critical section from the callback
+rather than holding it while the generic walker may sleep acquiring mapping
+locks.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ mm/memory-failure.c | 58 +++++++++++++++++++++++++++------------------
+ 1 file changed, 35 insertions(+), 23 deletions(-)
+
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index 87128fb1489c..263f4ffd5e2e 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -652,37 +652,49 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
+ /*
+  * Collect processes when the error hit a file mapped page.
+  */
+-static void collect_procs_file(struct folio *folio, struct page *page,
+-		struct list_head *to_kill, int force_early)
++struct collect_procs_file_walk {
++	struct page *page;
++	struct list_head *to_kill;
++	int force_early;
++};
++
++static int collect_procs_file_vma(struct vm_area_struct *vma, void *arg)
+ {
+-	struct vm_area_struct *vma;
++	struct collect_procs_file_walk *walk = arg;
+ 	struct task_struct *tsk;
+-	struct address_space *mapping = folio->mapping;
+-	pgoff_t pgoff;
+ 
+-	i_mmap_lock_read(mapping);
++	/*
++	 * Send early kill signals when the VMA covers the page even if the
++	 * corrupted page is not present in its page table. Applications that
++	 * requested early notification expect all such data corruption.
++	 */
+ 	rcu_read_lock();
+-	pgoff = page_to_pgoff(page);
+ 	for_each_process(tsk) {
+-		struct task_struct *t = task_early_kill(tsk, force_early);
++		struct task_struct *t;
+ 
+-		if (!t)
+-			continue;
+-		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+-				      pgoff) {
+-			/*
+-			 * Send early kill signal to tasks where a vma covers
+-			 * the page but the corrupted page is not necessarily
+-			 * mapped in its pte.
+-			 * Assume applications who requested early kill want
+-			 * to be informed of all such data corruptions.
+-			 */
+-			if (vma->vm_mm == t->mm)
+-				add_to_kill_anon_file(t, page, vma, to_kill);
+-		}
++		t = task_early_kill(tsk, walk->force_early);
++		if (t && vma->vm_mm == t->mm)
++			add_to_kill_anon_file(t, walk->page, vma,
++					      walk->to_kill);
+ 	}
+ 	rcu_read_unlock();
+-	i_mmap_unlock_read(mapping);
++	return 0;
++}
++
++static void collect_procs_file(struct folio *folio, struct page *page,
++			       struct list_head *to_kill, int force_early)
++{
++	struct address_space *mapping = folio->mapping;
++	struct collect_procs_file_walk walk = {
++		.page = page,
++		.to_kill = to_kill,
++		.force_early = force_early,
++	};
++	pgoff_t pgoff;
++
++	pgoff = page_to_pgoff(page);
++	i_mmap_read_walk(mapping, pgoff, pgoff, false,
++			 collect_procs_file_vma, &walk);
+ }
+ 
+ #ifdef CONFIG_FS_DAX
+-- 
+2.43.0
+

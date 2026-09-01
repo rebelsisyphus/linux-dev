@@ -1,0 +1,54 @@
+From 7736652306a832c71b8c6980bb6b76e8300c8dfe Mon Sep 17 00:00:00 2001
+From: Charlie Jenkins <charlie@rivosinc.com>
+Date: Wed, 7 May 2025 00:11:30 -0700
+Subject: [PATCH 25/25] LoongArch: entry: Fix include order
+
+mainline inclusion
+from mainline-v6.15-rc4
+commit 8278fd6006a02e3352d5230927c4576f53fb3b06
+category: bugfix
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+CVE: NA
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=8278fd6006a02e3352d5230927c4576f53fb3b06
+
+----------------------------------------------------------------------
+
+Reorder some introduced include headers to keep alphabetical order.
+
+Fixes: 7ace1602abf2 ("LoongArch: entry: Migrate ret_from_fork() to C")
+Signed-off-by: Charlie Jenkins <charlie@rivosinc.com>
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Link: https://lore.kernel.org/all/20250507-loongarch_include_order-v1-1-e8aada6a3da8@rivosinc.com
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ arch/loongarch/kernel/process.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index f05d78349e6f..ec27ba59f6fb 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -13,8 +13,8 @@
+ #include <linux/cpu.h>
+ #include <linux/init.h>
+ #include <linux/kernel.h>
+-#include <linux/errno.h>
+ #include <linux/entry-common.h>
++#include <linux/errno.h>
+ #include <linux/sched.h>
+ #include <linux/sched/debug.h>
+ #include <linux/sched/task.h>
+@@ -34,8 +34,8 @@
+ #include <linux/prctl.h>
+ #include <linux/nmi.h>
+ 
+-#include <asm/asm-prototypes.h>
+ #include <asm/asm.h>
++#include <asm/asm-prototypes.h>
+ #include <asm/bootinfo.h>
+ #include <asm/cpu.h>
+ #include <asm/elf.h>
+-- 
+2.43.0
+

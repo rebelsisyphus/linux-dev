@@ -1,0 +1,188 @@
+From ff1270d7d3188002a00d944031fddf5fea6b227f Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 15:58:16 +0800
+Subject: [PATCH 04/25] mm: add optional NUMA-local i_mmap shard state
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+A single address_space i_mmap_rwsem can become contended when many
+processes map or unmap the same regular files. Prepare an optional
+layout that isolates lock traffic between NUMA nodes while retaining
+several locks within each node.
+
+Add four cacheline-aligned shards for each of up to eight NUMA domains
+and record a stable NUMA home node and local shard index in each mm. A
+newly allocated mm selects its local shard once, while a fork child
+inherits both values from its parent so the family can remain in the
+same reverse-mapping tree. Initialize the dynamic shard pointer and
+accounting state for every inode lifetime because an inode slab
+constructor does not run again when an object is reused.
+
+Store the new address_space and mm state in existing KABI reserves. The
+experimental Kconfig option defaults to disabled, and no mapping can
+publish shards yet, so runtime behavior is unchanged.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ fs/inode.c               | 10 ++++++++++
+ include/linux/fs.h       | 28 ++++++++++++++++++++++++++++
+ include/linux/mm_types.h |  5 +++++
+ kernel/fork.c            | 14 ++++++++++++++
+ mm/Kconfig               |  5 +++--
+ 5 files changed, 60 insertions(+), 2 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ad7445342ee9..5b384ad71f67 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -205,6 +205,11 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
+ 	mapping->flags = 0;
+ 	mapping->wb_err = 0;
+ 	atomic_set(&mapping->i_mmap_writable, 0);
++#ifdef CONFIG_I_MMAP_SHARDS
++	mapping->i_mmap_shards = NULL;
++	atomic_set(&mapping->i_mmap_nr_vmas, 0);
++	atomic_set(&mapping->i_mmap_lock_contention, 0);
++#endif
+ #ifdef CONFIG_READ_ONLY_THP_FOR_FS
+ 	atomic_set(&mapping->nr_thps, 0);
+ #endif
+@@ -401,6 +406,11 @@ static void __address_space_init_once(struct address_space *mapping)
+ 	INIT_LIST_HEAD(&mapping->private_list);
+ 	spin_lock_init(&mapping->private_lock);
+ 	mapping->i_mmap = RB_ROOT_CACHED;
++#ifdef CONFIG_I_MMAP_SHARDS
++	mapping->i_mmap_shards = NULL;
++	atomic_set(&mapping->i_mmap_nr_vmas, 0);
++	atomic_set(&mapping->i_mmap_lock_contention, 0);
++#endif
+ }
+ 
+ void address_space_init_once(struct address_space *mapping)
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 8dd49c400ec0..9254900c310d 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -471,6 +471,28 @@ struct address_space_operations {
+ 
+ extern const struct address_space_operations empty_aops;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++#define I_MMAP_MAX_DOMAINS		8
++#define I_MMAP_SHARDS_PER_DOMAIN	4
++#define I_MMAP_MAX_SHARDS		(I_MMAP_MAX_DOMAINS * \
++					 I_MMAP_SHARDS_PER_DOMAIN)
++
++struct i_mmap_shard {
++	struct rb_root_cached	root;
++	struct rw_semaphore	rwsem;
++} ____cacheline_aligned_in_smp;
++
++struct i_mmap_domain_shards {
++	int			nid;
++	struct i_mmap_shard	shard[I_MMAP_SHARDS_PER_DOMAIN];
++};
++
++struct i_mmap_shards {
++	unsigned int		nr_domains;
++	struct i_mmap_domain_shards *domain[I_MMAP_MAX_DOMAINS];
++};
++#endif
++
+ /**
+  * struct address_space - Contents of a cacheable, mappable object.
+  * @host: Owner, either the inode or the block_device.
+@@ -514,8 +536,14 @@ struct address_space {
+ 	struct rw_semaphore	i_mmap_rwsem;
+ 	void			*private_data;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++	KABI_USE(1, struct i_mmap_shards *i_mmap_shards)
++	KABI_USE2(2, atomic_t i_mmap_nr_vmas,
++		  atomic_t i_mmap_lock_contention)
++#else
+ 	KABI_RESERVE(1)
+ 	KABI_RESERVE(2)
++#endif
+ 	KABI_RESERVE(3)
+ 	KABI_RESERVE(4)
+ 	KABI_RESERVE(5)
+diff --git a/include/linux/mm_types.h b/include/linux/mm_types.h
+index b25cc93103c3..20c62bc70558 100644
+--- a/include/linux/mm_types.h
++++ b/include/linux/mm_types.h
+@@ -1030,7 +1030,12 @@ struct mm_struct {
+ #else
+ 	KABI_RESERVE(3)
+ #endif
++#ifdef CONFIG_I_MMAP_SHARDS
++	KABI_USE2(4, int i_mmap_home_nid,
++		  unsigned int i_mmap_shard_idx)
++#else
+ 	KABI_RESERVE(4)
++#endif
+ 	KABI_RESERVE(5)
+ 	/*
+ 	 * The mm_cpumask needs to be at the end of mm_struct, because it
+diff --git a/kernel/fork.c b/kernel/fork.c
+index d5dc6d647e0e..6790eba2ff8f 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -76,6 +76,11 @@
+ #include <linux/freezer.h>
+ #include <linux/delayacct.h>
+ #include <linux/taskstats_kern.h>
++#ifdef CONFIG_I_MMAP_SHARDS
++#include <linux/hash.h>
++#include <linux/log2.h>
++#include <linux/topology.h>
++#endif
+ #include <linux/tty.h>
+ #include <linux/fs_struct.h>
+ #include <linux/magic.h>
+@@ -1480,6 +1485,10 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
+ 	mm->locked_vm = 0;
+ 	atomic64_set(&mm->pinned_vm, 0);
+ 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
++#ifdef CONFIG_I_MMAP_SHARDS
++	mm->i_mmap_home_nid = numa_node_id();
++	mm->i_mmap_shard_idx = hash_ptr(mm, ilog2(I_MMAP_SHARDS_PER_DOMAIN));
++#endif
+ 	reliable_clear_page_counter(mm);
+ 	spin_lock_init(&mm->page_table_lock);
+ 	spin_lock_init(&mm->arg_lock);
+@@ -1894,6 +1903,11 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
+ 	if (!mm_init(mm, tsk, mm->user_ns))
+ 		goto fail_nomem;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++	mm->i_mmap_home_nid = READ_ONCE(oldmm->i_mmap_home_nid);
++	mm->i_mmap_shard_idx = READ_ONCE(oldmm->i_mmap_shard_idx);
++#endif
++
+ 	err = dup_mmap(mm, oldmm);
+ 	if (err)
+ 		goto free_pt;
+diff --git a/mm/Kconfig b/mm/Kconfig
+index 73817353b6af..29c7df3f2dc2 100644
+--- a/mm/Kconfig
++++ b/mm/Kconfig
+@@ -7,8 +7,9 @@ config I_MMAP_SHARDS
+ 	depends on MMU && SMP && NUMA && EXPERT
+ 	default n
+ 	help
+-	  Build support for batching file VMA updates and splitting contended
+-	  regular-file reverse mapping interval trees into NUMA-local shards.
++	  Split contended regular-file reverse mapping interval trees into
++	  NUMA-local shards. This is intended for machines with highly
++	  concurrent fork, exec, mmap, and exit workloads.
+ 
+ 	  This feature is experimental. If unsure, say N.
+ 
+-- 
+2.43.0
+

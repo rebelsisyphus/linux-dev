@@ -1,0 +1,100 @@
+From 6e472585cb9fe750d4b2cd33e20c3cf5cc501ff6 Mon Sep 17 00:00:00 2001
+From: Linus Torvalds <torvalds@linux-foundation.org>
+Date: Tue, 11 Aug 2026 22:33:51 +0800
+Subject: [PATCH 23/25] fs: optimize acl_permission_check()
+
+mainline inclusion
+from mainline-6.13
+commit cb80d9074f2a56c8226657b01f19656584fc3ab5
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+CVE: NA
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=cb80d9074f2a56c8226657b01f19656584fc3ab5
+
+----------------------------------------------------------------------
+
+generic_permission() turned out to be costlier than expected. The reason
+is that acl_permission_check() performs owner checks that involve costly
+pointer dereferences.
+
+There's already code that skips expensive group checks if the group and
+other permission bits are the same wrt to the mask that is checked. This
+logic can be extended to also shortcut permission checking in
+acl_permission_check().
+
+If the inode doesn't have POSIX ACLs than ownership doesn't matter. If
+there are no missing UGO permissions the permission check can be
+shortcut.
+
+Acked-by: Al Viro <viro@zeniv.linux.org.uk>
+Link: https://lore.kernel.org/all/CAHk-=wgXEoAOFRkDg+grxs+p1U+QjWXLixRGmYEfd=vG+OBuFw@mail.gmail.com
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+Signed-off-by: Christian Brauner <brauner@kernel.org>
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ fs/namei.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 5e58afc0d0d9..7392b59ab236 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -320,6 +320,25 @@ static int check_acl(struct mnt_idmap *idmap,
+ 	return -EAGAIN;
+ }
+ 
++/*
++ * Very quick optimistic "we know we have no ACL's" check.
++ *
++ * Note that this is purely for ACL_TYPE_ACCESS, and purely
++ * for the "we have cached that there are no ACLs" case.
++ *
++ * If this returns true, we know there are no ACLs. But if
++ * it returns false, we might still not have ACLs (it could
++ * be the is_uncached_acl() case).
++ */
++static inline bool no_acl_inode(struct inode *inode)
++{
++#ifdef CONFIG_FS_POSIX_ACL
++	return likely(!READ_ONCE(inode->i_acl));
++#else
++	return true;
++#endif
++}
++
+ /**
+  * acl_permission_check - perform basic UNIX permission checking
+  * @idmap:	idmap of the mount the inode was found from
+@@ -342,6 +361,28 @@ static int acl_permission_check(struct mnt_idmap *idmap,
+ 	unsigned int mode = inode->i_mode;
+ 	vfsuid_t vfsuid;
+ 
++	/*
++	 * Common cheap case: everybody has the requested
++	 * rights, and there are no ACLs to check. No need
++	 * to do any owner/group checks in that case.
++	 *
++	 *  - 'mask&7' is the requested permission bit set
++	 *  - multiplying by 0111 spreads them out to all of ugo
++	 *  - '& ~mode' looks for missing inode permission bits
++	 *  - the '!' is for "no missing permissions"
++	 *
++	 * After that, we just need to check that there are no
++	 * ACL's on the inode - do the 'IS_POSIXACL()' check last
++	 * because it will dereference the ->i_sb pointer and we
++	 * want to avoid that if at all possible.
++	 */
++	if (!((mask & 7) * 0111 & ~mode)) {
++		if (no_acl_inode(inode))
++			return 0;
++		if (!IS_POSIXACL(inode))
++			return 0;
++	}
++
+ 	/* Are we the owner? If so, ACL's don't matter */
+ 	vfsuid = i_uid_into_vfsuid(idmap, inode);
+ 	if (likely(vfsuid_eq_kuid(vfsuid, current_fsuid()))) {
+-- 
+2.43.0
+

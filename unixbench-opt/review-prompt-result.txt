@@ -1,0 +1,109 @@
+审查范围（`cece3eeed8c9..7736652306a8`，全部 25 个提交均为审查对象）：
+
+1. * `9807f1c5f5e2` mm: batch file VMA insertions in dup_mmap
+2. * `e83b42f290d0` mm: batch file VMA unlink by address_space
+3. * `e11d3ddf3b40` mm: keep multiple file VMA batches in dup_mmap
+4. * `ff1270d7d318` mm: add optional NUMA-local i_mmap shard state
+5. * `3e522f9244e4` mm: allocate i_mmap shards on their NUMA nodes
+6. * `cd8bbd3257c4` mm: account file VMAs independently of i_mmap layout
+7. * `77e341b494fe` mm: add NUMA-aware i_mmap shard installation
+8. * `3fb9ff8c1ea2` mm: route file VMA updates through shard-aware locks
+9. * `83da7f3d02a6` mm: add all-shard i_mmap read iteration
+10. * `31dd20aea808` mm: make core file rmap walkers shard-aware
+11. * `2b4693e64241` mm/memory-failure: walk sharded file mappings
+12. * `c021762df97b` mm/khugepaged: find retractable mappings in all shards
+13. * `cdc7d5875b6a` mm/pagewalk: traverse every i_mmap shard
+14. * `4caa676cfafb` uprobes: build registration maps from all i_mmap shards
+15. * `d4204f242418` mm: preserve all-lock semantics for sharded i_mmap
+16. * `718b4b5c1738` mm: hold all i_mmap shards for locked file rmap
+17. * `f60c11e6593a` mm: enable NUMA-local i_mmap shards after contention
+18. * `4a1ab6f53044` mm: control i_mmap optimizations from the command line
+19. * `d589b3688530` riscv: entry: Convert ret_from_fork() to C
+20. * `cd6e76224b48` riscv: entry: Split ret_from_fork() into user and kernel
+21. * `bffc34b78faa` LoongArch: entry: Migrate ret_from_fork() to C
+22. * `3d21d0957c10` entry: Inline syscall_exit_to_user_mode()
+23. * `6e472585cb9f` fs: optimize acl_permission_check()
+24. * `a8cd3d8664a6` fs: speed up path lookup with cheaper handling of MAY_EXEC
+25. * `7736652306a8` LoongArch: entry: Fix include order
+
+结论：未发现能够从当前代码证明的功能回归、并发错误、资源生命周期错误或错误路径缺陷。
+
+CHANGE 分类：
+
+- CHANGE-1：`dup_mmap()` 多 mapping 批处理、容量刷新及失败退出刷新。
+- CHANGE-2：file VMA unlink 按 `address_space` 聚合。
+- CHANGE-3：分片对象的 NUMA 分配、部分分配回滚和 inode 销毁释放。
+- CHANGE-4：VMA 数量独立计数及 link/unlink 配平。
+- CHANGE-5：中央树到分片树的锁内迁移和 release/acquire 发布。
+- CHANGE-6：写锁 trylock、竞争计数、安装者选举及安装失败重试。
+- CHANGE-7：全分片读锁的固定顺序、trylock 回滚和逆序释放。
+- CHANGE-8：普通及 caller-locked rmap 遍历的停止与竞争传播。
+- CHANGE-9：unmap、memory-failure、khugepaged、pagewalk、uprobes walker 转换。
+- CHANGE-10：`vma_prepare()`/`vma_complete()` 和 mremap 的根选择及锁作用域。
+- CHANGE-11：`mm_take_all_locks()` 和 file-folio split 的全分片锁语义。
+- CHANGE-12：`i_mmap_opt=` 早期启动参数及静态键生命周期。
+- CHANGE-13：RISC-V user/kernel `ret_from_fork` ABI 拆分。
+- CHANGE-14：LoongArch fork 返回路径迁移到 C。
+- CHANGE-15：`syscall_exit_to_user_mode()` 内联及 syscall work 调用顺序。
+- CHANGE-16：无 ACL 的 UGO 权限快速路径。
+- CHANGE-17：目录遍历 `MAY_EXEC` 快速路径及 LSM 检查。
+- CHANGE-18：LoongArch include 顺序调整。
+
+REACHABILITY: confirmed
+
+`i_mmap` 分片路径需要 `CONFIG_I_MMAP_SHARDS=y`、`i_mmap_opt=on`、不超过 8 个 possible NUMA node、普通非 DAX/非 shmem/非 hugetlb 文件，并达到 256 次中央写锁竞争；这些条件可以由普通 mmap/fork/unmap 工作负载满足。架构入口和 VFS 快速路径也分别由 fork、syscall 返回和路径遍历直接到达。
+
+ENTRY-POINT:
+
+- 新入口为早期参数 `i_mmap_opt=<bool>`。
+- 未指定或 `off`：保留原中央树及原始 fork/unlink 路径。
+- `on`：字段在 inode/mm 初始化时建立，之后允许批处理和动态分片。
+- 非法值：`kstrtobool()` 返回错误，静态键保持关闭。
+- 参数在 live mapping 出现前解析，静态键为只读启动期策略，不存在运行时切换未初始化状态的问题。
+- parity: not an emulation path。
+
+# Callstack Regression Analysis
+
+MANDATORY VALIDATION: callstack.md analyzed: y
+
+检查覆盖了 `dup_mm()`、`free_pgtables()`、VMA merge/split/mremap、rmap/unmap、THP split、memory-failure、khugepaged、pagewalk、uprobes、架构 `copy_thread()`、syscall exit 和 `may_lookup()` 的上下游调用链。
+
+锁与资源结论：
+
+- 中央锁负责分片发布；发布后普通 writer 只持目标 shard。
+- 全分片 reader、`mm_take_all_locks()` 和 locked rmap 使用相同正序获取、逆序释放，没有发现反向获取路径。
+- trylock 在执行任何回调前获取全部 shard，失败时不会产生部分副作用。
+- fork 子进程继承父进程 shard 选择，相关 VMA 保持在同一 interval tree 中。
+- 分片分配的所有失败分支均释放已分配 domain；已发布分片由 inode 最终销毁路径释放。
+- fork 失败路径在标记不完整 maple tree 前刷新所有待处理 file VMA，引用、writable 计数及 interval-tree 状态配平。
+- ACL 与 `MAY_EXEC` 快速路径仍执行 `security_inode_permission()`；只在 mode bits 已明确允许且访问 ACL 已缓存为空时跳过通用 DAC 路径。
+
+排除的疑点：
+
+- 剩余中央 `i_mmap` walker 均受 NOMMU、无 NUMA 架构、DAX、hugetlb 或仅 shmem 路径结构性排除。
+- `copy_page_range()` 前遗漏批次刷新被排除：批处理判断与 `vma_needs_copy()` 条件完全一致。
+- VMA 调整跨 shard 被排除：相关 VMA 属于同一 mm，分片选择只依赖稳定的 mm 字段。
+- `rmap_walk_locked()` 锁覆盖不足被排除：对应 file-folio 和 all-lock 调用者持有全部 shard。
+- ACL sentinel 被误判为空被排除：`ACL_NOT_CACHED`、`ACL_DONT_CACHE` 和加载中 sentinel 均为非 NULL。
+- RISC-V/LoongArch 参数错位被排除：汇编寄存器传递与各自 C ABI 原型一致。
+
+验证结果：
+
+- `git diff --check HEAD~25..HEAD`：通过。
+- `CONFIG_I_MMAP_SHARDS=n` 修改对象编译：通过。
+- `CONFIG_I_MMAP_SHARDS=y`，并开启 THP、memory-failure、POSIX ACL：全部相关对象编译通过。
+- RISC-V `process.o`、`entry.o`、`common.o`：交叉编译通过。
+- LoongArch `process.c` 目标语法检查和 `entry.S` 汇编：通过；环境缺少 LoongArch linker，未执行完整目标链接。
+- checkpatch：0 errors；其余告警未构成功能回归。
+
+BUG FIX DETERMINATION: 前 24 个提交不是 bug fix；第 25 个为非功能性的轻微 include-order 修正。
+
+Fixes tag check for LoongArch entry: 标签格式、12 位 SHA、单行、引用主题和位置均正确；本地 backport 对应提交为 `bffc34b78faa`。无需 stable 标记。
+
+Kconfig changes verified：符号存在，`MMU && SMP && NUMA` 依赖可满足，无 `select` 或依赖环，默认关闭且帮助文本完整。
+
+未生成 `review-inline.txt`，因为没有确认的回归。元数据已写入 `review-metadata.json`。
+
+FINAL REGRESSIONS FOUND: 0
+FINAL TOKENS USED: unavailable（运行时未提供精确会话计数）
+Assisted-by: Codex:GPT-5

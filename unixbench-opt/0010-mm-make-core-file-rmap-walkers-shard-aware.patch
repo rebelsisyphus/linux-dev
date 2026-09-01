@@ -1,0 +1,203 @@
+From 31dd20aea808819134968c5d12f16b2b83036497 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Fri, 24 Jul 2026 16:09:47 +0800
+Subject: [PATCH 10/25] mm: make core file rmap walkers shard-aware
+
+hulk inclusion
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+
+--------------------------------
+
+Core reverse-mapping and unmap paths would miss every VMA after an
+address_space moves its interval nodes out of the central tree. The locked
+rmap variant must also avoid reacquiring locks already held by its caller.
+
+Run file rmap and unmap_mapping_pages() traversal through the common
+i_mmap iterator. Use caller-locked iteration for rmap_walk_locked(), and
+propagate an all-shard trylock failure through rwc->contended without
+executing partial callbacks.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ mm/memory.c | 51 +++++++++++++++++++++++++++++++++++++++++++
+ mm/rmap.c   | 63 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 114 insertions(+)
+
+diff --git a/mm/memory.c b/mm/memory.c
+index d5932b924e08..0a8550f4a91a 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -3838,6 +3838,30 @@ static void unmap_mapping_range_vma(struct vm_area_struct *vma,
+ 	zap_page_range_single(vma, start_addr, end_addr - start_addr, details);
+ }
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++struct unmap_mapping_walk {
++	pgoff_t first_index;
++	pgoff_t last_index;
++	struct zap_details *details;
++};
++
++static int unmap_mapping_range_vma_walk(struct vm_area_struct *vma, void *arg)
++{
++	struct unmap_mapping_walk *walk = arg;
++	unsigned long start_addr, end_addr;
++	pgoff_t vba, vea, zba, zea;
++
++	vba = vma->vm_pgoff;
++	vea = vba + vma_pages(vma) - 1;
++	zba = max(walk->first_index, vba);
++	zea = min(walk->last_index, vea);
++	start_addr = ((zba - vba) << PAGE_SHIFT) + vma->vm_start;
++	end_addr = ((zea - vba + 1) << PAGE_SHIFT) + vma->vm_start;
++	unmap_mapping_range_vma(vma, start_addr, end_addr, walk->details);
++
++	return 0;
++}
++#else
+ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
+ 					    pgoff_t first_index,
+ 					    pgoff_t last_index,
+@@ -3858,6 +3882,7 @@ static inline void unmap_mapping_range_tree(struct rb_root_cached *root,
+ 				details);
+ 	}
+ }
++#endif
+ 
+ /**
+  * unmap_mapping_folio() - Unmap single folio from processes.
+@@ -3886,11 +3911,24 @@ void unmap_mapping_folio(struct folio *folio)
+ 	details.single_folio = folio;
+ 	details.zap_flags = ZAP_FLAG_DROP_MARKER;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++	{
++		struct unmap_mapping_walk walk = {
++			.first_index = first_index,
++			.last_index = last_index,
++			.details = &details,
++		};
++
++		i_mmap_read_walk(mapping, first_index, last_index, false,
++				 unmap_mapping_range_vma_walk, &walk);
++	}
++#else
+ 	i_mmap_lock_read(mapping);
+ 	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+ 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
++#endif
+ }
+ 
+ /**
+@@ -3916,11 +3954,24 @@ void unmap_mapping_pages(struct address_space *mapping, pgoff_t start,
+ 	if (last_index < first_index)
+ 		last_index = ULONG_MAX;
+ 
++#ifdef CONFIG_I_MMAP_SHARDS
++	{
++		struct unmap_mapping_walk walk = {
++			.first_index = first_index,
++			.last_index = last_index,
++			.details = &details,
++		};
++
++		i_mmap_read_walk(mapping, first_index, last_index, false,
++				 unmap_mapping_range_vma_walk, &walk);
++	}
++#else
+ 	i_mmap_lock_read(mapping);
+ 	if (unlikely(!RB_EMPTY_ROOT(&mapping->i_mmap.rb_root)))
+ 		unmap_mapping_range_tree(&mapping->i_mmap, first_index,
+ 					 last_index, &details);
+ 	i_mmap_unlock_read(mapping);
++#endif
+ }
+ EXPORT_SYMBOL_GPL(unmap_mapping_pages);
+ 
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 2fea90f048af..3fd0c96372ed 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -2662,6 +2662,68 @@ static void rmap_walk_anon(struct folio *folio,
+  * Find all the mappings of a folio using the mapping pointer and the vma chains
+  * contained in the address_space struct it points to.
+  */
++#ifdef CONFIG_I_MMAP_SHARDS
++struct rmap_walk_file_arg {
++	struct folio *folio;
++	struct rmap_walk_control *rwc;
++};
++
++static int rmap_walk_file_vma(struct vm_area_struct *vma, void *arg)
++{
++	struct rmap_walk_file_arg *walk = arg;
++	struct rmap_walk_control *rwc = walk->rwc;
++	unsigned long address;
++
++	address = vma_address(&walk->folio->page, vma);
++	VM_BUG_ON_VMA(address == -EFAULT, vma);
++	cond_resched();
++
++	if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
++		return 0;
++
++	if (!rwc->rmap_one(walk->folio, vma, address, rwc->arg))
++		return 1;
++	if (rwc->done && rwc->done(walk->folio))
++		return 1;
++
++	return 0;
++}
++
++static void rmap_walk_file(struct folio *folio,
++		struct rmap_walk_control *rwc, bool locked)
++{
++	struct address_space *mapping = folio_mapping(folio);
++	pgoff_t pgoff_start, pgoff_end;
++	struct rmap_walk_file_arg walk = {
++		.folio = folio,
++		.rwc = rwc,
++	};
++	int ret;
++
++	/*
++	 * The page lock not only makes sure that page->mapping cannot
++	 * suddenly be NULLified by truncation, it makes sure that the
++	 * structure at mapping cannot be freed and reused yet,
++	 * so we can safely take mapping->i_mmap_rwsem.
++	 */
++	VM_BUG_ON_FOLIO(!folio_test_locked(folio), folio);
++
++	if (!mapping)
++		return;
++
++	pgoff_start = folio_pgoff(folio);
++	pgoff_end = pgoff_start + folio_nr_pages(folio) - 1;
++	if (locked)
++		ret = i_mmap_walk_locked(mapping, pgoff_start, pgoff_end,
++					 rmap_walk_file_vma, &walk);
++	else
++		ret = i_mmap_read_walk(mapping, pgoff_start, pgoff_end,
++				       rwc->try_lock, rmap_walk_file_vma,
++				       &walk);
++	if (ret == -EAGAIN)
++		rwc->contended = true;
++}
++#else
+ static void rmap_walk_file(struct folio *folio,
+ 		struct rmap_walk_control *rwc, bool locked)
+ {
+@@ -2714,6 +2776,7 @@ static void rmap_walk_file(struct folio *folio,
+ 	if (!locked)
+ 		i_mmap_unlock_read(mapping);
+ }
++#endif
+ 
+ void rmap_walk(struct folio *folio, struct rmap_walk_control *rwc)
+ {
+-- 
+2.43.0
+

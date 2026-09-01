@@ -1,0 +1,125 @@
+From d589b3688530ccd2ea53d37293d2b6ae99440149 Mon Sep 17 00:00:00 2001
+From: Charlie Jenkins <charlie@rivosinc.com>
+Date: Thu, 20 Mar 2025 10:29:21 -0700
+Subject: [PATCH 19/25] riscv: entry: Convert ret_from_fork() to C
+
+mainline inclusion
+from mainline-6.16
+commit f955aa8723a65759e920d4de8e5d076cef412afc
+category: feature
+bugzilla: https://atomgit.com/openeuler/kernel/issues/9771
+CVE: NA
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f955aa8723a65759e920d4de8e5d076cef412afc
+
+----------------------------------------------------------------------
+
+Move the main section of ret_from_fork() to C to allow inlining of
+syscall_exit_to_user_mode().
+
+Signed-off-by: Charlie Jenkins <charlie@rivosinc.com>
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Reviewed-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/all/20250320-riscv_optimize_entry-v6-1-63e187e26041@rivosinc.com
+Conflicts:
+	arch/riscv/kernel/entry.S
+	arch/riscv/kernel/process.c
+[Adapt to this tree's older RISC-V entry and process context.]
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ arch/riscv/include/asm/asm-prototypes.h |  1 +
+ arch/riscv/kernel/entry.S               | 15 ++++++---------
+ arch/riscv/kernel/process.c             | 15 +++++++++++++--
+ 3 files changed, 20 insertions(+), 11 deletions(-)
+
+diff --git a/arch/riscv/include/asm/asm-prototypes.h b/arch/riscv/include/asm/asm-prototypes.h
+index 36b955c762ba..373f0e69554a 100644
+--- a/arch/riscv/include/asm/asm-prototypes.h
++++ b/arch/riscv/include/asm/asm-prototypes.h
+@@ -25,6 +25,7 @@ DECLARE_DO_ERROR_INFO(do_trap_ecall_s);
+ DECLARE_DO_ERROR_INFO(do_trap_ecall_m);
+ DECLARE_DO_ERROR_INFO(do_trap_break);
+ 
++asmlinkage void ret_from_fork(void *fn_arg, int (*fn)(void *), struct pt_regs *regs);
+ asmlinkage void handle_bad_stack(struct pt_regs *regs);
+ asmlinkage void do_page_fault(struct pt_regs *regs);
+ asmlinkage void do_irq(struct pt_regs *regs);
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index 1f90fee24a8b..8d6fb2f6a14d 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -211,17 +211,14 @@ SYM_CODE_END(handle_kernel_stack_overflow)
+ ASM_NOKPROBE(handle_kernel_stack_overflow)
+ #endif
+ 
+-SYM_CODE_START(ret_from_fork)
++SYM_CODE_START(ret_from_fork_asm)
+ 	call schedule_tail
+-	beqz s0, 1f	/* not from kernel thread */
+-	/* Call fn(arg) */
+-	move a0, s1
+-	jalr s0
+-1:
+-	move a0, sp /* pt_regs */
+-	call syscall_exit_to_user_mode
++	move a0, s1 /* fn_arg */
++	move a1, s0 /* fn */
++	move a2, sp /* pt_regs */
++	call ret_from_fork
+ 	j ret_from_exception
+-SYM_CODE_END(ret_from_fork)
++SYM_CODE_END(ret_from_fork_asm)
+ 
+ /*
+  * Integer register context switch
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 83e223318822..fbc2dc477b1c 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -15,7 +15,9 @@
+ #include <linux/tick.h>
+ #include <linux/ptrace.h>
+ #include <linux/uaccess.h>
++#include <linux/entry-common.h>
+ 
++#include <asm/asm-prototypes.h>
+ #include <asm/unistd.h>
+ #include <asm/processor.h>
+ #include <asm/csr.h>
+@@ -32,7 +34,7 @@ unsigned long __stack_chk_guard __read_mostly;
+ EXPORT_SYMBOL(__stack_chk_guard);
+ #endif
+ 
+-extern asmlinkage void ret_from_fork(void);
++extern asmlinkage void ret_from_fork_asm(void);
+ 
+ void arch_cpu_idle(void)
+ {
+@@ -171,6 +173,15 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
+ 	return 0;
+ }
+ 
++asmlinkage void ret_from_fork(void *fn_arg, int (*fn)(void *),
++			      struct pt_regs *regs)
++{
++	if (unlikely(fn))
++		fn(fn_arg);
++
++	syscall_exit_to_user_mode(regs);
++}
++
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+ 	unsigned long clone_flags = args->flags;
+@@ -200,7 +211,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 		childregs->a0 = 0; /* Return value of fork() */
+ 		p->thread.s[0] = 0;
+ 	}
+-	p->thread.ra = (unsigned long)ret_from_fork;
++	p->thread.ra = (unsigned long)ret_from_fork_asm;
+ 	p->thread.sp = (unsigned long)childregs; /* kernel sp */
+ 	return 0;
+ }
+-- 
+2.43.0
+

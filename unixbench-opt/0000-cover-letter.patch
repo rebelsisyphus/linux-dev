@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Sun, 30 Aug 2026 22:23:09 +0800
+Subject: [PATCH openEuler-26.09 00/26] mm, fs, entry: improve concurrent
+ fork/exec scalability
+
+UnixBench shell, execl, and other process-heavy workloads repeatedly
+create and tear down dynamically linked processes. At high concurrency,
+many tasks insert and remove VMAs for the same executable, dynamic loader,
+and shared libraries. Those file VMAs are serialized by one
+address_space::i_mmap_rwsem and one interval tree, making the lock a
+cross-CPU and cross-NUMA bottleneck.
+
+Patches 1-19 add file-VMA batching and optional NUMA-local i_mmap shards.
+Mappings begin on the existing central tree and move to per-node shards
+only after write-lock contention. The series updates all write walkers,
+read walkers, architecture cache walkers, and all-lock users so every
+published root remains visible under the required locking contract. Dynamic
+shard state is reset for every inode lifetime so slab-object reuse cannot
+inherit a previous file's contention state. The shard-aware file-rmap callback
+also preserves the baseline invalid-address diagnostic invariant.
+
+CONFIG_I_MMAP_SHARDS is default n. Every source change in patches 1-19 is
+compile-time isolated: with the option disabled, removing the conditional
+blocks leaves the same C and header contents as the pre-series tree at
+every intermediate commit. With the capability built, i_mmap_opt=on is
+still required at early boot to enable batching and dynamic sharding.
+
+Patches 20-26 carry the related RISC-V and LoongArch entry conversions,
+the syscall-exit inline optimization, and the VFS permission lookup
+optimizations used by the measured fork/exec workload.
+
+The supplied UnixBench result reports the following aggregate scores:
+
+                         baseline    mmap-opt       change
+  1 container              1547.9      2055.5       +32.79%
+  80 containers            4201.1      4199.0        -0.05%
+  linearity                  36.8%       48.9%       +12.1 pp
+
+Sharding trades some read-side cost for write-side scalability. A read
+walk over a sharded mapping must cover every shard, so operations such as
+truncate and reclaim can be slower when they target that mapping. The
+cost is mapping-local and applies only after sustained write contention
+has triggered sharding; unsharded and unrelated files keep the original
+single-tree path.
+
+Targeted testing confirms this trade-off when truncating a highly shared,
+already-sharded file. Its practical impact on the intended workload is
+limited: the mappings most likely to become sharded are executables,
+loaders, and shared libraries, which are normally stable and rarely
+truncated or hole-punched while mapped. Global reclaim selects folios from
+the wider reclaimable set and performs file rmap one mapping at a time, so
+the additional cost is paid only when a selected folio belongs to an
+already-sharded mapping. Such executable and library folios normally form
+only a small part of the reclaimable working set, and the extra tree walk
+is only one stage of the complete reclaim process. The improvement in
+fork/exec-heavy workloads therefore outweighs this uncommon read-side
+case, while i_mmap_opt=off remains available for deployments that prefer
+the original behavior.
+
+Charlie Jenkins (5):
+  riscv: entry: Convert ret_from_fork() to C
+  riscv: entry: Split ret_from_fork() into user and kernel
+  LoongArch: entry: Migrate ret_from_fork() to C
+  entry: Inline syscall_exit_to_user_mode()
+  LoongArch: entry: Fix include order
+
+Dong Chenchen (19):
+  mm: batch file VMA insertions in dup_mmap
+  mm: batch file VMA unlink by address_space
+  mm: keep multiple file VMA batches in dup_mmap
+  mm: add optional NUMA-local i_mmap shard state
+  mm: allocate i_mmap shards on their NUMA nodes
+  mm: account file VMAs independently of i_mmap layout
+  mm: add NUMA-aware i_mmap shard installation
+  mm: route file VMA updates through shard-aware locks
+  mm: add all-shard i_mmap read iteration
+  mm: make core file rmap walkers shard-aware
+  mm/memory-failure: walk sharded file mappings
+  mm/khugepaged: find retractable mappings in all shards
+  mm/pagewalk: traverse every i_mmap shard
+  uprobes: build registration maps from all i_mmap shards
+  mm: make architecture i_mmap cache walkers shard-aware
+  mm: preserve all-lock semantics for sharded i_mmap
+  mm: hold all i_mmap shards for locked file rmap
+  mm: enable NUMA-local i_mmap shards after contention
+  mm: control i_mmap optimizations from the command line
+
+Linus Torvalds (1):
+  fs: optimize acl_permission_check()
+
+Mateusz Guzik (1):
+  fs: speed up path lookup with cheaper handling of MAY_EXEC
+
+ .../admin-guide/kernel-parameters.txt         |   9 +-
+ arch/arm/mm/fault-armv.c                      |  51 ++
+ arch/arm/mm/flush.c                           |  58 +++
+ arch/arm64/configs/openeuler_defconfig        |   1 +
+ arch/loongarch/include/asm/asm-prototypes.h   |   8 +
+ arch/loongarch/kernel/entry.S                 |  22 +-
+ arch/loongarch/kernel/process.c               |  33 +-
+ arch/nios2/mm/cacheflush.c                    |  39 ++
+ arch/parisc/kernel/cache.c                    |  84 +++
+ arch/riscv/include/asm/asm-prototypes.h       |   2 +
+ arch/riscv/kernel/entry.S                     |  20 +-
+ arch/riscv/kernel/process.c                   |  22 +-
+ arch/x86/configs/openeuler_defconfig          |   1 +
+ fs/inode.c                                    |  22 +
+ fs/namei.c                                    |  81 ++-
+ include/linux/entry-common.h                  |  43 +-
+ include/linux/fs.h                            | 140 ++++-
+ include/linux/mm_types.h                      |   5 +
+ kernel/entry/common.c                         |  49 +-
+ kernel/events/uprobes.c                       |  93 +++
+ kernel/fork.c                                 | 159 ++++++
+ mm/Kconfig                                    |  12 +
+ mm/huge_memory.c                              |  11 +
+ mm/internal.h                                 |   3 +
+ mm/khugepaged.c                               |  77 +++
+ mm/mapping_dirty_helpers.c                    |   8 +
+ mm/memory-failure.c                           |  47 ++
+ mm/memory.c                                   |  51 ++
+ mm/mmap.c                                     | 603 +++++++++++++++++++++++-
+ mm/mremap.c                                   |  65 ++
+ mm/pagewalk.c                                 |  91 +++
+ mm/rmap.c                                     |  63 +++
+ 32 files changed, 1886 insertions(+), 87 deletions(-)
+
+-- 
+2.43.0

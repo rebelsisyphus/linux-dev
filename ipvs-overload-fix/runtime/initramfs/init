@@ -1,0 +1,12 @@
+#!/bin/busybox sh
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+ip link set lo up
+echo 0 > /proc/sys/net/ipv4/vs/run_estimation
+echo "PACKETTEST BOOT $(uname -r)"
+/bin/packet-race 10000 128
+echo "PACKETTEST EXIT $?"
+echo "PACKETTEST COMPLETE"
+poweroff -f

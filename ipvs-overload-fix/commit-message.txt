@@ -1,0 +1,24 @@
+ipvs: order threshold updates before sampling connection counts
+
+A destination threshold edit can miss an overload transition when it
+races with connection binding or unbinding. The edit path stores the
+thresholds and then samples totalconns under dst_lock, but the connection
+paths change totalconns without that lock and only acquire it after
+detecting a threshold crossing.
+
+For example, lowering the upper threshold from 200 to 100 while a bind
+increments totalconns from 99 to 100 can leave the editor seeing the old
+count and the binder seeing the old threshold. Neither sets OVERLOAD.
+Subsequent increments above 100 also skip the update because the check
+uses equality, leaving the destination eligible for new connections above
+its configured upper threshold. A missed lower-threshold crossing can
+likewise leave the destination marked overloaded after connections drain.
+
+Order the threshold stores before the connection count read with
+smp_mb(). This pairs with the fully ordered atomic_inc_return() and
+atomic_fetch_dec() before the lockless threshold reads in the connection
+paths, so at least one side observes the other's update.
+
+Fixes: 8f843441c4e7 ("ipvs: properly update the overload flag on dest edit")
+Cc: stable@vger.kernel.org
+Assisted-by: LLM

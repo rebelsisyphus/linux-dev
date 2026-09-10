@@ -1,0 +1,70 @@
+Suggested patch recipients (review and remove this preparation block):
+  Simon Horman <horms@verge.net.au>
+  Julian Anastasov <ja@ssi.bg>
+  Pablo Neira Ayuso <pablo@netfilter.org>
+  Florian Westphal <fw@strlen.de>
+  Phil Sutter <phil@nwl.cc>
+  lvs-devel@vger.kernel.org
+  netfilter-devel@vger.kernel.org
+  netdev@vger.kernel.org
+  linux-kernel@vger.kernel.org
+
+Send the report and model to the maintainers if requested. Before sending,
+check the plain-text mail setup described in
+Documentation/process/email-clients.rst. The complete get_maintainer.pl
+output is in maintainers.txt.
+
+ipvs: destination edits can miss overload threshold crossings
+
+Mainline base: 45c13f3f9e3bb15fd89ff2864c6f627a3b4b4229
+Fix commit: 1b104892472cd047c20a4025d874e961b18ff0d6
+Branch: ipvs-overload-ordering-fix
+Worktree: /home/sisyphus/code/linux-ipvs-overload-fix
+
+The affected implementation was introduced by 8f843441c4e7 ("ipvs: properly
+update the overload flag on dest edit"). It is present in the mainline base
+above and in the supplied working branch at
+9f3cd6a8fd249686dd175723ee7412dfb81160c6.
+
+With IPVS enabled, an administrator can change a destination threshold
+while normal connections are bound or expired. The edit stores the
+thresholds and then reads totalconns. Connection accounting updates
+totalconns and then reads a threshold without taking dst_lock unless it
+detects a crossing.
+
+The editor and connection path can each observe the old value from the
+other side. Both then skip changing the overload flag. Later count changes
+past the threshold do not repair the state because the accounting checks
+use equality. This can leave a destination eligible above its upper
+threshold or still marked overloaded below its lower threshold.
+
+The fix adds smp_mb() after the threshold stores, before the editor reads
+the counter. It pairs with the fully ordered atomic_inc_return() and
+atomic_fetch_dec() in connection accounting.
+
+This is a functional concurrency bug requiring a destination configuration
+change concurrent with normal traffic. No privilege or isolation boundary
+crossing has been established; the proposed handling is as an ordinary
+networking bug fix.
+
+The minimized x86 userspace model is in overload-ordering.c. It uses three
+CPUs and models the shared atomic operations and spin lock. Each case ran
+1000000 iterations: bind had 703 missed updates before the fence and zero
+after; unbind had 5521 before and zero after. Full output and commands are
+in model-results.txt. These are model observations; a complete in-kernel
+traffic reproduction and kernel boot test were not run.
+
+Both ip_vs_ctl.o and ip_vs_conn.o built without warnings with GCC, W=1 and
+an x86_64_defconfig-derived configuration enabling SMP, IPVS, IPv6, TCP,
+UDP and SCTP. Build commands are in build.log; the output directory is
+recorded in build-directory.txt.
+
+The exported patch passes checkpatch.pl --strict --no-signoff. It applies
+to the mainline base and the supplied working branch. Applying it to a
+temporary index initialized from the base recreates the committed tree
+exactly. git mailinfo preserves the author, subject and commit body.
+
+Documentation/process/coding-assistants.rst prohibits AI agents from adding
+Signed-off-by tags. The commit includes Assisted-by: LLM. The human
+submitter must review the contribution and add their own sign-off before
+submission.

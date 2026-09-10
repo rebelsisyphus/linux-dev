@@ -1,0 +1,25 @@
+{
+  "base": "45c13f3f9e3bb15fd89ff2864c6f627a3b4b4229",
+  "commit": "1b104892472cd047c20a4025d874e961b18ff0d6",
+  "branch": "ipvs-overload-ordering-fix",
+  "worktree": "/home/sisyphus/code/linux-ipvs-overload-fix",
+  "patch": "/home/sisyphus/code/linux/ipvs-overload-fix/0001-ipvs-order-threshold-updates-before-sampling-connect.patch",
+  "original_worktree_head": "9f3cd6a8fd249686dd175723ee7412dfb81160c6",
+  "validation": {
+    "objects": [
+      "ip_vs_ctl.o",
+      "ip_vs_conn.o"
+    ],
+    "extra_warnings": "W=1",
+    "build_warnings": 0,
+    "model_iterations_per_case": 1000000,
+    "bind_before_misses": 703,
+    "bind_after_misses": 0,
+    "unbind_before_misses": 5521,
+    "unbind_after_misses": 0,
+    "checkpatch": "--strict --no-signoff",
+    "patch_tree_roundtrip": true,
+    "git_mailinfo_roundtrip": true,
+    "full_kernel_runtime_test": false
+  }
+}

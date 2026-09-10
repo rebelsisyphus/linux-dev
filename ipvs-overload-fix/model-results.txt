@@ -1,0 +1,18 @@
+$ /tmp/ipvs-overload-build-dy6x6ed0/overload-ordering 1000000 0 0
+miss iteration=57 edit_read_total=99 accounting_read_threshold=200 final_total=100 final_upper=100 flags=0
+miss iteration=71 edit_read_total=99 accounting_read_threshold=200 final_total=100 final_upper=100 flags=0
+miss iteration=188 edit_read_total=99 accounting_read_threshold=200 final_total=100 final_upper=100 flags=0
+event=bind iterations=1000000 edit_full_fence=0 misses=703
+
+$ /tmp/ipvs-overload-build-dy6x6ed0/overload-ordering 1000000 1 0
+event=bind iterations=1000000 edit_full_fence=1 misses=0
+
+$ /tmp/ipvs-overload-build-dy6x6ed0/overload-ordering 1000000 0 1
+miss iteration=116 edit_read_total=75 accounting_read_threshold=50 final_total=74 final_upper=100 flags=2
+miss iteration=344 edit_read_total=75 accounting_read_threshold=50 final_total=74 final_upper=100 flags=2
+miss iteration=455 edit_read_total=75 accounting_read_threshold=50 final_total=74 final_upper=100 flags=2
+event=unbind iterations=1000000 edit_full_fence=0 misses=5521
+
+$ /tmp/ipvs-overload-build-dy6x6ed0/overload-ordering 1000000 1 1
+event=unbind iterations=1000000 edit_full_fence=1 misses=0
+

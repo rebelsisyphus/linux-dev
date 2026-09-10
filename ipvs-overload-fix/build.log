@@ -1,0 +1,152 @@
+
+$ make -C /home/sisyphus/code/linux-ipvs-overload-fix O=/tmp/ipvs-overload-build-dy6x6ed0 ARCH=x86 x86_64_defconfig
+make: Entering directory '/home/sisyphus/code/linux-ipvs-overload-fix'
+make[1]: Entering directory '/tmp/ipvs-overload-build-dy6x6ed0'
+  UPD     /tmp/ipvs-overload-build-dy6x6ed0/Makefile
+  HOSTCC  scripts/basic/fixdep
+  HOSTCC  scripts/kconfig/conf.o
+  HOSTCC  scripts/kconfig/confdata.o
+  HOSTCC  scripts/kconfig/expr.o
+  LEX     scripts/kconfig/lexer.lex.c
+  YACC    scripts/kconfig/parser.tab.[ch]
+  HOSTCC  scripts/kconfig/lexer.lex.o
+  HOSTCC  scripts/kconfig/menu.o
+  HOSTCC  scripts/kconfig/parser.tab.o
+  HOSTCC  scripts/kconfig/preprocess.o
+  HOSTCC  scripts/kconfig/symbol.o
+  HOSTCC  scripts/kconfig/util.o
+  HOSTLD  scripts/kconfig/conf
+#
+# configuration written to .config
+#
+make[1]: Leaving directory '/tmp/ipvs-overload-build-dy6x6ed0'
+make: Leaving directory '/home/sisyphus/code/linux-ipvs-overload-fix'
+
+$ /home/sisyphus/code/linux-ipvs-overload-fix/scripts/config --file /tmp/ipvs-overload-build-dy6x6ed0/.config --enable IP_VS --enable IP_VS_IPV6 --enable IP_VS_PROTO_TCP --enable IP_VS_PROTO_UDP --enable IP_VS_PROTO_SCTP --enable IP_VS_RR --enable IP_VS_WLC
+
+$ make -C /home/sisyphus/code/linux-ipvs-overload-fix O=/tmp/ipvs-overload-build-dy6x6ed0 ARCH=x86 olddefconfig
+make: Entering directory '/home/sisyphus/code/linux-ipvs-overload-fix'
+make[1]: Entering directory '/tmp/ipvs-overload-build-dy6x6ed0'
+#
+# configuration written to .config
+#
+make[1]: Leaving directory '/tmp/ipvs-overload-build-dy6x6ed0'
+make: Leaving directory '/home/sisyphus/code/linux-ipvs-overload-fix'
+
+$ make -C /home/sisyphus/code/linux-ipvs-overload-fix O=/tmp/ipvs-overload-build-dy6x6ed0 ARCH=x86 -j8 W=1 net/netfilter/ipvs/ip_vs_ctl.o net/netfilter/ipvs/ip_vs_conn.o
+make: Entering directory '/home/sisyphus/code/linux-ipvs-overload-fix'
+make[1]: Entering directory '/tmp/ipvs-overload-build-dy6x6ed0'
+  SYNC    include/config/auto.conf.cmd
+  GEN     arch/x86/include/generated/asm/orc_hash.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_32.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_64.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_x32.h
+  HOSTCC  arch/x86/tools/relocs_32.o
+  UPD     arch/x86/include/generated/uapi/asm/bpf_perf_event.h
+  UPD     arch/x86/include/generated/uapi/asm/errno.h
+  UPD     arch/x86/include/generated/uapi/asm/fcntl.h
+  UPD     arch/x86/include/generated/asm/cpufeaturemasks.h
+  UPD     arch/x86/include/generated/uapi/asm/ioctl.h
+  SYSTBL  arch/x86/include/generated/asm/syscalls_32.h
+  UPD     include/generated/uapi/linux/version.h
+  UPD     arch/x86/include/generated/uapi/asm/ioctls.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_32_ia32.h
+  UPD     arch/x86/include/generated/uapi/asm/ipcbuf.h
+  UPD     include/generated/compile.h
+  UPD     arch/x86/include/generated/uapi/asm/param.h
+  UPD     arch/x86/include/generated/uapi/asm/poll.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_64_x32.h
+  HOSTCC  scripts/selinux/mdp/mdp
+  UPD     arch/x86/include/generated/uapi/asm/resource.h
+  UPD     arch/x86/include/generated/uapi/asm/socket.h
+  SYSTBL  arch/x86/include/generated/asm/syscalls_64.h
+  HOSTCC  scripts/kallsyms
+  DESCEND objtool
+  UPD     arch/x86/include/generated/uapi/asm/sockios.h
+  UPD     arch/x86/include/generated/uapi/asm/termbits.h
+  HOSTCC  scripts/sorttable.o
+  UPD     arch/x86/include/generated/uapi/asm/termios.h
+  HOSTCC  scripts/elf-parse.o
+  UPD     arch/x86/include/generated/uapi/asm/types.h
+  HOSTCC  scripts/asn1_compiler
+  UPD     arch/x86/include/generated/asm/early_ioremap.h
+  UPD     arch/x86/include/generated/asm/fprobe.h
+  UPD     arch/x86/include/generated/asm/mcs_spinlock.h
+  UPD     arch/x86/include/generated/asm/mmzone.h
+  UPD     arch/x86/include/generated/asm/ring_buffer.h
+  UPD     arch/x86/include/generated/asm/kexec_handover.h
+  UPD     arch/x86/include/generated/asm/device.h
+  HOSTCC  scripts/tracepoint-update.o
+  UPD     arch/x86/include/generated/asm/irq_regs.h
+  UPD     arch/x86/include/generated/asm/kmap_size.h
+  UPD     arch/x86/include/generated/asm/local64.h
+  UPD     arch/x86/include/generated/asm/mmiowb.h
+  UPD     arch/x86/include/generated/asm/module.lds.h
+  UPD     arch/x86/include/generated/asm/rwonce.h
+  HOSTLD  scripts/sorttable
+  HOSTCC  arch/x86/tools/relocs_64.o
+  HOSTCC  arch/x86/tools/relocs_common.o
+  HOSTCC  arch/x86/tools/vdso2c
+  HOSTLD  scripts/tracepoint-update
+  HOSTLD  arch/x86/tools/relocs
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/exec-cmd.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/help.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/pager.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/parse-options.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/run-command.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/sigchain.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/subcmd-config.o
+  LD      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/libsubcmd-in.o
+  AR      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libsubcmd/libsubcmd.a
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/weak.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/check.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/special.o
+  MKDIR   /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/lib/
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/builtin-check.o
+  MKDIR   /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/lib/
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/elf.o
+  GEN     /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/lib/inat-tables.c
+  GEN     /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/lib/cpu-feature-names.c
+  MKDIR   /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/orc.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/klp-symid.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/objtool.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/orc_gen.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/orc_dump.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/decode.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libstring.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/libctype.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/str_error_r.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/librbtree.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/signal.o
+  CC      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/special.o
+  LD      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/arch/x86/objtool-in.o
+  LD      /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/objtool-in.o
+  LINK    /tmp/ipvs-overload-build-dy6x6ed0/tools/objtool/objtool
+  UPD     include/config/kernel.release
+  UPD     include/generated/utsrelease.h
+  CC      scripts/mod/empty.o
+  HOSTCC  scripts/mod/mk_elfconfig
+  CC      scripts/mod/devicetable-offsets.s
+  UPD     scripts/mod/devicetable-offsets.h
+  MKELF   scripts/mod/elfconfig.h
+  HOSTCC  scripts/mod/modpost.o
+  HOSTCC  scripts/mod/file2alias.o
+  HOSTCC  scripts/mod/sumversion.o
+  HOSTCC  scripts/mod/symsearch.o
+  HOSTLD  scripts/mod/modpost
+  CC      kernel/bounds.s
+  CHKSHA1 /home/sisyphus/code/linux-ipvs-overload-fix/include/linux/atomic/atomic-arch-fallback.h
+  CHKSHA1 /home/sisyphus/code/linux-ipvs-overload-fix/include/linux/atomic/atomic-instrumented.h
+  CHKSHA1 /home/sisyphus/code/linux-ipvs-overload-fix/include/linux/atomic/atomic-long.h
+  UPD     include/generated/timeconst.h
+  UPD     include/generated/bounds.h
+  CC      arch/x86/kernel/asm-offsets.s
+  UPD     include/generated/asm-offsets.h
+  CC      kernel/sched/rq-offsets.s
+  UPD     include/generated/rq-offsets.h
+  CALL    /home/sisyphus/code/linux-ipvs-overload-fix/scripts/checksyscalls.sh 
+  CC      net/netfilter/ipvs/ip_vs_ctl.o
+  CC      net/netfilter/ipvs/ip_vs_conn.o
+make[1]: Leaving directory '/tmp/ipvs-overload-build-dy6x6ed0'
+make: Leaving directory '/home/sisyphus/code/linux-ipvs-overload-fix'

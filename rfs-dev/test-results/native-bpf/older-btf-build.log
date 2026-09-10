@@ -1,0 +1,63 @@
+mkdir -p /tmp/rfs-bpf-build/compat
+/home/sisyphus/code/test/bpf_test/bpftool btf dump file /sys/kernel/btf/vmlinux format c > /tmp/rfs-bpf-build/compat/vmlinux.h.tmp
+mv /tmp/rfs-bpf-build/compat/vmlinux.h.tmp /tmp/rfs-bpf-build/compat/vmlinux.h
+mkdir -p /tmp/rfs-bpf-build/compat/libbpf
+make -C /home/sisyphus/code/linux/tools/lib/bpf OUTPUT=/tmp/rfs-bpf-build/compat/libbpf/ BUILD_STATIC_ONLY=1
+make[1]: Entering directory '/home/sisyphus/code/linux/tools/lib/bpf'
+  GEN     /tmp/rfs-bpf-build/compat/libbpf/bpf_helper_defs.h
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/libbpf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/bpf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/nlattr.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/btf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/libbpf_utils.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/netlink.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/bpf_prog_linfo.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/libbpf_probes.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/hashmap.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/btf_dump.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/ringbuf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/strset.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/linker.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/gen_loader.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/relo_core.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/usdt.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/zip.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/elf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/features.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/btf_iter.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/btf_relocate.o
+  LD      /tmp/rfs-bpf-build/compat/libbpf/staticobjs/libbpf-in.o
+  LINK    /tmp/rfs-bpf-build/compat/libbpf/libbpf.a
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/libbpf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/bpf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/nlattr.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/btf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/libbpf_utils.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/netlink.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/bpf_prog_linfo.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/libbpf_probes.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/hashmap.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/btf_dump.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/ringbuf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/strset.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/linker.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/gen_loader.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/relo_core.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/usdt.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/zip.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/elf.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/features.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/btf_iter.o
+  CC      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/btf_relocate.o
+  LD      /tmp/rfs-bpf-build/compat/libbpf/sharedobjs/libbpf-in.o
+  LINK    /tmp/rfs-bpf-build/compat/libbpf/libbpf.so.1.8.0
+  GEN     /tmp/rfs-bpf-build/compat/libbpf/libbpf.pc
+make[1]: Leaving directory '/home/sisyphus/code/linux/tools/lib/bpf'
+clang-18 -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
+	-I/tmp/rfs-bpf-build/compat -I/tmp/rfs-bpf-build/compat/libbpf -I/home/sisyphus/code/linux/tools/lib -c /home/sisyphus/code/linux/samples/bpf/rfs_policy.bpf.c -o /tmp/rfs-bpf-build/compat/rfs_policy.bpf.o
+/home/sisyphus/code/test/bpf_test/bpftool gen skeleton /tmp/rfs-bpf-build/compat/rfs_policy.bpf.o name rfs_policy > /tmp/rfs-bpf-build/compat/rfs_policy.skel.h.tmp
+mv /tmp/rfs-bpf-build/compat/rfs_policy.skel.h.tmp /tmp/rfs-bpf-build/compat/rfs_policy.skel.h
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-bpf-build/compat -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy.c -o /tmp/rfs-bpf-build/compat/rfs_policy.o
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-bpf-build/compat -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy_loader.c -o /tmp/rfs-bpf-build/compat/rfs_policy_loader.o
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-bpf-build/compat -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy_topology.c -o /tmp/rfs-bpf-build/compat/rfs_policy_topology.o
+cc /tmp/rfs-bpf-build/compat/rfs_policy.o /tmp/rfs-bpf-build/compat/rfs_policy_loader.o /tmp/rfs-bpf-build/compat/rfs_policy_topology.o /tmp/rfs-bpf-build/compat/libbpf/libbpf.a -lelf -lz -o /tmp/rfs-bpf-build/compat/rfs_policy

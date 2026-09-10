@@ -1,0 +1,37 @@
+WARNING:FILE_PATH_CHANGES: added, moved or deleted file(s), does MAINTAINERS need updating?
+#2: 
+new file mode 100644
+
+WARNING:REPEATED_WORD: Possible repeated word: 'bpf'
+#77: FILE: Documentation/networking/bpf_rfs.rst:71:
++  mount -t bpf bpf /sys/fs/bpf  # if not already mounted
+
+WARNING:EMBEDDED_FILENAME: It's generally not useful to have the filename in the file
+#608: FILE: samples/bpf/Makefile.rfs:2:
++# Standalone CO-RE sample: make -f samples/bpf/Makefile.rfs
+
+WARNING:VOLATILE: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#665: FILE: samples/bpf/rfs_policy.bpf.c:9:
++const volatile __u32 mode;
+
+CHECK:BIT_MACRO: Prefer using the BIT macro
+#1020: FILE: samples/bpf/rfs_policy.h:27:
++#define RFS_CTX_APP_CPU_ONLINE (1U << 1)
+
+CHECK:BIT_MACRO: Prefer using the BIT macro
+#1021: FILE: samples/bpf/rfs_policy.h:28:
++#define RFS_CTX_ACTIVE_CPU_ONLINE (1U << 2)
+
+WARNING:VOLATILE: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#1603: FILE: tools/testing/selftests/bpf/rfs/test_rfs.bpf.c:8:
++const volatile __u32 result;
+
+total: 0 errors, 5 warnings, 2 checks, 2045 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/tmp/rfs-commits-4g16e3ao/series.diff has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

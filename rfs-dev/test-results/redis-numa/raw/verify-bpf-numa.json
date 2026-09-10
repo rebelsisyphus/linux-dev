@@ -1,0 +1,15 @@
+{
+  "mode": "bpf-numa",
+  "tcp_rx_skb_counts": [
+    1008,
+    0,
+    0,
+    0,
+    0,
+    873051,
+    0,
+    0
+  ],
+  "expected_cpu": 5,
+  "on_expected_percent": 99.88467597725096
+}

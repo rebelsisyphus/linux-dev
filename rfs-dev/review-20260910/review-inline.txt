@@ -1,0 +1,18 @@
+commit 9f3cd6a8fd249686dd175723ee7412dfb81160c6
+Author: Dong Chenchen <superdcc97@163.com>
+
+docs: networking: Describe BPF CPU selection for RFS
+
+This review covers the four-commit programmable RFS series ending here.
+No confirmed regressions were found in the reviewed source paths.
+
+The rebuilt sample and selftests pass all 22 cases on the existing debug
+kernel in an isolated eight-vCPU test-kernel VM. Additional probes pass
+permission, link replacement, device move and namespace lifetime checks.
+
+Hardware aRFS, multi-queue stress, concurrent CPU hotplug with traffic and
+packet ordering before TCP reassembly still need separate validation.
+The existing virtual-NUMA benchmark does not establish physical NUMA
+locality gains. Detailed scope, evidence and limitations are recorded in
+rfs-dev/review-20260910/report.md and audit.txt.
+

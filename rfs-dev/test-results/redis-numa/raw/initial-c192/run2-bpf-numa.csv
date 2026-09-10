@@ -1,0 +1,2 @@
+"test","rps","avg_latency_ms","min_latency_ms","p50_latency_ms","p95_latency_ms","p99_latency_ms","max_latency_ms"
+"GET rfs-key","1332356.25","1.117","0.072","1.071","1.719","2.143","8.575"

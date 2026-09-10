@@ -1,0 +1,59 @@
+Linux sisyphus 7.2.0-rfs-bpf+ #296 SMP PREEMPT_DYNAMIC Mon Sep  7 12:27:25 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+0-3
+4-7
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+bond0            DOWN           
+dummy0           DOWN           
+enp0s4           UP             192.0.2.2/30 fe80::5054:ff:fe7f:1/64 
+enp0s3           UP             10.0.2.15/24 metric 100 fec0::5054:ff:fe12:3456/64 fe80::5054:ff:fe12:3456/64 
+gre0@NONE        DOWN           
+gretap0@NONE     DOWN           
+erspan0@NONE     DOWN           
+ip6tnl0@NONE     DOWN           
+ip6gre0@NONE     DOWN           
+            CPU0       CPU1       CPU2       CPU3       CPU4       CPU5       CPU6       CPU7       
+   0:        180          0          0          0          0          0          0          0  IO-APIC                  2-edge      timer
+   1:          0         13          0          0          0          0          0          0  IO-APIC                  1-edge      i8042
+   4:        349          0          0          0          0          0          0          0  IO-APIC                  4-edge      ttyS0
+   8:          0          0          1          0          0          0          0          0  IO-APIC                  8-edge      rtc0
+   9:          0          0          0          0          0          0          0          0  IO-APIC                  9-fasteoi   acpi
+  12:        125          0          0          0          0          0          0          0  IO-APIC                 12-edge      i8042
+  16:          0          0          0          0          0          0          0          0  IO-APIC                 16-fasteoi   i801_smbus
+  23:          0          0          0          0        299          0          0          0  IO-APIC                 23-fasteoi   enp0s3
+  24:          0          0       1885          0          0          0          0          0  PCI-MSI-0000:00:1f.2     0-edge      ahci[0000:00:1f.2]
+  25:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:04.0    0-edge      virtio1-config
+  26:          0          0          0          0          3          0          0          0  PCI-MSIX-0000:00:04.0    1-edge      virtio1-input.0
+  27:          0          0          0          0          0          9          0          0  PCI-MSIX-0000:00:04.0    2-edge      virtio1-output.0
+  28:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:02.0    0-edge      virtio0-config
+  29:          0          0          0        102          0          0          0          0  PCI-MSIX-0000:00:02.0    1-edge      virtio0-requests
+ NMI:          0          0          0          0          0          0          0          0  Non-maskable interrupts
+ LOC:      10953      11277      14787      11867      15228      12975      11940      11876  Local timer interrupts
+ PMI:          0          0          0          0          0          0          0          0  Performance monitoring interrupts
+ IWI:         74         14         10         17        116         63         34         56  IRQ work interrupts
+ RES:        113        115         95        110        153        155        132        133  Rescheduling interrupts
+ CAL:       4765       2655       1651       1790       2390       2387       2448       1802  Function call interrupts
+ TLB:         99         79         92         84         89        434         81         92  TLB shootdowns
+ TRM:          0          0          0          0          0          0          0          0  Thermal event interrupts
+ THR:          0          0          0          0          0          0          0          0  Threshold APIC interrupts
+ DFR:          0          0          0          0          0          0          0          0  Deferred Error APIC interrupts
+ MCE:          0          0          0          0          0          0          0          0  Machine check exceptions
+ MCP:          1          1          1          1          1          1          1          1  Machine check polls
+ HYP:          1          1          1          1          1          1          1          1  Hypervisor callback interrupts
+/usr/bin/python3
+/usr/sbin/ethtool
+/usr/bin/gcc
+ldd (Ubuntu GLIBC 2.39-0ubuntu8) 2.39
+RFS performance VM ready

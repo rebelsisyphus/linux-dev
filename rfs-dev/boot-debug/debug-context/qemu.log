@@ -1,0 +1,6 @@
+2026-09-07 12:20:05: Kernel panic detected!
+
+=== Panic details ===
+[    6.716618] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000009
+[    6.731428] Kernel Offset: 0x1ee00000 from 0xffffffff81000000 (relocation range: 0xffffffff80000000-0xffffffffbfffffff)
+[    6.733140] ---[ end Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000009 ]---

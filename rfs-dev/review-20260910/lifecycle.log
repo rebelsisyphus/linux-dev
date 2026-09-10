@@ -1,0 +1,16 @@
+PASS devices found
+PASS topology load
+PASS three policy objects opened
+PASS prepare a
+PASS prepare b
+PASS prepare different device
+PASS attach without effective CAP_NET_ADMIN: EPERM
+PASS authorized attach
+PASS duplicate device: EBUSY
+PASS update without effective CAP_NET_ADMIN: EPERM
+PASS update to different device: EINVAL
+PASS wrong expected-old map: EPERM
+PASS valid expected-old update
+PASS detach after update
+PASS old map reusable after detach
+PASS detach reused map

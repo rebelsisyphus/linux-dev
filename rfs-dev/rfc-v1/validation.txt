@@ -1,0 +1,9 @@
+Cover: RFC net-next 0/4, current Redis benchmark, complete headers and no placeholders.
+Patch 1/4: e37739322a0c, patch-id matches, replies to cover.
+Patch 2/4: ba5347a259ea, patch-id matches, replies to cover.
+Patch 3/4: 75c47d5b969c, patch-id matches, replies to cover.
+Patch 4/4: 9f3cd6a8fd24, patch-id matches, replies to cover.
+Cover body: ASCII, lines <=75 columns; actual base-commit retained.
+All four commit trees match the pre-benchmark series; messages refreshed.
+12 Redis trials validated; exact conditions, ranges and virtual NUMA limits recorded.
+Diagram sources unchanged; no kernel/sample source edits. Local draft only.

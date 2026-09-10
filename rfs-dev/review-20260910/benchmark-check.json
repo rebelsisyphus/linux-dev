@@ -1,0 +1,11 @@
+{
+  "baseline": 1354738.25,
+  "rfs": 1088731.62,
+  "rps": 1441233.75,
+  "bpf-numa": 1438331.62,
+  "bpf_vs_rfs_pct": 32.110760225738645,
+  "bpf_vs_rps_pct": -0.20136428251141814,
+  "runs": 12,
+  "all_commands_20m": true,
+  "all_errors_zero": true
+}

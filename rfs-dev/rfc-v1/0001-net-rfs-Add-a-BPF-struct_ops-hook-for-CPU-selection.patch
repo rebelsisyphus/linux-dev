@@ -1,0 +1,539 @@
+From e37739322a0c0cbaf9d5b1a7dd7e9dc323596a88 Mon Sep 17 00:00:00 2001
+Message-ID: <e37739322a0c0cbaf9d5b1a7dd7e9dc323596a88.1788775763.git.superdcc97@163.com>
+In-Reply-To: <cover.1788775763.git.superdcc97@163.com>
+References: <cover.1788775763.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 7 Sep 2026 14:26:31 +0800
+Subject: [RFC net-next 1/4] net: rfs: Add a BPF struct_ops hook for CPU
+ selection
+
+Native RFS derives the desired receive CPU from application CPU hints in
+the socket flow table. There is no policy interface for choosing a
+different CPU, such as another CPU in the same NUMA node.
+
+Add a per-device bpf_rfs_ops policy under CONFIG_BPF_RFS. Invoke
+select_cpu() after the native flow lookup and before the existing
+migration check. Provide read-only scalar context and encode DEFAULT as
+zero and an explicit CPU as CPU + 1. Validate explicit results and fall
+back to the native hint when the requested CPU is invalid or offline.
+
+Keep the native application hint, active CPU, queue progress and aRFS
+state on their existing paths. Both policy proposals and fallback
+decisions pass through the native migration check. Use a static key when
+no policy is attached and a compile-time stub when the option is
+disabled.
+
+Require link-based attachment and CAP_NET_ADMIN in the target network
+namespace. Serialize registration and replacement with RTNL, publish
+policies with RCU, and wait for readers before returning from update or
+unregister. Deactivate bindings on NETDEV_UNREGISTER without retaining
+the device or entering the struct_ops update mutex from the notifier. An
+inactive link remains inspectable until released and rejects further
+updates.
+
+Tested with an x86_64 kernel build and boot using KASAN, lockdep and RCU
+checking. Building net/core/dev.o with CONFIG_BPF_RFS disabled also
+passes, with no bpf_rfs references in the object. The accompanying
+selftests cover receive CPU selection and link lifecycle behavior.
+
+Preliminary full-series Redis benchmark (three runs per mode): use
+test-kernel with QEMU/KVM, eight vCPUs, two virtual NUMA nodes and one
+virtio-net queue over TAP/vhost-net. Pin RX/TX IRQs to CPU0/node0 and
+Redis CPU/memory to CPU4/node1. Native RFS follows CPU4; RPS and the
+NUMA sample with candidate CPU5 use CPU5/node1. Enable RFS tables of
+32768 global/4096 per queue for the two RFS modes. RPS uses mask 0x20
+with RFS disabled. Disable KASAN/lockdep and enable IRQ time accounting.
+
+Redis 7.2.5, one I/O thread, libc allocator, no persistence, 64-byte GET:
+redis-benchmark --threads 3 -c 384 -P 8 -n 20000000, after 500000 warmup
+requests. Rotate mode order and keep the load generator on separate host
+cores. QPS and per-CPU busy percentages below are medians of three runs:
+
+  Mode                  QPS   CPU0   CPU4   CPU5
+  No RPS/RFS        1354738   28.4   99.9    0.0
+  Native RFS        1088732   19.4   99.7    0.1
+  RPS CPU5          1441234   23.6   99.5   18.8
+  BPF NUMA CPU5     1438332   24.8   99.6   18.5
+
+QPS min/max across the three runs:
+  baseline   1354646-1354922
+  rfs        1051469-1089384
+  rps        1354463-1442377
+  bpf-numa   1331558-1442897
+
+BPF NUMA changes QPS by +32.1% versus native RFS and -0.2% versus
+static RPS. CPU4 is 99.4-99.9% busy in every timed run, using the central
+half of per-second samples. Separate TCP receive probes put at least
+99.88% of skbs on the intended CPUs and are detached before timing;
+RX/TX IRQ deltas remain on CPU0. There are no GET misses or error replies.
+
+The AMD Ryzen 7 9700X host runs WSL2 and has one physical NUMA node.
+These virtual-topology measurements do not establish physical NUMA
+locality gains or isolated callback cost. Static RPS is a control for
+the same fixed CPU mapping; small differences need more samples.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/netdevice.h |   4 +
+ include/net/bpf_rfs.h     |  61 ++++++++
+ net/Kconfig               |   9 ++
+ net/core/Makefile         |   1 +
+ net/core/bpf_rfs.c        | 290 ++++++++++++++++++++++++++++++++++++++
+ net/core/dev.c            |   7 +-
+ 6 files changed, 371 insertions(+), 1 deletion(-)
+ create mode 100644 include/net/bpf_rfs.h
+ create mode 100644 net/core/bpf_rfs.c
+
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index 87cafc932e9e..5bb7e032abfb 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -77,6 +77,7 @@ struct udp_tunnel_info;
+ struct udp_tunnel_nic_info;
+ struct udp_tunnel_nic;
+ struct bpf_prog;
++struct bpf_rfs_ops;
+ struct xdp_buff;
+ struct xdp_frame;
+ struct xdp_metadata_ops;
+@@ -2228,6 +2229,9 @@ struct net_device {
+ #endif
+ #ifdef CONFIG_NET_XGRESS
+ 	struct bpf_mprog_entry __rcu *tcx_ingress;
++#endif
++#ifdef CONFIG_BPF_RFS
++	struct bpf_rfs_ops __rcu *bpf_rfs_ops;
+ #endif
+ 	__cacheline_group_end(net_device_read_rx);
+ 
+diff --git a/include/net/bpf_rfs.h b/include/net/bpf_rfs.h
+new file mode 100644
+index 000000000000..594df4a9e96f
+--- /dev/null
++++ b/include/net/bpf_rfs.h
+@@ -0,0 +1,61 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _NET_BPF_RFS_H
++#define _NET_BPF_RFS_H
++
++#include <linux/static_key.h>
++#include <linux/types.h>
++
++struct net_device;
++struct sk_buff;
++
++enum bpf_rfs_ctx_flags {
++	BPF_RFS_RX_QUEUE_RECORDED = 1U << 0,
++	BPF_RFS_APP_CPU_ONLINE = 1U << 1,
++	BPF_RFS_ACTIVE_CPU_ONLINE = 1U << 2,
++};
++
++/* Read-only, advisory snapshots; flow_hash identifies an RFS slot, not a socket. */
++struct bpf_rfs_ctx {
++	u32 flow_hash;
++	u32 ifindex;
++	u32 rx_queue;
++	u32 rx_cpu;
++	s32 app_cpu_hint;
++	s32 active_cpu;
++	u32 nr_cpu_ids;
++	u32 flags;
++};
++
++/* Return DEFAULT or CPU + 1. The native RFS migration check still applies. */
++#define BPF_RFS_DEFAULT 0U
++#define BPF_RFS_CPU(cpu) ((u32)(cpu) + 1U)
++
++struct bpf_rfs_ops {
++	u32 ifindex;
++	u32 flags;
++	char name[16];
++	u32 (*select_cpu)(const struct bpf_rfs_ctx *ctx);
++};
++
++#ifdef CONFIG_BPF_RFS
++DECLARE_STATIC_KEY_FALSE(bpf_rfs_enabled);
++
++u32 bpf_rfs_select_cpu(struct net_device *dev, struct sk_buff *skb,
++		       u32 hash, u32 app_cpu, u32 active_cpu);
++
++static inline u32 bpf_rfs_cpu(struct net_device *dev, struct sk_buff *skb,
++			      u32 hash, u32 app_cpu, u32 active_cpu)
++{
++	if (static_branch_unlikely(&bpf_rfs_enabled))
++		return bpf_rfs_select_cpu(dev, skb, hash, app_cpu, active_cpu);
++	return app_cpu;
++}
++#else
++static inline u32 bpf_rfs_cpu(struct net_device *dev, struct sk_buff *skb,
++			      u32 hash, u32 app_cpu, u32 active_cpu)
++{
++	return app_cpu;
++}
++#endif
++
++#endif /* _NET_BPF_RFS_H */
+diff --git a/net/Kconfig b/net/Kconfig
+index e38477393551..6b342a827e45 100644
+--- a/net/Kconfig
++++ b/net/Kconfig
+@@ -310,6 +310,15 @@ config RPS
+ 	  Software receive side packet steering (RPS) distributes the
+ 	  load of received packet processing across multiple CPUs.
+ 
++config BPF_RFS
++	bool "BPF CPU selection for Receive Flow Steering"
++	depends on RPS && BPF_SYSCALL && BPF_JIT && DEBUG_INFO_BTF
++	help
++	  Allow a BPF struct_ops policy to select the desired CPU for native
++	  RFS on a network device. Native RFS continues to manage queue state
++	  and migration. Requires an architecture supporting BPF trampolines.
++	  Policies are attached and updated using BPF links.
++
+ config RFS_ACCEL
+ 	bool "Hardware acceleration of RFS"
+ 	depends on RPS
+diff --git a/net/core/Makefile b/net/core/Makefile
+index c20e520358b8..6b206b614b9e 100644
+--- a/net/core/Makefile
++++ b/net/core/Makefile
+@@ -44,6 +44,7 @@ obj-$(CONFIG_FAILOVER) += failover.o
+ obj-$(CONFIG_NET_SOCK_MSG) += skmsg.o
+ obj-$(CONFIG_BPF_SYSCALL) += sock_map.o
+ obj-$(CONFIG_BPF_SYSCALL) += bpf_sk_storage.o
++obj-$(CONFIG_BPF_RFS) += bpf_rfs.o
+ ifdef CONFIG_INET
+ obj-$(CONFIG_BPF_SYSCALL) += bpf_ksock.o
+ endif
+diff --git a/net/core/bpf_rfs.c b/net/core/bpf_rfs.c
+new file mode 100644
+index 000000000000..0fda06e2ae6e
+--- /dev/null
++++ b/net/core/bpf_rfs.c
+@@ -0,0 +1,290 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Programmable desired-CPU selection for native RFS. */
++
++#include <linux/bpf.h>
++#include <linux/bpf_verifier.h>
++#include <linux/btf.h>
++#include <linux/btf_ids.h>
++#include <linux/filter.h>
++#include <linux/init.h>
++#include <linux/netdevice.h>
++#include <linux/nsproxy.h>
++#include <linux/rtnetlink.h>
++#include <linux/slab.h>
++#include <net/bpf_rfs.h>
++#include <net/rps.h>
++
++DEFINE_STATIC_KEY_FALSE(bpf_rfs_enabled);
++
++/*
++ * RTNL protects this list and all binding fields. No device reference is held:
++ * NETDEV_UNREGISTER clears dev before its storage or namespace can change.
++ * An inactive binding lives until link release, without retaining the device.
++ */
++struct bpf_rfs_binding {
++	struct list_head list;
++	struct bpf_link *link;
++	struct bpf_rfs_ops *ops;
++	struct net_device *dev;
++};
++
++static LIST_HEAD(bpf_rfs_bindings);
++
++u32 bpf_rfs_select_cpu(struct net_device *dev, struct sk_buff *skb,
++		       u32 hash, u32 app_cpu, u32 active_cpu)
++{
++	const struct bpf_rfs_ops *ops;
++	struct bpf_rfs_ctx ctx = {
++		.flow_hash = hash,
++		.ifindex = dev->ifindex,
++		.rx_cpu = raw_smp_processor_id(),
++		.app_cpu_hint = app_cpu,
++		.active_cpu = active_cpu < nr_cpu_ids ? active_cpu : -1,
++		.nr_cpu_ids = nr_cpu_ids,
++	};
++	u32 cpu;
++
++	ops = rcu_dereference(dev->bpf_rfs_ops);
++	if (!ops || app_cpu >= nr_cpu_ids || !cpu_possible(app_cpu))
++		return app_cpu;
++
++	if (skb_rx_queue_recorded(skb)) {
++		ctx.rx_queue = skb_get_rx_queue(skb);
++		ctx.flags |= BPF_RFS_RX_QUEUE_RECORDED;
++	}
++	if (cpu_online(app_cpu))
++		ctx.flags |= BPF_RFS_APP_CPU_ONLINE;
++	if (active_cpu < nr_cpu_ids && cpu_online(active_cpu))
++		ctx.flags |= BPF_RFS_ACTIVE_CPU_ONLINE;
++
++	cpu = ops->select_cpu(&ctx);
++	if (!cpu)
++		return app_cpu;
++	cpu--;
++	if (cpu >= nr_cpu_ids || cpu >= RPS_NO_CPU ||
++	    !cpu_possible(cpu) || !cpu_online(cpu))
++		return app_cpu;
++
++	return cpu;
++}
++
++static bool bpf_rfs_in_use(const struct bpf_rfs_ops *ops)
++{
++	struct bpf_rfs_binding *binding;
++
++	list_for_each_entry(binding, &bpf_rfs_bindings, list)
++		if (binding->ops == ops)
++			return true;
++	return false;
++}
++
++static int bpf_rfs_reg(void *kdata, struct bpf_link *link)
++{
++	struct net *net = current->nsproxy->net_ns;
++	struct bpf_rfs_ops *ops = kdata;
++	struct bpf_rfs_binding *binding;
++	struct net_device *dev;
++	int err = 0;
++
++	/* Only link-based attachments have the required lifetime and update API. */
++	if (!link)
++		return -EOPNOTSUPP;
++	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
++		return -EPERM;
++	binding = kzalloc_obj(*binding);
++	if (!binding)
++		return -ENOMEM;
++
++	rtnl_lock();
++	dev = __dev_get_by_index(net, ops->ifindex);
++	if (!dev || dev->reg_state != NETREG_REGISTERED) {
++		err = -ENODEV;
++		goto out;
++	}
++	if (rcu_access_pointer(dev->bpf_rfs_ops) || bpf_rfs_in_use(ops)) {
++		err = -EBUSY;
++		goto out;
++	}
++	binding->dev = dev;
++	binding->ops = ops;
++	binding->link = link;
++	list_add(&binding->list, &bpf_rfs_bindings);
++	static_branch_inc(&bpf_rfs_enabled);
++	rcu_assign_pointer(dev->bpf_rfs_ops, ops);
++out:
++	rtnl_unlock();
++	if (err)
++		kfree(binding);
++	return err;
++}
++
++static void bpf_rfs_deactivate(struct bpf_rfs_binding *binding)
++{
++	if (!binding->dev)
++		return;
++	rcu_assign_pointer(binding->dev->bpf_rfs_ops, NULL);
++	binding->dev = NULL;
++	static_branch_dec(&bpf_rfs_enabled);
++}
++
++static void bpf_rfs_unreg(void *kdata, struct bpf_link *link)
++{
++	struct bpf_rfs_binding *binding, *found = NULL;
++
++	rtnl_lock();
++	list_for_each_entry(binding, &bpf_rfs_bindings, list) {
++		if (binding->link != link)
++			continue;
++		bpf_rfs_deactivate(binding);
++		list_del(&binding->list);
++		found = binding;
++		break;
++	}
++	rtnl_unlock();
++	/* The struct_ops core may release the trampoline after we return. */
++	synchronize_rcu();
++	kfree(found);
++}
++
++static int bpf_rfs_update(void *kdata, void *old_kdata, struct bpf_link *link)
++{
++	struct bpf_rfs_ops *ops = kdata;
++	struct bpf_rfs_binding *binding;
++	struct net_device *dev;
++	int err = -ENOLINK;
++
++	rtnl_lock();
++	list_for_each_entry(binding, &bpf_rfs_bindings, list) {
++		if (binding->link != link)
++			continue;
++		dev = binding->dev;
++		if (!dev) {
++			err = -ENODEV;
++			break;
++		}
++		if (binding->ops != old_kdata || ops->ifindex != dev->ifindex) {
++			err = -EINVAL;
++			break;
++		}
++		if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN)) {
++			err = -EPERM;
++			break;
++		}
++		if (bpf_rfs_in_use(ops)) {
++			err = -EBUSY;
++			break;
++		}
++		binding->ops = ops;
++		rcu_assign_pointer(dev->bpf_rfs_ops, ops);
++		err = 0;
++		break;
++	}
++	rtnl_unlock();
++	if (!err)
++		synchronize_rcu();
++	return err;
++}
++
++static int bpf_rfs_netdev_event(struct notifier_block *nb, unsigned long event,
++				void *ptr)
++{
++	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
++	struct bpf_rfs_binding *binding;
++
++	if (event != NETDEV_UNREGISTER)
++		return NOTIFY_DONE;
++	list_for_each_entry(binding, &bpf_rfs_bindings, list)
++		if (binding->dev == dev)
++			bpf_rfs_deactivate(binding);
++	/* Do not call link detach here: RTNL nests inside struct_ops update_mutex. */
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block bpf_rfs_netdev_notifier = {
++	.notifier_call = bpf_rfs_netdev_event,
++};
++
++static int bpf_rfs_check_member(const struct btf_type *t,
++				const struct btf_member *member,
++				const struct bpf_prog *prog)
++{
++	return prog->sleepable ? -EINVAL : 0;
++}
++
++static int bpf_rfs_init_member(const struct btf_type *t,
++			       const struct btf_member *member,
++			       void *kdata, const void *udata)
++{
++	const struct bpf_rfs_ops *uops = udata;
++	struct bpf_rfs_ops *ops = kdata;
++	u32 off = __btf_member_bit_offset(t, member) / 8;
++
++	switch (off) {
++	case offsetof(struct bpf_rfs_ops, ifindex):
++		if (!uops->ifindex || uops->ifindex > INT_MAX)
++			return -EINVAL;
++		ops->ifindex = uops->ifindex;
++		return 1;
++	case offsetof(struct bpf_rfs_ops, name):
++		if (bpf_obj_name_cpy(ops->name, uops->name, sizeof(ops->name)) <= 0)
++			return -EINVAL;
++		return 1;
++	}
++	/* The core rejects nonzero unsupported fields, including flags. */
++	return 0;
++}
++
++static int bpf_rfs_validate(void *kdata)
++{
++	struct bpf_rfs_ops *ops = kdata;
++
++	return ops->select_cpu ? 0 : -EINVAL;
++}
++
++static u32 bpf_rfs_default(const struct bpf_rfs_ctx *ctx)
++{
++	return BPF_RFS_DEFAULT;
++}
++
++static const struct bpf_verifier_ops bpf_rfs_verifier_ops = {
++	.get_func_proto = bpf_base_func_proto,
++	.is_valid_access = bpf_tracing_btf_ctx_access,
++	/* No btf_struct_access override: kernel BTF objects remain read-only. */
++};
++
++static struct bpf_rfs_ops bpf_rfs_cfi_stubs = {
++	.select_cpu = bpf_rfs_default,
++};
++
++static int bpf_rfs_ops_init(struct btf *btf)
++{
++	return 0;
++}
++
++static struct bpf_struct_ops bpf_rfs_struct_ops = {
++	.init = bpf_rfs_ops_init,
++	.verifier_ops = &bpf_rfs_verifier_ops,
++	.reg = bpf_rfs_reg,
++	.unreg = bpf_rfs_unreg,
++	.update = bpf_rfs_update,
++	.check_member = bpf_rfs_check_member,
++	.init_member = bpf_rfs_init_member,
++	.validate = bpf_rfs_validate,
++	.name = "bpf_rfs_ops",
++	.cfi_stubs = &bpf_rfs_cfi_stubs,
++	.owner = THIS_MODULE,
++};
++
++static int __init bpf_rfs_init(void)
++{
++	int err;
++
++	err = register_netdevice_notifier(&bpf_rfs_netdev_notifier);
++	if (err)
++		return err;
++	err = register_bpf_struct_ops(&bpf_rfs_struct_ops, bpf_rfs_ops);
++	if (err)
++		unregister_netdevice_notifier(&bpf_rfs_netdev_notifier);
++	return err;
++}
++late_initcall(bpf_rfs_init);
+diff --git a/net/core/dev.c b/net/core/dev.c
+index 38336858c168..f9f744305d7c 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -162,6 +162,7 @@
+ #include <net/page_pool/helpers.h>
+ #include <net/page_pool/memory_provider.h>
+ #include <net/rps.h>
++#include <net/bpf_rfs.h>
+ #include <linux/phy_link_topology.h>
+ 
+ #include "dev.h"
+@@ -5222,6 +5223,7 @@ static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
+ 		flow_table = rps_tag_to_table(q_tag_ptr);
+ 		rflow = flow_table + flow_id;
+ 		tcpu = rflow->cpu;
++		next_cpu = bpf_rfs_cpu(dev, skb, hash, next_cpu, tcpu);
+ 
+ 		/*
+ 		 * If the desired CPU (where last recvmsg was done) is
+@@ -13347,7 +13349,10 @@ static void __init net_dev_struct_check(void)
+ #ifdef CONFIG_NET_XGRESS
+ 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, tcx_ingress);
+ #endif
+-	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 92);
++#ifdef CONFIG_BPF_RFS
++	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, bpf_rfs_ops);
++#endif
++	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 100);
+ }
+ 
+ /*
+-- 
+2.43.0
+

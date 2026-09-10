@@ -1,0 +1,340 @@
+{
+  "agent_id": "agent-0",
+  "agent_type": "code",
+  "theory_id": "T1",
+  "status": "confirmed",
+  "summary": "The first 7.2.0-rfs-bpf+ #295 boot panic is caused by bpf_rfs_struct_ops omitting its mandatory .init callback. At the exact reported bpf_struct_ops_desc_init+0x6cc return point, the original vmlinux calls the pointer at descriptor offset 8, which is struct bpf_struct_ops.init. The compiled descriptor contains eight zero bytes there, and its address plus the reported KASLR offset equals crash R12. RAX and RIP are both zero. This identifies the missing callback directly, rather than merely inferring it from the trace. The BTF lookups and member validation were already completed; neither wrong descriptor identity nor another callback explains this callsite. Add a separate int callback taking struct btf * and returning 0, and assign it to .init. Source excerpts and binary evidence below were captured before the root agent's fix/rebuild.",
+  "scope": {
+    "permitted": "Read source, exact built vmlinux and immutable bug context; write only agent-0-result.json and agent-0-status.txt.",
+    "performed": "No source edits, builds, VM execution, reproducer examination or git history search.",
+    "tool_fallback": "No semcode/tool-search tools were present in ALL_TOOLS. Source loaded with rg and numbered sed output; gdb was absent, so binary analysis used objdump, nm, readelf and addr2line.",
+    "guides_loaded": [
+      "technical-patterns.md",
+      "subsystem/subsystem.md",
+      "subsystem/bpf.md",
+      "subsystem/build.md",
+      "subsystem/networking-core.md",
+      "subsystem/locking.md",
+      "subsystem/rcu.md",
+      "subsystem/mm-alloc.md",
+      "subsystem/hid.md",
+      "agent/debug-code.md",
+      "debugging.md"
+    ],
+    "trigger_summary": "Networking Core matched net/core/bpf_rfs.c; BPF matched struct_ops registration; Build System explicitly assigned; MM Allocation matched registration allocations; locking/RCU guides loaded for lifecycle context; HID matched the comparable hid_bpf_ops_init example. Other index rows do not affect this missing initialization callback theory."
+  },
+  "functions_loaded": [
+    {
+      "name": "bpf_struct_ops_desc_init",
+      "file": "kernel/bpf/bpf_struct_ops.c",
+      "lines": "358-509",
+      "key_observations": [
+        "Obtains st_ops directly from descriptor.",
+        "Checks BTF identity, wrapper type and member prototypes before calling st_ops->init(btf) without a NULL check at line 496.",
+        "Error cleanup is after callback execution and cannot catch instruction fetch at zero."
+      ]
+    },
+    {
+      "name": "__register_bpf_struct_ops",
+      "file": "kernel/bpf/btf.c",
+      "lines": "9976-10004",
+      "key_observations": [
+        "Gets valid BTF and log, then calls btf_add_struct_ops with the same supplied st_ops.",
+        "Does not fill any missing .init callback."
+      ]
+    },
+    {
+      "name": "btf_add_struct_ops",
+      "file": "kernel/bpf/btf.c",
+      "lines": "9891-9930",
+      "key_observations": [
+        "Writes supplied st_ops into table slot at line 9921.",
+        "Immediately passes that slot to bpf_struct_ops_desc_init at line 9923.",
+        "Table count increments only after successful initialization."
+      ]
+    },
+    {
+      "name": "bpf_rfs_init",
+      "file": "net/core/bpf_rfs.c",
+      "lines": "272-284",
+      "key_observations": [
+        "late_initcall registers netdevice notifier, then registers &bpf_rfs_struct_ops.",
+        "Boot failure occurs on registration before this function returns.",
+        "Existing initcall function has incompatible signature for the .init callback and would recursively register if reused."
+      ]
+    },
+    {
+      "name": "bpf_struct_ops_supported",
+      "file": "kernel/bpf/bpf_struct_ops.c",
+      "lines": "351-356",
+      "key_observations": [
+        "Checks CFI stub presence for individual operations; not an initializer default."
+      ]
+    },
+    {
+      "name": "bpf_rfs_init_member",
+      "file": "net/core/bpf_rfs.c",
+      "lines": "214-235",
+      "key_observations": [
+        "Initializes ifindex/name in each userspace map value.",
+        "Does not initialize the subsystem descriptor .init field."
+      ]
+    },
+    {
+      "name": "bpf_rfs_validate",
+      "file": "net/core/bpf_rfs.c",
+      "lines": "237-242",
+      "key_observations": [
+        "Validates runtime policy select_cpu presence; unrelated to descriptor bootstrap callback."
+      ]
+    },
+    {
+      "name": "bpf_rfs_default",
+      "file": "net/core/bpf_rfs.c",
+      "lines": "244-247",
+      "key_observations": [
+        "CFI stub for select_cpu returns BPF_RFS_DEFAULT.",
+        "Has different purpose and signature from struct_ops .init."
+      ]
+    },
+    {
+      "name": "do_one_initcall",
+      "file": "init/main.c",
+      "lines": "1347-1374",
+      "key_observations": [
+        "Directly invokes fn() at line 1357; no wrapper initializes descriptor callbacks.",
+        "The crash trace confirms bpf_rfs_init was not blacklisted."
+      ]
+    },
+    {
+      "name": "bpf_dummy_init",
+      "file": "net/bpf/bpf_dummy_struct_ops.c",
+      "lines": "205-209",
+      "key_observations": [
+        "Comparable subsystem supplies correctly typed init callback and returns 0; descriptor .init assignment exists at line 309."
+      ]
+    },
+    {
+      "name": "hid_bpf_ops_init",
+      "file": "drivers/hid/bpf/hid_bpf_struct_ops.c",
+      "lines": "25-29",
+      "key_observations": [
+        "Comparable device-bound struct_ops supplies correctly typed init callback and returns 0; descriptor .init assignment exists at line 300."
+      ]
+    }
+  ],
+  "types_loaded": [
+    {
+      "name": "bpf_struct_ops",
+      "file": "include/linux/bpf.h",
+      "lines": "2102-2119",
+      "key_observations": [
+        "First member verifier_ops is a pointer; next member init is int (*)(struct btf *), at offset 8 on this x86_64 build.",
+        "The compiled faulting load is exactly that second pointer."
+      ]
+    },
+    {
+      "name": "bpf_struct_ops_desc",
+      "file": "include/linux/bpf.h",
+      "lines": "2134-2144",
+      "key_observations": [
+        "st_ops is its first member and is set to supplied bpf_rfs_struct_ops before initialization."
+      ]
+    },
+    {
+      "name": "bpf_rfs_ops",
+      "file": "include/net/bpf_rfs.h",
+      "lines": "33-39",
+      "key_observations": [
+        "BPF-visible policy type has ifindex, flags, name and select_cpu; it is separate from framework bpf_struct_ops."
+      ]
+    },
+    {
+      "name": "bpf_rfs_ctx",
+      "file": "include/net/bpf_rfs.h",
+      "lines": "17-27",
+      "key_observations": [
+        "Read-only scalar context; its contents are not involved in this boot-time registration crash."
+      ]
+    }
+  ],
+  "binary_evidence": {
+    "vmlinux": "/home/sisyphus/code/linux/vmlinux",
+    "build_id": "defb294bfd7ef0093b57266326729f5bf315625a",
+    "kernel_version_from_bug": "7.2.0-rfs-bpf+ #295 SMP PREEMPT_DYNAMIC",
+    "saved_before_rebuild": true,
+    "symbols": "ffffffff83d7c306 r __flags___register_bpf_struct_ops\nffffffff83d87924 r __kstrtab___register_bpf_struct_ops\nffffffff83d8a2c2 r __kstrtabns___register_bpf_struct_ops\nffffffff83d56890 r __ksymtab___register_bpf_struct_ops\nffffffff81602f10 0000000000000010 T __pfx___register_bpf_struct_ops\nffffffff85934ff0 0000000000000010 t __pfx_bpf_rfs_init\nffffffff8162f440 0000000000000010 T __pfx_bpf_struct_ops_desc_init\nffffffff81602f20 0000000000000292 T __register_bpf_struct_ops\nffffffff85935000 0000000000000045 t bpf_rfs_init\nffffffff8162f450 000000000000086f T bpf_struct_ops_desc_init\n\nDisplaying notes found in: .notes\n  Owner                Data size \tDescription\n  Linux                0x00000004\tfunc\n   description data: 00 00 00 00 \n  Linux                0x00000001\tOPEN\n   description data: 00 \n  GNU                  0x00000014\tNT_GNU_BUILD_ID (unique build ID bitstring)\n    Build ID: defb294bfd7ef0093b57266326729f5bf315625a\n",
+    "registration_disassembly": "include/linux/btf.h:540:int __register_bpf_struct_ops(struct bpf_struct_ops *st_ops);\nkernel/bpf/btf.c:9976:int __register_bpf_struct_ops(struct bpf_struct_ops *st_ops)\ninclude/linux/bpf.h:2207: * a struct_ops type instead of calling __register_bpf_struct_ops() directly.\ninclude/linux/bpf.h:2216:\t\t__register_bpf_struct_ops(st_ops);\t\t\t\\\n\nvmlinux:     file format elf64-x86-64\n\n\nDisassembly of section .text:\n\nDisassembly of section .data:\n\nDisassembly of section .init.text:\n\nffffffff85935000 <bpf_rfs_init>:\nffffffff85935000:\tf3 0f 1e fa          \tendbr64\nffffffff85935004:\t53                   \tpush   %rbx\nffffffff85935005:\t48 c7 c7 c0 b2 df 84 \tmov    $0xffffffff84dfb2c0,%rdi\nffffffff8593500c:\te8 4f 5f f5 fc       \tcall   ffffffff8288af60 <register_netdevice_notifier>\nffffffff85935011:\t89 c3                \tmov    %eax,%ebx\nffffffff85935013:\t85 c0                \ttest   %eax,%eax\nffffffff85935015:\t74 08                \tje     ffffffff8593501f <bpf_rfs_init+0x1f>\nffffffff85935017:\t89 d8                \tmov    %ebx,%eax\nffffffff85935019:\t5b                   \tpop    %rbx\nffffffff8593501a:\te9 91 a5 68 fd       \tjmp    ffffffff82fbf5b0 <__pi___x86_return_thunk>\nffffffff8593501f:\t48 c7 c7 40 ab df 84 \tmov    $0xffffffff84dfab40,%rdi\nffffffff85935026:\te8 f5 de cc fb       \tcall   ffffffff81602f20 <__register_bpf_struct_ops>\nffffffff8593502b:\t89 c3                \tmov    %eax,%ebx\nffffffff8593502d:\t85 c0                \ttest   %eax,%eax\nffffffff8593502f:\t74 e6                \tje     ffffffff85935017 <bpf_rfs_init+0x17>\nffffffff85935031:\t48 c7 c7 c0 b2 df 84 \tmov    $0xffffffff84dfb2c0,%rdi\nffffffff85935038:\te8 33 5e f5 fc       \tcall   ffffffff8288ae70 <unregister_netdevice_notifier>\nffffffff8593503d:\t89 d8                \tmov    %ebx,%eax\nffffffff8593503f:\t5b                   \tpop    %rbx\nffffffff85935040:\te9 6b a5 68 fd       \tjmp    ffffffff82fbf5b0 <__pi___x86_return_thunk>\n\nDisassembly of section .altinstr_aux:\n\nDisassembly of section .altinstr_replacement:\n\nDisassembly of section .exit.text:\n 71435: ffffffff84dfab40  1816 OBJECT  LOCAL  DEFAULT   15 bpf_rfs_struct_ops\n219808: ffffffff8162f450  2159 FUNC    GLOBAL DEFAULT    1 bpf_struct_ops_desc_init\n",
+    "callsite_disassembly": "ffffffff8162fb01:\t4c 8b 34 24          \tmov    (%rsp),%r14\nffffffff8162fb05:\t49 8d 7c 24 08       \tlea    0x8(%r12),%rdi\nffffffff8162fb0a:\te8 f1 78 15 00       \tcall   ffffffff81787400 <__asan_load8>\nffffffff8162fb0f:\t49 8b 44 24 08       \tmov    0x8(%r12),%rax\nffffffff8162fb14:\t4c 89 f7             \tmov    %r14,%rdi\nffffffff8162fb17:\te8 64 ee 98 01       \tcall   ffffffff82fbe980 <__x86_indirect_thunk_array>\nffffffff8162fb1c:\t89 c3                \tmov    %eax,%ebx\nffffffff8162fb1e:\t85 c0                \ttest   %eax,%eax\nffffffff8162fb20:\t0f 84 3a fb ff ff    \tje     ffffffff8162f660 <bpf_struct_ops_desc_init+0x210>\nffffffff8162fb26:\t48 8b 7c 24 40       \tmov    0x40(%rsp),%rdi\nffffffff8162fb2b:\te8 d0 78 15 00       \tcall   ffffffff81787400 <__asan_load8>\nffffffff8162fb30:\t49 8b 74 24 50       \tmov    0x50(%r12),%rsi\nffffffff8162fb35:\t48 c7 c7 00 ae 10 83 \tmov    $0xffffffff8310ae00,%rdi\nffffffff8162fb3c:\te8 cf 7a d8 ff       \tcall   ffffffff813b7610 <_printk>\nffffffff8162fb41:\teb 48                \tjmp    ffffffff8162fb8b <bpf_struct_ops_desc_init+0x73b>\nffffffff8162fb43:\t48 8b 7c 24 40       \tmov    0x40(%rsp),%rdi\nffffffff8162fb48:\t4c 8b 7c 24 60       \tmov    0x60(%rsp),%r15\nffffffff8162fb4d:\te8 ae 78 15 00       \tcall   ffffffff81787400 <__asan_load8>",
+    "descriptor_bytes_thunk_and_line_mapping": "\nvmlinux:     file format elf64-x86-64\n\nContents of section .data:\n ffffffff84dfab40 e0e65e83 ffffffff 00000000 00000000  ..^.............\n ffffffff84dfab50 40799482 ffffffff 807c9482 ffffffff  @y.......|......\n ffffffff84dfab60 807d9482 ffffffff 807b9482 ffffffff  .}.......{......\n ffffffff84dfab70 e0799482 ffffffff 80799482 ffffffff  .y.......y......\n ffffffff84dfab80 80b2df84 ffffffff 00000000 00000000  ................\n ffffffff84dfab90 a0e65e83 ffffffff                    ..^.....        \n\nvmlinux:     file format elf64-x86-64\n\n\nDisassembly of section .text:\n\nffffffff82fbe980 <__x86_indirect_thunk_array>:\nffffffff82fbe980:\te8 01 00 00 00       \tcall   ffffffff82fbe986 <__x86_indirect_thunk_array+0x6>\nffffffff82fbe985:\tcc                   \tint3\nffffffff82fbe986:\t48 89 04 24          \tmov    %rax,(%rsp)\nffffffff82fbe98a:\te9 21 0c 00 00       \tjmp    ffffffff82fbf5b0 <__pi___x86_return_thunk>\nffffffff82fbe98f:\t90                   \tnop\nffffffff82fbe990:\t66 66 2e 0f 1f 84 00 \tdata16 cs nopw 0x0(%rax,%rax,1)\nffffffff82fbe997:\t00 00 00 00 \nffffffff82fbe99b:\t0f 1f 44 00 00       \tnopl   0x0(%rax,%rax,1)\nbpf_struct_ops_desc_init\n/home/sisyphus/code/linux/kernel/bpf/bpf_struct_ops.c:496\nbpf_struct_ops_desc_init\n/home/sisyphus/code/linux/kernel/bpf/bpf_struct_ops.c:496\nbpf_rfs_init\n/home/sisyphus/code/linux/net/core/bpf_rfs.c:279\n",
+    "calculations": [
+      "0xffffffff8162f450 + 0x6cc = 0xffffffff8162fb1c (reported return address)",
+      "0xffffffff8162fb17 is +0x6c7 and is the 5-byte call through RAX thunk; the next instruction is +0x6cc.",
+      "0xffffffff84dfab40 + 0x1ee00000 = 0xffffffffa3bfab40 (exactly crash R12)",
+      "Descriptor bytes at 0xffffffff84dfab48 through 0xffffffff84dfab4f are zero (.init).",
+      "At 0xffffffff8162fb0f (+0x6bf), mov 0x8(%r12),%rax loads the zero .init pointer; crash RAX=0 and RIP=0 agree."
+    ]
+  },
+  "findings": [
+    {
+      "type": "evidence_for",
+      "description": "Mandatory callback is invoked without a presence check at the exact faulting source line.",
+      "code_snippets": [
+        {
+          "file": "kernel/bpf/bpf_struct_ops.c",
+          "function": "bpf_struct_ops_desc_init",
+          "line": 496,
+          "code": "if (st_ops->init(btf)) {\n\tpr_warn(\"Error in init bpf_struct_ops %s\\n\",\n\t\tst_ops->name);\n\terr = -EINVAL;\n\tgoto errout;\n}"
+        }
+      ],
+      "call_traces": [
+        "do_one_initcall -> bpf_rfs_init -> __register_bpf_struct_ops -> btf_add_struct_ops (inlined in __register_bpf_struct_ops binary) -> bpf_struct_ops_desc_init -> NULL .init"
+      ]
+    },
+    {
+      "type": "evidence_for",
+      "description": "The source descriptor omits .init; static storage zero-initializes the omitted pointer. Its compiled .data bytes independently confirm NULL.",
+      "code_snippets": [
+        {
+          "file": "net/core/bpf_rfs.c",
+          "function": "bpf_rfs_struct_ops initializer",
+          "line": 259,
+          "code": "static struct bpf_struct_ops bpf_rfs_struct_ops = {\n\t.verifier_ops = &bpf_rfs_verifier_ops,\n\t.reg = bpf_rfs_reg,\n\t.unreg = bpf_rfs_unreg,\n\t.update = bpf_rfs_update,\n\t.check_member = bpf_rfs_check_member,\n\t.init_member = bpf_rfs_init_member,\n\t.validate = bpf_rfs_validate,\n\t.name = \"bpf_rfs_ops\",\n\t.cfi_stubs = &bpf_rfs_cfi_stubs,\n\t.owner = THIS_MODULE,\n};"
+        },
+        {
+          "file": "include/linux/bpf.h",
+          "function": "struct bpf_struct_ops",
+          "line": 2102,
+          "code": "struct bpf_struct_ops {\n\tconst struct bpf_verifier_ops *verifier_ops;\n\tint (*init)(struct btf *btf);"
+        }
+      ]
+    },
+    {
+      "type": "evidence_for",
+      "description": "Binary evidence identifies both actual descriptor and callback, not just a plausible source bug. The exact +0x6cc return point follows the .init load/call. The relocated descriptor address equals crash R12, and its zero .init explains crash RAX=0 and RIP=0.",
+      "code_snippets": [
+        {
+          "file": "vmlinux (Build ID defb294bfd7ef0093b57266326729f5bf315625a)",
+          "function": "bpf_struct_ops_desc_init",
+          "code": "ffffffff8162fb01:\t4c 8b 34 24          \tmov    (%rsp),%r14\nffffffff8162fb05:\t49 8d 7c 24 08       \tlea    0x8(%r12),%rdi\nffffffff8162fb0a:\te8 f1 78 15 00       \tcall   ffffffff81787400 <__asan_load8>\nffffffff8162fb0f:\t49 8b 44 24 08       \tmov    0x8(%r12),%rax\nffffffff8162fb14:\t4c 89 f7             \tmov    %r14,%rdi\nffffffff8162fb17:\te8 64 ee 98 01       \tcall   ffffffff82fbe980 <__x86_indirect_thunk_array>\nffffffff8162fb1c:\t89 c3                \tmov    %eax,%ebx\nffffffff8162fb1e:\t85 c0                \ttest   %eax,%eax\nffffffff8162fb20:\t0f 84 3a fb ff ff    \tje     ffffffff8162f660 <bpf_struct_ops_desc_init+0x210>\nffffffff8162fb26:\t48 8b 7c 24 40       \tmov    0x40(%rsp),%rdi\nffffffff8162fb2b:\te8 d0 78 15 00       \tcall   ffffffff81787400 <__asan_load8>\nffffffff8162fb30:\t49 8b 74 24 50       \tmov    0x50(%r12),%rsi\nffffffff8162fb35:\t48 c7 c7 00 ae 10 83 \tmov    $0xffffffff8310ae00,%rdi\nffffffff8162fb3c:\te8 cf 7a d8 ff       \tcall   ffffffff813b7610 <_printk>\nffffffff8162fb41:\teb 48                \tjmp    ffffffff8162fb8b <bpf_struct_ops_desc_init+0x73b>\nffffffff8162fb43:\t48 8b 7c 24 40       \tmov    0x40(%rsp),%rdi\nffffffff8162fb48:\t4c 8b 7c 24 60       \tmov    0x60(%rsp),%r15\nffffffff8162fb4d:\te8 ae 78 15 00       \tcall   ffffffff81787400 <__asan_load8>"
+        },
+        {
+          "file": "vmlinux .data",
+          "function": "bpf_rfs_struct_ops",
+          "code": "ffffffff84dfab40 e0e65e83 ffffffff 00000000 00000000\n.init is the second eight-byte word: 0x0000000000000000."
+        }
+      ]
+    },
+    {
+      "type": "evidence_against",
+      "description": "T2 is eliminated as an explanation of this panic. bpf_rfs_init passes the intended descriptor; btf_add_struct_ops stores that exact pointer. Runtime R12 matches it after KASLR. Missing BTF type/wrapper or invalid member prototypes return before line 496, whereas the observed return address proves execution reached the .init call. Other policy callbacks (.reg, .init_member, select_cpu) are not the target of the offset-8 load.",
+      "code_snippets": [
+        {
+          "file": "net/core/bpf_rfs.c",
+          "function": "bpf_rfs_init",
+          "line": 272,
+          "code": "static int __init bpf_rfs_init(void)\n{\n\tint err;\n\n\terr = register_netdevice_notifier(&bpf_rfs_netdev_notifier);\n\tif (err)\n\t\treturn err;\n\terr = register_bpf_struct_ops(&bpf_rfs_struct_ops, bpf_rfs_ops);\n\tif (err)\n\t\tunregister_netdevice_notifier(&bpf_rfs_netdev_notifier);\n\treturn err;\n}\nlate_initcall(bpf_rfs_init);"
+        },
+        {
+          "file": "kernel/bpf/btf.c",
+          "function": "btf_add_struct_ops",
+          "line": 9921,
+          "code": "tab->ops[btf->struct_ops_tab->cnt].st_ops = st_ops;\n\nerr = bpf_struct_ops_desc_init(&tab->ops[btf->struct_ops_tab->cnt], btf, log);"
+        },
+        {
+          "file": "kernel/bpf/bpf_struct_ops.c",
+          "function": "bpf_struct_ops_desc_init",
+          "line": 384,
+          "code": "type_id = btf_find_by_name_kind(btf, st_ops->name,\n\t\t\t\tBTF_KIND_STRUCT);\nif (type_id < 0) {\n\tpr_warn(\"Cannot find struct %s in %s\\n\",\n\t\tst_ops->name, btf_get_name(btf));\n\treturn -EINVAL;\n}"
+        },
+        {
+          "file": "kernel/bpf/bpf_struct_ops.c",
+          "function": "bpf_struct_ops_desc_init",
+          "line": 398,
+          "code": "value_id = btf_find_by_name_kind(btf, value_name,\n\t\t\t\t BTF_KIND_STRUCT);\nif (value_id < 0) {\n\tpr_warn(\"Cannot find struct %s in %s\\n\",\n\t\tvalue_name, btf_get_name(btf));\n\treturn -EINVAL;\n}\nif (!is_valid_value_type(btf, value_id, t, value_name))\n\treturn -EINVAL;"
+        }
+      ]
+    },
+    {
+      "type": "observation",
+      "description": "No concurrency is needed. This is a deterministic initialization omission whenever this built-in subsystem reaches registration with valid BTF. The descriptor has static lifetime; no allocation, free or RCU operation is required to make .init NULL. Parent registration functions do not populate it. Cleanup runs only after callback return or prior validation failure, so it does not recover a jump to zero.",
+      "code_snippets": [
+        {
+          "file": "kernel/bpf/btf.c",
+          "function": "__register_bpf_struct_ops",
+          "line": 9996,
+          "code": "err = btf_add_struct_ops(btf, st_ops, log);\n\nerrout:\n\tkfree(log);\n\tbtf_put(btf);"
+        },
+        {
+          "file": "init/main.c",
+          "function": "do_one_initcall",
+          "line": 1356,
+          "code": "do_trace_initcall_start(fn);\nret = fn();\ndo_trace_initcall_finish(fn, ret);"
+        }
+      ]
+    },
+    {
+      "type": "observation",
+      "description": "Narrow fix belongs to bpf_rfs integration: provide a correctly typed initializer returning 0 and wire .init. Generic framework behavior need not change, and the existing late_initcall bpf_rfs_init(void) must not be used because it has the wrong signature and performs registration itself. RFS currently uses generic BTF context access and does not need additional per-type BTF lookup state for this initializer.",
+      "code_snippets": [
+        {
+          "file": "net/core/bpf_rfs.c",
+          "function": "proposed bpf_rfs_ops_init (not applied by this agent)",
+          "code": "static int bpf_rfs_ops_init(struct btf *btf)\n{\n\treturn 0;\n}\n\n/* In bpf_rfs_struct_ops: */\n.init = bpf_rfs_ops_init,"
+        },
+        {
+          "file": "drivers/hid/bpf/hid_bpf_struct_ops.c",
+          "function": "hid_bpf_ops_init",
+          "line": 25,
+          "code": "static int hid_bpf_ops_init(struct btf *btf)\n{\n\thid_bpf_ops_btf = btf;\n\treturn 0;\n}"
+        },
+        {
+          "file": "net/core/bpf_rfs.c",
+          "function": "bpf_rfs_verifier_ops initializer",
+          "line": 249,
+          "code": "static const struct bpf_verifier_ops bpf_rfs_verifier_ops = {\n\t.get_func_proto = bpf_base_func_proto,\n\t.is_valid_access = bpf_tracing_btf_ctx_access,\n\t/* No btf_struct_access override: kernel BTF objects remain read-only. */\n};"
+        }
+      ]
+    },
+    {
+      "type": "verification",
+      "description": "Mandatory false-positive verification passed. (1) Execution proof: original trace and exact binary callsite identify bpf_rfs_init registration and unconditionally invoked .init. (2) Concrete bad state: original compiled descriptor contains NULL at offset 8; R12 matches that descriptor after relocation; RAX and instruction-fetch RIP are zero. (3) Full relevant caller context checked: do_one_initcall invokes the late initcall, bpf_rfs_init passes the static descriptor, __register_bpf_struct_ops obtains BTF and calls btf_add_struct_ops, and btf_add_struct_ops preserves pointer identity. None fills .init or branches around the final callback. Locks cannot populate a missing static initializer; no race/lifetime hypothesis is needed. (4) Exact source and binary agree; the faulting instruction maps to kernel/bpf/bpf_struct_ops.c:496. Author defense considered: '.init may be optional, CFI stubs/init_member may supply a default, or trace may refer to a different callback/descriptor/BTF mismatch.' Refutation: no optional test at line 496 or in its machine code; offset-8 call and descriptor bytes prove the actual target; BTF failures exit earlier; CFI stub is a separate pointer at offset 64; init_member is a separate pointer at offset 24. Race-window verification is not applicable to this non-race bug.",
+      "code_snippets": [
+        {
+          "file": "kernel/bpf/bpf_struct_ops.c",
+          "function": "bpf_struct_ops_desc_init",
+          "line": 496,
+          "code": "if (st_ops->init(btf)) {"
+        },
+        {
+          "file": "vmlinux (original build)",
+          "function": "bpf_struct_ops_desc_init",
+          "code": "ffffffff8162fb0f: 49 8b 44 24 08    mov 0x8(%r12),%rax\nffffffff8162fb14: 4c 89 f7          mov %r14,%rdi\nffffffff8162fb17: e8 64 ee 98 01    call ffffffff82fbe980 <__x86_indirect_thunk_array>\nffffffff8162fb1c: 89 c3             mov %eax,%ebx"
+        }
+      ]
+    }
+  ],
+  "new_theories": [],
+  "questions_answered": [
+    {
+      "question": "Is st_ops->init unconditionally invoked at the exact crashing callsite?",
+      "answer": "Yes. With previous validation successful, line 496 calls st_ops->init(btf) without testing presence. Original vmlinux +0x6bf loads offset 8 into RAX, +0x6c7 calls the RAX thunk and +0x6cc is the reported return point. addr2line maps the call to line 496."
+    },
+    {
+      "question": "Does compiled bpf_rfs descriptor leave .init NULL?",
+      "answer": "Yes. Symbol bpf_rfs_struct_ops is at 0xffffffff84dfab40; .data bytes at +8 are eight zeros. Source initializer at pre-fix lines 259-270 omits .init. Its relocated address is exactly crash R12=0xffffffffa3bfab40."
+    },
+    {
+      "question": "Can a BTF lookup or another callback explain this crash instead?",
+      "answer": "No for this observed panic. Validations must finish to reach the observed callsite, and failed BTF lookups return earlier. Actual target load is the .init field, not select_cpu or .init_member; supplied descriptor pointer and runtime R12 both identify bpf_rfs_struct_ops. T2 therefore eliminated as the cause of this specific crash."
+    },
+    {
+      "question": "What is the narrow correct fix in bpf_rfs integration?",
+      "answer": "Add static int bpf_rfs_ops_init(struct btf *btf) returning 0 and assign .init = bpf_rfs_ops_init. Keep it distinct from existing static int __init bpf_rfs_init(void). Rebuild and boot the corrected image, then resume the requested functional tests; this agent did not apply or execute the fix."
+    }
+  ],
+  "unanswered_questions": [],
+  "validation_limits": [
+    "The missing-callback cause is proven by the original failure, source and exact binary. Whether subsequent boot/functional tests pass after fixing it is outside this agent's assignment and not claimed here."
+  ]
+}

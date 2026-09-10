@@ -1,0 +1,301 @@
+RFS BPF series audit, 2026-09-10
+
+1. e37739322a0c net: rfs: Add a BPF struct_ops hook for CPU selection
+2. ba5347a259ea samples/bpf: Add topology-aware RFS CPU policies
+3. 75c47d5b969c selftests/bpf: Cover native RFS CPU selection and policy
+lifetime
+4. 9f3cd6a8fd24 docs: networking: Describe BPF CPU selection for RFS
+
+Intent and scope
+
+The series makes the desired CPU programmable inside native RFS. It leaves
+socket hints, queue progress, software backlog delivery and the migration
+gate in native code. The sample supplies topology policies and generation
+replacement, with tests and documentation in later commits.
+
+All four diffs, including messages, were read. This is a new feature, not a
+bug fix. The base is 45c13f3f9e3b and the tip is 9f3cd6a8fd24. No later commit
+in the reviewed series changes the core implementation. The original XDP
+prototype is outside this review.
+
+Semcode and semcode lore tools were unavailable. All source context was
+obtained outside semcode, with git show, rg and source-file reads. No public
+submission or community endorsement is inferred from the local RFC files.
+
+Loaded guides: technical-patterns, review-core, subsystem index, build,
+networking-core, bpf, libbpf, rcu, locking, mm-alloc, kconfig, selftests,
+scheduler, syscall, callstack, false-positive-guide and inline-template.
+The test-kernel skill was also read before running the isolated VM.
+
+Change categorization
+
+change-categories.txt lists 356 fine-grained change entries and source
+witnesses. It splits conditions, each loop, returns/breaks/continues/gotos,
+allocation/free, initialization, publication and lock operations. The
+associated JSON is the local checklist; no TodoWrite tool was available.
+The audit groups below apply to every category in the corresponding file
+and function. Test-only style or FD-leak concerns are excluded as required
+by the review protocol; coverage limitations are recorded separately.
+
+REACHABILITY: confirmed
+
+On x86_64 with RPS, BPF_SYSCALL, BPF_JIT, DEBUG_INFO_BTF and BPF_RFS enabled,
+the registered struct_ops type can load and attach. A nonzero global RFS
+table enables rps_needed and rfs_needed in rps_sock_flow_sysctl(). A queue
+flow table plus a matching hash reaches the hook through all three RX
+callers. The fresh 22-case run confirms IPv4/IPv6 and real receive-CPU
+selection. This does not establish support on architectures without BPF
+trampolines.
+
+ENTRY-POINT: per-device struct_ops registration, update and RX callback
+
+Preconditions and their establishment:
+
+- Immutable initialized ops: the map update path validates scalar members,
+  resolves the callback, runs validate(), protects trampoline memory, then
+  publishes READY. Link creation/update checks READY with acquire ordering.
+- Device lookup: reg holds RTNL before __dev_get_by_index() and checks the
+  registered state. Namespace permission is checked before publication.
+- Binding access: reg/update/unreg take RTNL. NETDEV_UNREGISTER notifications
+  come from paths holding RTNL; the core notifier dispatcher asserts it.
+- RX lifetime: each caller acquires RCU before get_rps_cpu(). That scope
+  covers the dev ops lookup, callback execution and subsequent RFS enqueue.
+- Callback execution: the trampoline establishes its BPF run context and
+  migration protection. check_member rejects sleepable programs. Generic
+  helper validation still applies; the RFS type grants no custom kfuncs.
+- Native flow access: get_rps_cpu() has checked RX queue bounds, table
+  presence, nonzero hash and socket-table association before the hook.
+- Return safety: BPF results are validated before becoming next_cpu. The
+  original migration gate and final online check remain after the hook.
+
+Input-space classes traced:
+
+- BPF_RFS on/off; RPS inherited SMP/SYSFS dependencies; BTF/JIT prerequisites.
+- Absent/present policy; absent queue/global tables; zero hash; hash miss/hit.
+- Recorded/unrecorded/invalid RX queue; native RFS and optional aRFS branch.
+- DEFAULT, CPU0, valid explicit CPU, impossible/offline CPU and large u32.
+- Unset/offline/online active CPU; pending/drained old queue; moving app hint.
+- Invalid ifindex/name/flags, missing callback, sleepable or writable ctx.
+- Link/legacy registration; duplicate device/map; valid/stale expected-old;
+  other device index; missing CAP_NET_ADMIN; moved/deleted/reused device.
+- Default/process/cluster/NUMA mode; sparse/empty/invalid CPU lists; missing
+  cluster/node topology; SMT exclusion; excluded app; eligible active CPU;
+  frozen topology generation and stale topology following CPU hotplug.
+
+parity: not an emulation path
+
+The patch reuses the existing RFS path, rather than constructing a parallel
+enqueue path. Before and after the hook, native hash matching, the migration
+predicate, set_rps_cpu(), aRFS steering and enqueue_to_backlog() still execute
+in their original order. Only next_cpu is replaced.
+
+Callstack Regression Analysis
+
+RX group: bpf_rfs_cpu(), bpf_rfs_select_cpu(), get_rps_cpu()
+
+Callers loaded: netif_rx_internal(), netif_receive_skb_internal(), and
+netif_receive_skb_list_internal(). Witness in each: rcu_read_lock() before
+get_rps_cpu(). Public netif_rx/__netif_rx and netif_receive_skb/list wrappers
+establish the documented interrupt/BH context. The hook acquires no sleeping
+lock. get_rps_cpu() returns a valid online CPU or -1; each caller handles -1
+using its existing local/direct delivery path.
+
+Callees loaded: set_rps_cpu(), enqueue_to_backlog(), rps_flow_is_active(),
+rps_may_expire_flow(), rps_record_sock_flow(), queue head/tail helpers,
+bpf_trampoline_enter()/exit() and their non-sleepable implementations.
+Witnesses: WRITE_ONCE(rflow->cpu, next_cpu); rps_input_queue_tail_save(qtail,
+tail); run_ctx->saved_run_ctx = bpf_set_run_ctx(&run_ctx->run_ctx).
+
+The stack ctx initializer clears omitted fields including flags/rx_queue.
+There is no allocation or persistent ctx pointer in the hook. Invalid BPF
+returns cannot become an unchecked per_cpu() index. RPS's CPU-hotplug and
+hash-collision assumptions remain; runtime tests do not prove all such
+interleavings. TCP reassembly is not an ordering oracle for the RX layer.
+
+Control group: reg/in_use/deactivate/unreg/update/netdev_event
+
+Callers loaded: bpf_struct_ops_map_update_elem(), link_create(),
+map_link_update(), map_link_detach(), map_link_dealloc(), device unregister,
+namespace move, notifier registration and notifier dispatch. The link
+update/create/detach paths serialize with update_mutex; final link dealloc
+has exclusive lifetime ownership. All binding accesses are within RTNL.
+
+Lock order: update_mutex -> RTNL -> static-key CPU/jump-label locks. The
+device notifier does not call link detach or take update_mutex. Rtnl net
+locks still nest inside global RTNL with DEBUG_NET_SMALL_RTNL in this tree.
+The actual __dev_get_by_index() implementation matches its RTNL contract.
+
+Three ownership assignments:
+  binding->dev = dev;
+  binding->ops = ops;
+  binding->link = link;
+
+binding is zero allocated before RTNL, published into the list on success,
+freed on every failed reg, and removed/freed by unreg on success. The device
+pointer is borrowed under RTNL and revoked by the unregister notifier.
+ops aliases kvalue.data owned by the struct_ops map. The link holds that map
+reference; an inactive binding is intentionally retained until link release.
+
+Every control-list loop is finite under RTNL. Searches either advance,
+return, or break. unreg removes only its matching link and exits the loop
+before freeing the selected object. Repeated deactivation returns before
+decrementing the static key a second time. All update errors unlock RTNL;
+they leave the old pointer and binding intact. Map preparation/legacy-reg
+failure cleans program references and trampoline images in the core.
+
+subsystem/rcu.md loaded: y
+Object in data structures: dev->bpf_rfs_ops and the RTNL-only binding list.
+Removal location: before synchronize_rcu().
+Accesses before refcount: ops fields under outer RCU; binding/dev fields
+under RTNL, with map lifetime retained by the link/core operation.
+
+Update publishes the new ops before its grace period, and the core puts the
+old map only after update returns. Unreg clears dev->bpf_rfs_ops and removes
+the binding before its grace period. The core's final map free also calls
+synchronize_rcu_mult(call_rcu, call_rcu_tasks) before freeing images.
+NETDEV_UNREGISTER clears dev without freeing ops; later link cleanup waits
+again. Device teardown and namespace move drain native RX before reuse.
+
+Verifier/registration group: check_member/init_member/validate/init/stubs
+
+Callers loaded: check_struct_ops_btf_id(), bpf_struct_ops_desc_init(),
+bpf_struct_ops_map_update_elem(), __register_bpf_struct_ops(). Callees
+loaded: bpf_obj_name_cpy(), bpf_tracing_btf_ctx_access(), btf_ctx_access(),
+the verifier's BTF access checks and bpf_base_func_proto().
+
+Witnesses: err = st_ops->check_member(t, member, prog);
+if (atype != BPF_READ && !type_is_ptr_alloc_obj(reg->type));
+if (memchr_inv(udata + moff, 0, msize)).
+
+The callback is required; scalar flags must be zero; name/ifindex are
+validated before any attachment. init exists, cfi_stubs is initialized and
+the type is registered after notifier setup. Failed registration unwinds
+the notifier. There are no acquired ctx references requiring release.
+Generic struct_ops test_run explicitly rejects non-dummy ops; it cannot
+inject an arbitrary RFS ctx through the dummy test harness.
+
+Helper context suspicion checked: bpf_timer_cancel() rejects hardirq or
+IRQ-disabled invocation through defer_timer_wq_op(). bpf_spin_lock() saves
+IRQs and uses an architecture spinlock. These source paths do not support
+the suspected hardirq timer wait or sleeping-lock failure.
+
+Sample policy and loader groups
+
+All choose/select_cpu, open/load/fill_map/member_offset/prepare and CLI
+functions were read in full. Their callers are the CLI and the selftests;
+the BPF callback is invoked by the core hook. Libbpf map sizing, update,
+freeze, attach and link update implementations were checked, as were array
+lookup bounds and generated skeleton destruction.
+
+Witnesses: count = group->count - cg.exclude_count;
+index = group->base + rank;
+return bpf_map_freeze(fd);
+err = bpf_link_update(fd, bpf_map__fd(skel->maps.rfs_ops), &update).
+
+The empty/excluded-count checks precede modulo. Active CPUs must be members
+of the preferred group and online, with ranks outside the excluded interval.
+Failed map lookup falls back. BPF array lookup rejects indexes at/above
+max_entries, including active_cpu=-1 converted to u32. All topology data is
+initialized before attachment and cannot be rewritten by the program.
+
+The CLI holds an FD to the expected old map during replacement. Failure
+closes newly loaded objects without touching the active policy. Attach pin
+failure closes the new link and lets its owned map/programs unwind. Detach
+first detaches the link, then unlinks the named pin. show reports IDs only;
+that limitation is documented and appears in the improvement list.
+
+Topology group: parse/read_list/first_cpu/compare/free/load
+
+Every parser and nested topology loop was checked. Parser text advances
+through numbers, ranges, separators and trailing space; no backwards range
+or INT_MAX-sized CPU ID is accepted. realloc preserves earlier bits and
+zeros extensions; every parser failure frees the temporary mask.
+
+Group IDs occupy disjoint ranges for global, cluster and NUMA groups. The
+number of groups is at most 2*np+2, and each eligible CPU contributes at most
+three slots. The overflow bound precedes those allocations. Allocation
+failure routes through cleanup before later copies or indexing.
+
+Core-then-ID sorting makes each physical core's eligible members contiguous
+after filtering to a group. The exclusion interval is therefore appropriate
+for the BPF rank-skipping code. Each kind, group, CPU and candidate loop has
+its own bounded induction variable; the two uses of start do not control an
+outer loop. Temporary topology buffers and the three result arrays have
+distinct ownership and balanced failure/success cleanup.
+
+Missing topology uses empty group zero. A stale online snapshot can suggest
+a now-offline CPU, but core validation rejects it. The documented explicit
+refresh requirement means this is a deployment limitation, not a missing
+memory-safety check.
+
+Build, tests, documentation and claims
+
+Kconfig changes verified: the new symbol and each dependency exist. There
+is no added select and no cycle introduced by the new leaf option. The
+object build gate matches BPF_RFS, and the disabled inline returns app_cpu.
+The net_device member and cacheline assertion are conditional/matched.
+
+The sample and test build/install succeeded with fresh output. All referenced
+runtime files were present in the installed test directory. Original tests
+use the kselftest harness; minor test-only concerns are outside the report's
+regression count. Comments describing ID-only show output, explicit refresh,
+native fallback, advisory candidate sets and TCP ordering limits match code.
+
+The existing debug kernel was reused, not rebuilt. Its SHA-256 matches the
+earlier validation record. The tested x86_64 configuration enables KASAN,
+PROVE_LOCKING and PROVE_RCU. The four commit trees match the pre-reworded
+trees; the rewording did not alter the implementation. CONFIG_BPF_RFS=n
+object-build evidence is from the earlier run and was not rerun here.
+
+The fresh VM run passes 22 existing cases, with no skips. Review-only probes
+also confirm missing-capability rejection, duplicate binding rejection,
+different-device rejection, expected-old behavior, map reuse, namespace
+move deactivation, namespace deletion with pinned links and ifindex reuse.
+The VM was stopped and logs copied to this review directory.
+
+The Redis benchmark was not rerun. Recomputing medians from its 12-row CSV
+gives +32.110760% against native RFS and -0.201364% against static RPS, with
+20 million commands and zero misses/errors in each row. The commit already
+states that one physical NUMA node and fixed CPU mapping do not demonstrate
+physical NUMA locality gains or isolated callback cost.
+
+Verification and eliminated suspicions
+
+Ruled out regression 1: RX callers hold RCU over ops lookup and execution.
+Ruled out regression 2: old maps are not put before the update grace period;
+the core also delays final trampoline reclamation.
+Ruled out regression 3: the notifier does not take update_mutex while holding
+RTNL, and revokes the borrowed dev pointer before namespace/device reuse.
+Ruled out regression 4: invalid CPU results cannot bypass core validation or
+the native migration gate.
+Ruled out regression 5: empty topology groups do not reach modulo by zero;
+shared group IDs/rank intervals do not overflow the allocated slot arrays.
+Ruled out regression 6: hardirq BPF timer cancellation is rejected in the
+helper implementation; no RFS-specific sleeping helper was added.
+Ruled out regression 7: freeze happens on ordinary topology arrays after
+initialization, before attachment; the active generation is not rewritten.
+
+None of these suspicions was reported as a confirmed bug and then silently
+retracted. No issue is omitted because it is merely unlikely. Inactive-link
+inspection and stale topology are retained as documented limitations, not
+as claims of kernel corruption.
+
+Review limitations: PREEMPT_RT, other architectures, allocation fault
+injection, physical SMT/NUMA, hardware aRFS, multiple RX queues under load,
+concurrent hotplug with sustained traffic, and the full BPF suite were not
+run. Review-only dummy-device lifecycle checks do not test in-flight packet
+ordering during device teardown. CPU-selection correctness in the existing
+TCP tests does not establish packet ordering before TCP reassembly.
+
+Task completion: callstack tasks 1-9 were applied to the categorized source
+groups, including caller/callee constraints, locks and error paths, resource
+propagation, RCU, loop progress, initialization and comment/message claims.
+Source review complete; dynamic coverage is limited as stated above.
+
+BUG FIX DETERMINATION: not a bug fix
+Fixes tag check for net/BPF: not required for this feature series
+Kconfig changes verified
+FINAL REGRESSIONS FOUND: 0
+FINAL TOKENS USED: unavailable (no session token counter exposed)
+Assisted-by: Codex:GPT-6
+

@@ -1,0 +1,20 @@
+{
+  "agent_id": "agent-1",
+  "agent_type": "report",
+  "task_description": "Generate standalone plain-text debug report from confirmed final analysis and immutable bug context.",
+  "instructions": [
+    "Read /home/sisyphus/code/review-prompts/kernel/agent/debug-report.md and follow its format.",
+    "Use captured pre-fix evidence in final-analysis.json; root is independently fixing/rebuilding source now, so do not infer the old defect from live source.",
+    "Write only /home/sisyphus/code/linux/rfs-dev/boot-debug/debug-report.txt. No source changes, builds, VMs, or new debugging needed.",
+    "Keep report concise but self-contained, preserve relevant exact code snippets, no markdown, prose wrap at 78 columns, no source line numbers.",
+    "A fix is recommended, not validated by this debugging task. Root handles follow-up testing."
+  ],
+  "context_from_prior_agents": [
+    "agent-0 confirmed missing mandatory .init via original vmlinux and eliminated wrong descriptor/BTF cause."
+  ],
+  "paths": {
+    "final_analysis": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-context/final-analysis.json",
+    "bug_context": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-context/bug.json",
+    "output": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-report.txt"
+  }
+}

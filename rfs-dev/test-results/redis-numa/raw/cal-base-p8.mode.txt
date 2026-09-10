@@ -1,0 +1,4 @@
+net.core.rps_sock_flow_entries = 0
+/sys/class/net/enp0s4/queues/rx-0
+00
+0

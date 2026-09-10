@@ -1,0 +1,88 @@
+Formatting '/tmp/rfs-kernel-vm.1Vg8pf/rootfs.img', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=21474836480 backing_file=/home/sisyphus/code/qemu/rootfs.img backing_fmt=raw lazy_refcounts=off refcount_bits=16
+RFS VM directory: /tmp/rfs-kernel-vm.1Vg8pf
+RFS SSH port: 2242
+[0;34m========================================[0m
+[0;34m     内核测试自动化流程[0m
+[0;34m========================================[0m
+
+[0;32m✓[0m 内核镜像: /home/sisyphus/code/linux/arch/x86/boot/bzImage
+
+[1;33m[0/6] 清理历史测试记录...[0m
+[0;32m✓[0m 环境已清理
+
+[1;33m[1/6] 检查QEMU状态...[0m
+[1;33m[2/6] 准备内核镜像...[0m
+[0;32m✓[0m 内核已复制到QEMU目录
+
+[1;33m[3/6] 启动QEMU...[0m
+[0;32m✓[0m QEMU启动成功 (PID: 422473)
+
+[1;33m[4/6] 启动panic监控...[0m
+[0;32m✓[0m Panic监控已启动
+
+[1;33m[5/6] 等待VM启动和SSH就绪...[0m
+  (预计需要30-40秒，请稍候...)
+
+[0;32m✓[0m SSH连接就绪 (尝试 4 次)
+
+Warning: Permanently added '[localhost]:2242' (ED25519) to the list of known hosts.
+[1;33m[6/6] 执行测试脚本...[0m
+
+开始执行测试...
+----------------------------------------
+Warning: Permanently added '[localhost]:2242' (ED25519) to the list of known hosts.
+Linux sisyphus 7.2.0-rfs-bpf+ #296 SMP PREEMPT_DYNAMIC Mon Sep  7 12:27:25 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+#            OK  rfs.empty_candidates
+ok 22 rfs.empty_candidates
+# PASSED: 22 / 22 tests passed.
+# Totals: pass:22 fail:0 xfail:0 xpass:0 skip:0 error:0
+PASS devices found
+PASS topology load
+PASS three policy objects opened
+PASS prepare a
+PASS prepare b
+PASS prepare different device
+PASS attach without effective CAP_NET_ADMIN: EPERM
+PASS authorized attach
+PASS duplicate device: EBUSY
+PASS update without effective CAP_NET_ADMIN: EPERM
+PASS update to different device: EINVAL
+PASS wrong expected-old map: EPERM
+PASS valid expected-old update
+PASS detach after update
+PASS old map reusable after detach
+PASS detach reused map
+attach: device=review0 mode=numa candidates=2 link=/run/rfs-review-bpf/old
+PASS old link rejects update after device netns move: ENODEV
+link_id=39 map_id=168
+attach: device=review0 mode=numa candidates=2 link=/run/rfs-review-bpf/new
+PASS new policy attaches to moved device
+PASS netns deletion completes with pinned policy links
+link_id=40 map_id=186
+PASS ifindex reuse does not reactivate old link: ENODEV
+PASS no kernel failure signatures
+----------------------------------------
+
+[0;32m✓[0m 测试结果已保存到: /home/sisyphus/code/test/rfs-review-20260910/test_result.txt
+
+[0;34m========================================[0m
+[0;32m         内核测试通过 ✓[0m
+[0;32m========================================[0m
+
+测试概要:
+  ✓ 内核启动正常
+  ✓ SSH连接正常 (端口: 2242)
+  ✓ 共享目录工作正常
+  ✓ 测试脚本执行成功
+
+系统信息:
+7.2.0-rfs-bpf+
+ 12:05:12 up 0 min,  1 user,  load average: 1.30, 0.31, 0.10
+
+QEMU PID: 422473
+日志文件: /tmp/rfs-kernel-vm.1Vg8pf/serial.log
+
+常用命令:
+  查看日志: tail -f /tmp/rfs-kernel-vm.1Vg8pf/serial.log
+  连接SSH:  ssh root@localhost -p 2242
+  停止QEMU: kill 422473

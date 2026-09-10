@@ -1,0 +1,8 @@
+12 timed runs, 240000000 GET commands, 0 misses/errors.
+CPU4 steady busy range: 99.377-99.875%.
+All RX/TX IRQ deltas on CPU0; TCP CPU placement verified separately.
+22/22 functional selftests pass; final dmesg has no checked kernel diagnostics.
+All four original/new trees match; commit benchmark text matches saved message.
+4 strict checkpatch runs have 0 errors; existing source/style warnings remain.
+RFC patch-ids and reply threading validated; no mail sent.
+Benchmark VM and TAP stopped; original kernel SHA-256 unchanged.

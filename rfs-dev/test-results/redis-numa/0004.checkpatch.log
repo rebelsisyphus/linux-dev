@@ -1,0 +1,17 @@
+WARNING: added, moved or deleted file(s), does MAINTAINERS need updating?
+#32: 
+new file mode 100644
+
+WARNING: Possible repeated word: 'bpf'
+#107: FILE: Documentation/networking/bpf_rfs.rst:71:
++  mount -t bpf bpf /sys/fs/bpf  # if not already mounted
+
+total: 0 errors, 2 warnings, 0 checks, 140 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+rfs-dev/rfc-v1/0004-docs-networking-Describe-BPF-CPU-selection-for-RFS.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

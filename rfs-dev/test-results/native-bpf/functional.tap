@@ -1,0 +1,96 @@
+Warning: Permanently added '[localhost]:2244' (ED25519) to the list of known hosts.
+7.2.0-rfs-bpf+
+Running concurrent fork/exec smoke test (8 workers, 512 execs)
+TAP version 13
+1..22
+# Starting 22 tests from 2 test cases.
+#  RUN           global.cpulist_large_and_sparse ...
+#            OK  global.cpulist_large_and_sparse
+ok 1 global.cpulist_large_and_sparse
+#  RUN           rfs.native_default ...
+#            OK  rfs.native_default
+ok 2 rfs.native_default
+#  RUN           rfs.no_policy ...
+#            OK  rfs.no_policy
+ok 3 rfs.no_policy
+#  RUN           rfs.no_rfs_table ...
+#            OK  rfs.no_rfs_table
+ok 4 rfs.no_rfs_table
+#  RUN           rfs.offline_cpu_default ...
+#            OK  rfs.offline_cpu_default
+ok 5 rfs.offline_cpu_default
+#  RUN           rfs.cpu_zero_encoding ...
+#            OK  rfs.cpu_zero_encoding
+ok 6 rfs.cpu_zero_encoding
+#  RUN           rfs.alternate_cpu ...
+#            OK  rfs.alternate_cpu
+ok 7 rfs.alternate_cpu
+#  RUN           rfs.ipv6 ...
+#            OK  rfs.ipv6
+ok 8 rfs.ipv6
+#  RUN           rfs.invalid_cpu_default ...
+#            OK  rfs.invalid_cpu_default
+ok 9 rfs.invalid_cpu_default
+#  RUN           rfs.readonly_context ...
+libbpf: prog 'write_ctx': BPF program load failed: -EACCES
+libbpf: prog 'write_ctx': failed to load: -EACCES
+libbpf: failed to load object 'test_rfs'
+libbpf: failed to load BPF skeleton 'test_rfs': -EACCES
+#            OK  rfs.readonly_context
+ok 10 rfs.readonly_context
+#  RUN           rfs.sleepable_rejected ...
+libbpf: prog 'sleepable': BPF program load failed: -EINVAL
+libbpf: prog 'sleepable': -- BEGIN PROG LOAD LOG --
+attach to unsupported member select_cpu of struct bpf_rfs_ops
+processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
+-- END PROG LOAD LOG --
+libbpf: prog 'sleepable': failed to load: -EINVAL
+libbpf: failed to load object 'test_rfs'
+libbpf: failed to load BPF skeleton 'test_rfs': -EINVAL
+#            OK  rfs.sleepable_rejected
+ok 11 rfs.sleepable_rejected
+#  RUN           rfs.reserved_flags ...
+#            OK  rfs.reserved_flags
+ok 12 rfs.reserved_flags
+#  RUN           rfs.duplicate_attach ...
+#            OK  rfs.duplicate_attach
+ok 13 rfs.duplicate_attach
+#  RUN           rfs.application_migration ...
+#            OK  rfs.application_migration
+ok 14 rfs.application_migration
+#  RUN           rfs.replace_during_connection ...
+#            OK  rfs.replace_during_connection
+ok 15 rfs.replace_during_connection
+#  RUN           rfs.detach_during_connection ...
+#            OK  rfs.detach_during_connection
+ok 16 rfs.detach_during_connection
+#  RUN           rfs.expected_old ...
+#            OK  rfs.expected_old
+ok 17 rfs.expected_old
+#  RUN           rfs.device_unregister ...
+#            OK  rfs.device_unregister
+ok 18 rfs.device_unregister
+#  RUN           rfs.update_unregister_race ...
+#            OK  rfs.update_unregister_race
+ok 19 rfs.update_unregister_race
+#  RUN           rfs.sample_numa ...
+#            OK  rfs.sample_numa
+ok 20 rfs.sample_numa
+#  RUN           rfs.sample_cluster ...
+#            OK  rfs.sample_cluster
+ok 21 rfs.sample_cluster
+#  RUN           rfs.empty_candidates ...
+#            OK  rfs.empty_candidates
+ok 22 rfs.empty_candidates
+# PASSED: 22 / 22 tests passed.
+# Totals: pass:22 fail:0 xfail:0 xpass:0 skip:0 error:0
+Testing pinned-link CLI attach/update/failure/detach
+attach: device=lo mode=process candidates=8 link=/run/rfs_bpf_391/policy
+rfs_policy: Device or resource busy
+update: device=lo mode=cluster candidates=1 link=/run/rfs_bpf_391/policy
+rfs_policy: Invalid argument
+Usage: /mnt/shared/bpf/rfs/rfs_policy attach|update -i DEVICE -p LINK_PIN [-s process|cluster|numa]
+       [-c CPU_LIST] [--exclude-smt]
+       /mnt/shared/bpf/rfs/rfs_policy detach|show -p LINK_PIN
+Native RFS tables must already be configured. Candidate CPUs are preferences.
+RFS native BPF tests: PASS

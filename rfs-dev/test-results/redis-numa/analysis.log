@@ -1,0 +1,74 @@
+{"round": 1, "mode": "baseline", "qps": 1354921.75, "p99_ms": 3.975, "redis_cpu": 97.81989705019582, "cpu0_busy": 28.43551797040169, "cpu4_busy": 99.87531172069825, "cpu5_busy": 0.0, "cpu4_softirq": 1.4962593516209477, "rx_pps": 175802.56778405156, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [111108, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [69523, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 100.70253209705847, "host_cpu12_busy": 56.701868399675064}
+{"round": 1, "mode": "rfs", "qps": 1089384.0, "p99_ms": 5.351, "redis_cpu": 82.25175781317165, "cpu0_busy": 19.441860465116278, "cpu4_busy": 99.8003992015968, "cpu5_busy": 0.29910269192422734, "cpu4_softirq": 16.067864271457086, "rx_pps": 132810.13654324735, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [214395, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [100943, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 85.06718562962874, "host_cpu12_busy": 53.241032095657644}
+{"round": 1, "mode": "rps", "qps": 1354463.0, "p99_ms": 4.095, "redis_cpu": 97.63271147792925, "cpu0_busy": 23.868778280542987, "cpu4_busy": 99.62593516209476, "cpu5_busy": 18.819188191881917, "cpu4_softirq": 1.371571072319202, "rx_pps": 175807.70985150614, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [151425, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [65673, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 100.15925335118621, "host_cpu12_busy": 57.9243765084473}
+{"round": 1, "mode": "bpf-numa", "qps": 1438331.62, "p99_ms": 4.039, "redis_cpu": 97.56599909931111, "cpu0_busy": 24.915824915824917, "cpu4_busy": 99.62593516209476, "cpu5_busy": 18.54140914709518, "cpu4_softirq": 1.371571072319202, "rx_pps": 173218.82451856264, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [145125, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [65073, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 101.24211757786398, "host_cpu12_busy": 58.16890292028413}
+{"round": 2, "mode": "baseline", "qps": 1354738.25, "p99_ms": 4.039, "redis_cpu": 97.90157588885458, "cpu0_busy": 28.299894403379092, "cpu4_busy": 99.75093399750934, "cpu5_busy": 0.12484394506866417, "cpu4_softirq": 1.36986301369863, "rx_pps": 175016.96355883082, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [108573, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [68444, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 100.16400912508416, "host_cpu12_busy": 57.2463768115942}
+{"round": 2, "mode": "rfs", "qps": 1088731.62, "p99_ms": 5.375, "redis_cpu": 82.32154073793079, "cpu0_busy": 19.237918215613384, "cpu4_busy": 99.6011964107677, "cpu5_busy": 0.09970089730807577, "cpu4_softirq": 16.0518444666002, "rx_pps": 133231.975473468, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [210723, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [99298, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 85.00300399675028, "host_cpu12_busy": 54.03225806451613}
+{"round": 2, "mode": "rps", "qps": 1441233.75, "p99_ms": 4.215, "redis_cpu": 97.50070794740388, "cpu0_busy": 23.609534619750285, "cpu4_busy": 99.37733499377335, "cpu5_busy": 18.673218673218674, "cpu4_softirq": 1.4943960149439601, "rx_pps": 175325.5984773246, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [151620, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [65164, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 100.39988405891953, "host_cpu12_busy": 57.21271393643032}
+{"round": 2, "mode": "bpf-numa", "qps": 1331557.88, "p99_ms": 4.167, "redis_cpu": 97.42320827076274, "cpu0_busy": 24.719101123595507, "cpu4_busy": 99.50248756218906, "cpu5_busy": 18.316831683168317, "cpu4_softirq": 1.492537313432836, "rx_pps": 173247.77858703412, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [143314, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [64190, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 98.92917927923882, "host_cpu12_busy": 57.88630904723779}
+{"round": 3, "mode": "baseline", "qps": 1354646.5, "p99_ms": 4.015, "redis_cpu": 97.92898115262044, "cpu0_busy": 28.526315789473685, "cpu4_busy": 99.87515605493134, "cpu5_busy": 0.0, "cpu4_softirq": 1.373283395755306, "rx_pps": 177532.76780025466, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [108755, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [67642, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 101.24175697801732, "host_cpu12_busy": 57.78132482043097}
+{"round": 3, "mode": "rfs", "qps": 1051469.38, "p99_ms": 5.271, "redis_cpu": 82.63624104198853, "cpu0_busy": 19.591457753017643, "cpu4_busy": 99.7005988023952, "cpu5_busy": 0.0, "cpu4_softirq": 15.968063872255488, "rx_pps": 133781.38749800622, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [207366, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [97958, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 84.94330721284861, "host_cpu12_busy": 54.405422057917434}
+{"round": 3, "mode": "rps", "qps": 1442377.0, "p99_ms": 4.119, "redis_cpu": 97.65928888094146, "cpu0_busy": 23.636363636363637, "cpu4_busy": 99.50124688279301, "cpu5_busy": 18.842364532019705, "cpu4_softirq": 1.4962593516209477, "rx_pps": 176063.60839095095, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [148558, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [64092, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 101.23083839248117, "host_cpu12_busy": 57.07196029776675}
+{"round": 3, "mode": "bpf-numa", "qps": 1442897.38, "p99_ms": 4.071, "redis_cpu": 97.65145582020646, "cpu0_busy": 24.803591470258137, "cpu4_busy": 99.75062344139651, "cpu5_busy": 18.59605911330049, "cpu4_softirq": 1.4962593516209477, "rx_pps": 173069.76768134805, "commands_processed": 20000000, "misses": 0, "errors": 0, "irq_deltas": {"virtio1-input.0": [148588, 0, 0, 0, 0, 0, 0, 0], "virtio1-output.0": [67045, 0, 0, 0, 0, 0, 0, 0]}, "client_cpu": 100.0121961759759, "host_cpu12_busy": 57.56605284227382}
+{
+  "baseline": {
+    "qps": 1354738.25,
+    "p99_ms": 4.015,
+    "redis_cpu": 97.90157588885458,
+    "cpu0_busy": 28.43551797040169,
+    "cpu4_busy": 99.87515605493134,
+    "cpu5_busy": 0.0,
+    "cpu4_softirq": 1.373283395755306,
+    "rx_pps": 175802.56778405156,
+    "client_cpu": 100.70253209705847,
+    "host_cpu12_busy": 57.2463768115942,
+    "qps_min": 1354646.5,
+    "qps_max": 1354921.75,
+    "vs_baseline_percent": 0.0
+  },
+  "rfs": {
+    "qps": 1088731.62,
+    "p99_ms": 5.351,
+    "redis_cpu": 82.32154073793079,
+    "cpu0_busy": 19.441860465116278,
+    "cpu4_busy": 99.7005988023952,
+    "cpu5_busy": 0.09970089730807577,
+    "cpu4_softirq": 16.0518444666002,
+    "rx_pps": 133231.975473468,
+    "client_cpu": 85.00300399675028,
+    "host_cpu12_busy": 54.03225806451613,
+    "qps_min": 1051469.38,
+    "qps_max": 1089384.0,
+    "vs_baseline_percent": -19.635278623010745
+  },
+  "rps": {
+    "qps": 1441233.75,
+    "p99_ms": 4.119,
+    "redis_cpu": 97.63271147792925,
+    "cpu0_busy": 23.636363636363637,
+    "cpu4_busy": 99.50124688279301,
+    "cpu5_busy": 18.819188191881917,
+    "cpu4_softirq": 1.4943960149439601,
+    "rx_pps": 175807.70985150614,
+    "client_cpu": 100.39988405891953,
+    "host_cpu12_busy": 57.21271393643032,
+    "qps_min": 1354463.0,
+    "qps_max": 1442377.0,
+    "vs_baseline_percent": 6.3846650819817
+  },
+  "bpf-numa": {
+    "qps": 1438331.62,
+    "p99_ms": 4.071,
+    "redis_cpu": 97.56599909931111,
+    "cpu0_busy": 24.803591470258137,
+    "cpu4_busy": 99.62593516209476,
+    "cpu5_busy": 18.54140914709518,
+    "cpu4_softirq": 1.492537313432836,
+    "rx_pps": 173218.82451856264,
+    "client_cpu": 100.0121961759759,
+    "host_cpu12_busy": 57.88630904723779,
+    "qps_min": 1331557.88,
+    "qps_max": 1442897.38,
+    "vs_baseline_percent": 6.170444364437189
+  }
+}

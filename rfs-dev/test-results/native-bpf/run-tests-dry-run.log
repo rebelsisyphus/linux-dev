@@ -1,0 +1,11 @@
+make: Entering directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'
+cp /tmp/rfs-bpf-build/selftests/sample/rfs_policy /tmp/rfs-bpf-build/selftests/rfs_policy
+if [ "Xtest_rfs.sh../../net/lib.sh" != "X" ]; then \
+	rsync -aq --copy-unsafe-links test_rfs.sh  ../../net/lib.sh  /tmp/rfs-bpf-build/selftests; \
+fi
+if [ "Xtest_rfs.sh" != "X" ]; then \
+		BASE_DIR="/home/sisyphus/code/linux/tools/testing/selftests"; . /home/sisyphus/code/linux/tools/testing/selftests/kselftest/runner.sh; if [ "X" != "X" ]; then per_test_logging=1; fi; run_many    /tmp/rfs-bpf-build/selftests/test_rfs.sh ; \
+else \
+		BASE_DIR="/home/sisyphus/code/linux/tools/testing/selftests"; . /home/sisyphus/code/linux/tools/testing/selftests/kselftest/runner.sh; if [ "X" != "X" ]; then per_test_logging=1; fi; run_many   ; \
+fi
+make: Leaving directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'

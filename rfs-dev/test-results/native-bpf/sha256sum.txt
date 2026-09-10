@@ -1,0 +1,5 @@
+a45d415b7238f7f94e815aee022bd43d4f8f4d8955513be2708b3df695477893  /home/sisyphus/code/linux/arch/x86/boot/bzImage
+a7d8d6cdb0b575381122355579281b650b1eb088efdcb7e67c7620ef3376e920  /home/sisyphus/code/linux/vmlinux
+330a4a6f0120540b1aa20fe18e63c420a4c5d42e2aa8c3390ede6e805920f415  /home/sisyphus/code/linux/.config
+f85c4b16a915d934433c1f1cfe8d0c00965b83ee95f6887537629da5ff3ebf80  /tmp/rfs-bpf-build/selftests/test_rfs
+375df10c4e9095db9a0511ec07d3edf41559478637d597bee0363042d80fc2a7  /tmp/rfs-bpf-build/selftests/sample/rfs_policy

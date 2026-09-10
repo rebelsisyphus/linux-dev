@@ -1,0 +1,4 @@
+{"mode": "baseline", "tcp_rx_skb_counts": [884263, 0, 0, 0, 0, 0, 0, 0], "expected_cpu": 0, "on_expected_percent": 100.0}
+{"mode": "rfs", "tcp_rx_skb_counts": [523, 0, 0, 0, 667193, 0, 0, 0], "expected_cpu": 4, "on_expected_percent": 99.92167328624744}
+{"mode": "rps", "tcp_rx_skb_counts": [0, 0, 0, 0, 0, 850450, 0, 0], "expected_cpu": 5, "on_expected_percent": 100.0}
+{"mode": "bpf-numa", "tcp_rx_skb_counts": [1008, 0, 0, 0, 0, 873051, 0, 0], "expected_cpu": 5, "on_expected_percent": 99.88467597725096}

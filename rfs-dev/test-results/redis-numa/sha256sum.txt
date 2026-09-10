@@ -1,0 +1,7 @@
+252d647c72f03cbfbd493231a44bda00e760bb25dc0a4c3c789af3881263b7ad  /tmp/rfs-perf-build/arch/x86/boot/bzImage
+2a39cc02e2d542f2d734434126f96ad4cf8d2bdf3aaadad285b277c55276c915  /tmp/rfs-perf-build/vmlinux
+8d9abe32ed2418440e9959f12f552c97be2dce03f0bae8828545778f2413c126  /tmp/rfs-perf-build/.config
+32a99e97d348dd494de3157cfff08fd32a1b436a3a7e73c1e0604efd3440d0ac  /home/sisyphus/code/test/rfs-perf/bin/redis-server
+7b128b52bfdea743728be2268114868e5c93049e07a762377febd1b642f4dfc0  /home/sisyphus/code/test/rfs-perf/bin/redis-benchmark
+375df10c4e9095db9a0511ec07d3edf41559478637d597bee0363042d80fc2a7  /home/sisyphus/code/test/rfs-perf/bin/rfs_policy
+3a5eb35c879ab6d1c723f4c3dcbaaac21eff853152df8a24437a0c569b9098fe  /home/sisyphus/code/test/rfs-perf/bin/bpftool

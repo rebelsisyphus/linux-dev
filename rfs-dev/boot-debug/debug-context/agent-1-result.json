@@ -1,0 +1,9 @@
+{
+  "agent_id": "agent-1",
+  "agent_type": "report",
+  "status": "complete",
+  "output": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-report.txt",
+  "format_checks_passed": true,
+  "bug_confirmed": true,
+  "suspect_commit": null
+}

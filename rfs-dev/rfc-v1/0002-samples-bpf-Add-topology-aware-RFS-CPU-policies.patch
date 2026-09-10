@@ -1,0 +1,964 @@
+From ba5347a259ead20454a7a98b8020112250adfc09 Mon Sep 17 00:00:00 2001
+Message-ID: <ba5347a259ead20454a7a98b8020112250adfc09.1788775763.git.superdcc97@163.com>
+In-Reply-To: <cover.1788775763.git.superdcc97@163.com>
+References: <cover.1788775763.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 7 Sep 2026 14:26:32 +0800
+Subject: [RFC net-next 2/4] samples/bpf: Add topology-aware RFS CPU policies
+
+The RFS struct_ops interface needs a userspace example that selects CPUs
+from system topology and replaces a running policy without exposing a
+partially updated configuration.
+
+Add process, cluster and NUMA policies with candidate CPU lists and
+optional SMT sibling exclusion. Parse sparse CPU lists without a fixed
+64-CPU limit and represent candidates as shared groups. Keep an eligible
+active CPU before hashing to another candidate. Treat the candidate pool
+as a preference and fall back to native RFS when no suitable proposal is
+available.
+
+Load topology into program-read-only maps and freeze them before
+attachment. Publish refreshed topology as a new program and map set
+through BPF_LINK_UPDATE with expected-old-map protection. Provide
+attach, update, show and detach commands for pinned links, preserving
+the existing policy when replacement fails.
+
+Add a standalone Makefile using the in-tree libbpf, bpftool and CO-RE
+types. Resolve struct_ops wrapper offsets from runtime BTF when
+preparing a map for a pinned-link update.
+
+The sample builds with Clang 18 against both the new kernel BTF and an
+older kernel BTF without the RFS types. Policy and pinned-link CLI tests
+pass in the test-kernel VM. The full-series Redis VM benchmark in the
+core hook commit also exercises the NUMA policy. Physical NUMA locality
+benefits and isolated callback cost remain unmeasured.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ samples/bpf/Makefile.rfs          |  44 +++++
+ samples/bpf/rfs_policy.bpf.c      | 122 +++++++++++++
+ samples/bpf/rfs_policy.c          | 203 +++++++++++++++++++++
+ samples/bpf/rfs_policy.h          |  89 ++++++++++
+ samples/bpf/rfs_policy_loader.c   | 131 ++++++++++++++
+ samples/bpf/rfs_policy_topology.c | 284 ++++++++++++++++++++++++++++++
+ 6 files changed, 873 insertions(+)
+ create mode 100644 samples/bpf/Makefile.rfs
+ create mode 100644 samples/bpf/rfs_policy.bpf.c
+ create mode 100644 samples/bpf/rfs_policy.c
+ create mode 100644 samples/bpf/rfs_policy.h
+ create mode 100644 samples/bpf/rfs_policy_loader.c
+ create mode 100644 samples/bpf/rfs_policy_topology.c
+
+diff --git a/samples/bpf/Makefile.rfs b/samples/bpf/Makefile.rfs
+new file mode 100644
+index 000000000000..560bca90ef66
+--- /dev/null
++++ b/samples/bpf/Makefile.rfs
+@@ -0,0 +1,44 @@
++# SPDX-License-Identifier: GPL-2.0
++# Standalone CO-RE sample: make -f samples/bpf/Makefile.rfs
++RFS_SRC := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
++RFS_ROOT := $(abspath $(RFS_SRC)/../..)
++OUTPUT ?= $(RFS_SRC)/rfs-build
++OUTPUT := $(abspath $(OUTPUT))
++VMLINUX ?= $(RFS_ROOT)/vmlinux
++CLANG ?= clang
++BPFTOOL ?= bpftool
++RFS_CFLAGS := -O2 -g -Wall -Wextra -Werror -I$(OUTPUT) \
++	-I$(RFS_SRC) -I$(RFS_ROOT)/tools/lib -I$(RFS_ROOT)/tools/include/uapi
++RFS_LIB := $(OUTPUT)/libbpf/libbpf.a
++RFS_OBJS := $(OUTPUT)/rfs_policy_loader.o $(OUTPUT)/rfs_policy_topology.o
++
++.PHONY: all clean
++all: $(OUTPUT)/rfs_policy
++
++$(OUTPUT) $(OUTPUT)/libbpf:
++	mkdir -p $@
++
++$(RFS_LIB): | $(OUTPUT)/libbpf
++	$(MAKE) -C $(RFS_ROOT)/tools/lib/bpf OUTPUT=$(OUTPUT)/libbpf/ BUILD_STATIC_ONLY=1
++
++$(OUTPUT)/vmlinux.h: $(VMLINUX) | $(OUTPUT)
++	$(BPFTOOL) btf dump file $< format c > $@.tmp
++	mv $@.tmp $@
++
++$(OUTPUT)/rfs_policy.bpf.o: $(RFS_SRC)/rfs_policy.bpf.c $(RFS_SRC)/rfs_policy.h $(OUTPUT)/vmlinux.h $(RFS_LIB)
++	$(CLANG) -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
++		-I$(OUTPUT) -I$(OUTPUT)/libbpf -I$(RFS_ROOT)/tools/lib -c $< -o $@
++
++$(OUTPUT)/rfs_policy.skel.h: $(OUTPUT)/rfs_policy.bpf.o
++	$(BPFTOOL) gen skeleton $< name rfs_policy > $@.tmp
++	mv $@.tmp $@
++
++$(OUTPUT)/%.o: $(RFS_SRC)/%.c $(RFS_SRC)/rfs_policy.h $(OUTPUT)/rfs_policy.skel.h
++	$(CC) $(RFS_CFLAGS) -c $< -o $@
++
++$(OUTPUT)/rfs_policy: $(OUTPUT)/rfs_policy.o $(RFS_OBJS) $(RFS_LIB)
++	$(CC) $^ -lelf -lz -o $@
++
++clean:
++	$(RM) $(OUTPUT)/rfs_policy $(OUTPUT)/rfs_policy*.o \
++		$(OUTPUT)/rfs_policy.skel.h $(OUTPUT)/vmlinux.h
+diff --git a/samples/bpf/rfs_policy.bpf.c b/samples/bpf/rfs_policy.bpf.c
+new file mode 100644
+index 000000000000..4a3636644ec5
+--- /dev/null
++++ b/samples/bpf/rfs_policy.bpf.c
+@@ -0,0 +1,122 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "vmlinux.h"
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_tracing.h>
++#include "rfs_policy.h"
++
++char LICENSE[] SEC("license") = "GPL";
++
++const volatile __u32 mode;
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(max_entries, 1);
++	__uint(map_flags, BPF_F_RDONLY_PROG);
++	__type(key, __u32);
++	__type(value, struct rfs_cpu);
++} cpu_topology SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(max_entries, 1);
++	__uint(map_flags, BPF_F_RDONLY_PROG);
++	__type(key, __u32);
++	__type(value, struct rfs_group);
++} groups SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(max_entries, 1);
++	__uint(map_flags, BPF_F_RDONLY_PROG);
++	__type(key, __u32);
++	__type(value, __u32);
++} cpu_slots SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++	__uint(max_entries, 1);
++	__type(key, __u32);
++	__type(value, struct rfs_policy_stats);
++} stats SEC(".maps");
++
++static __always_inline __u32 choose(const struct bpf_rfs_ctx___local *rctx,
++				    const struct rfs_cpu *app,
++				    const struct rfs_cpu *active,
++				    __u32 kind, bool exclude,
++				    struct rfs_policy_stats *s)
++{
++	struct rfs_cpu_group cg = app->group[kind];
++	__u32 id = cg.id, count, rank, index, *cpu, selected;
++	const struct rfs_group *group;
++
++	group = bpf_map_lookup_elem(&groups, &id);
++	if (!group || !group->count)
++		return 0;
++	if (!exclude)
++		cg.exclude_count = 0;
++	if (cg.exclude_count >= group->count)
++		return 0;
++	count = group->count - cg.exclude_count;
++
++	if (active && active->member &&
++	    (rctx->flags & RFS_CTX_ACTIVE_CPU_ONLINE) &&
++	    active->group[kind].id == id) {
++		rank = active->group[kind].rank;
++		if (!cg.exclude_count || rank < cg.exclude_start ||
++		    rank >= cg.exclude_start + cg.exclude_count) {
++			s->kept_active++;
++			return (__u32)rctx->active_cpu + 1;
++		}
++	}
++	rank = rctx->flow_hash % count;
++	if (cg.exclude_count && rank >= cg.exclude_start)
++		rank += cg.exclude_count;
++	index = group->base + rank;
++	cpu = bpf_map_lookup_elem(&cpu_slots, &index);
++	if (!cpu)
++		return 0;
++	selected = *cpu;
++	/* Keep this map load separate from the context load in the active case. */
++	barrier_var(selected);
++	return selected + 1;
++}
++
++SEC("struct_ops/select_cpu")
++__u32 BPF_PROG(rfs_select_cpu, const struct bpf_rfs_ctx___local *rctx)
++{
++	__u32 key = 0, app_id = rctx->app_cpu_hint, active_id = rctx->active_cpu;
++	const struct rfs_cpu *app, *active;
++	struct rfs_policy_stats *s;
++	__u32 cpu = 0;
++
++	s = bpf_map_lookup_elem(&stats, &key);
++	if (!s)
++		return 0;
++	s->calls++;
++	if (mode == RFS_PROCESS)
++		goto out;
++	app = bpf_map_lookup_elem(&cpu_topology, &app_id);
++	active = bpf_map_lookup_elem(&cpu_topology, &active_id);
++	if (!app)
++		goto out;
++	if (mode == RFS_CLUSTER)
++		cpu = choose(rctx, app, active, RFS_CLUSTER_GROUP, true, s);
++	if (!cpu && (mode == RFS_CLUSTER || mode == RFS_NUMA))
++		cpu = choose(rctx, app, active, RFS_NUMA_GROUP, true, s);
++	if (!cpu && app->member && (rctx->flags & RFS_CTX_APP_CPU_ONLINE))
++		cpu = app_id + 1;
++	if (!cpu)
++		cpu = choose(rctx, app, active, RFS_GLOBAL_GROUP, false, s);
++out:
++	if (cpu)
++		s->proposed++;
++	else
++		s->defaults++;
++	return cpu;
++}
++
++SEC(".struct_ops.link")
++struct bpf_rfs_ops___local rfs_ops = {
++	.name = "rfs_policy",
++	.select_cpu = (void *)rfs_select_cpu,
++};
+diff --git a/samples/bpf/rfs_policy.c b/samples/bpf/rfs_policy.c
+new file mode 100644
+index 000000000000..e50fe723ad7a
+--- /dev/null
++++ b/samples/bpf/rfs_policy.c
+@@ -0,0 +1,203 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <errno.h>
++#include <getopt.h>
++#include <glob.h>
++#include <limits.h>
++#include <net/if.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <bpf/bpf.h>
++#include <bpf/libbpf.h>
++#include "rfs_policy.h"
++#include "rfs_policy.skel.h"
++
++static void usage(const char *name)
++{
++	fprintf(stderr,
++		"Usage: %s attach|update -i DEVICE -p LINK_PIN [-s process|cluster|numa]\n"
++		"       [-c CPU_LIST] [--exclude-smt]\n"
++		"       %s detach|show -p LINK_PIN\n"
++		"Native RFS tables must already be configured. Candidate CPUs are preferences.\n",
++		name, name);
++}
++
++static int check_rfs_tables(const char *dev)
++{
++	unsigned int count, enabled = 0;
++	char path[PATH_MAX];
++	FILE *file;
++	glob_t queues;
++	size_t i;
++	int err;
++
++	file = fopen("/proc/sys/net/core/rps_sock_flow_entries", "re");
++	if (file) {
++		err = fscanf(file, "%u", &count);
++		fclose(file);
++		if (err != 1 || !count) {
++			fprintf(stderr,
++				"Set net.core.rps_sock_flow_entries before attaching a policy\n");
++			return -EINVAL;
++		}
++	}
++	snprintf(path, sizeof(path), "/sys/class/net/%s/queues/rx-*/rps_flow_cnt", dev);
++	err = glob(path, 0, NULL, &queues);
++	if (err)
++		return -ENOENT;
++	for (i = 0; i < queues.gl_pathc; i++) {
++		file = fopen(queues.gl_pathv[i], "re");
++		if (!file)
++			continue;
++		if (fscanf(file, "%u", &count) == 1 && count)
++			enabled++;
++		fclose(file);
++	}
++	globfree(&queues);
++	if (!enabled) {
++		fprintf(stderr, "Set rps_flow_cnt on at least one RX queue of %s\n", dev);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	static const struct option options[] = {
++		{ "exclude-smt", no_argument, NULL, 'x' },
++		{},
++	};
++	struct bpf_link_info info = {};
++	struct rfs_topology topo = {};
++	struct rfs_policy *skel = NULL;
++	const char *dev = NULL, *pin = NULL, *cpus = NULL, *command;
++	unsigned int len = sizeof(info), ifindex;
++	enum rfs_policy_mode mode = RFS_PROCESS;
++	int fd = -1, old_fd = -1, err = -EINVAL, smt = 0, opt;
++
++	if (argc < 2) {
++		usage(argv[0]);
++		return 1;
++	}
++	command = argv[1];
++	optind = 2;
++	while ((opt = getopt_long(argc, argv, "i:p:s:c:x", options, NULL)) != -1) {
++		switch (opt) {
++		case 'i':
++			dev = optarg;
++			break;
++		case 'p':
++			pin = optarg;
++			break;
++		case 'c':
++			cpus = optarg;
++			break;
++		case 'x':
++			smt = 1;
++			break;
++		case 's':
++			if (!strcmp(optarg, "process"))
++				mode = RFS_PROCESS;
++			else if (!strcmp(optarg, "cluster"))
++				mode = RFS_CLUSTER;
++			else if (!strcmp(optarg, "numa"))
++				mode = RFS_NUMA;
++			else
++				goto out;
++			break;
++		default:
++			goto out;
++		}
++	}
++	if (!pin || optind != argc)
++		goto out;
++	if (strcmp(command, "attach")) {
++		fd = bpf_obj_get(pin);
++		if (fd < 0) {
++			err = -errno;
++			goto out;
++		}
++		err = bpf_link_get_info_by_fd(fd, &info, &len);
++		if (err)
++			goto out;
++		if (info.type != BPF_LINK_TYPE_STRUCT_OPS) {
++			err = -EINVAL;
++			goto out;
++		}
++		if (!strcmp(command, "show")) {
++			printf("link_id=%u map_id=%u\n", info.id, info.struct_ops.map_id);
++			goto out;
++		}
++		if (!strcmp(command, "detach")) {
++			err = bpf_link_detach(fd);
++			if (!err && unlink(pin))
++				err = -errno;
++			goto out;
++		}
++		if (strcmp(command, "update")) {
++			err = -EINVAL;
++			goto out;
++		}
++		old_fd = bpf_map_get_fd_by_id(info.struct_ops.map_id);
++		if (old_fd < 0) {
++			err = -errno;
++			goto out;
++		}
++	}
++	ifindex = dev ? if_nametoindex(dev) : 0;
++	if (!ifindex) {
++		err = -ENODEV;
++		goto out;
++	}
++	err = check_rfs_tables(dev);
++	if (err)
++		goto out;
++	err = rfs_topology_load(&topo, "/sys/devices/system/cpu", cpus, smt);
++	if (err)
++		goto out;
++	skel = rfs_policy_open(&topo, ifindex, mode);
++	if (!skel) {
++		err = -errno;
++		goto out;
++	}
++	err = rfs_policy_load(skel, &topo);
++	if (!err)
++		err = rfs_policy_prepare(skel);
++	if (err)
++		goto out;
++	if (!strcmp(command, "attach")) {
++		fd = bpf_link_create(bpf_map__fd(skel->maps.rfs_ops), 0, BPF_STRUCT_OPS, NULL);
++		if (fd < 0) {
++			err = -errno;
++			goto out;
++		}
++		err = bpf_obj_pin(fd, pin);
++	} else {
++		LIBBPF_OPTS(bpf_link_update_opts, update,
++			    .flags = BPF_F_REPLACE,
++			    .old_map_fd = old_fd,
++		);
++
++		err = bpf_link_update(fd, bpf_map__fd(skel->maps.rfs_ops), &update);
++	}
++	if (!err)
++		printf("%s: device=%s mode=%s candidates=%u link=%s\n",
++		       command, dev, mode == RFS_PROCESS ? "process" :
++		       mode == RFS_CLUSTER ? "cluster" : "numa",
++		       topo.groups[1].count, pin);
++out:
++	if (err) {
++		fprintf(stderr, "rfs_policy: %s\n", strerror(-err));
++		if (err == -EINVAL)
++			usage(argv[0]);
++	}
++	if (fd >= 0)
++		close(fd);
++	if (old_fd >= 0)
++		close(old_fd);
++	rfs_policy__destroy(skel);
++	rfs_topology_free(&topo);
++	return !!err;
++}
+diff --git a/samples/bpf/rfs_policy.h b/samples/bpf/rfs_policy.h
+new file mode 100644
+index 000000000000..9177295cb45d
+--- /dev/null
++++ b/samples/bpf/rfs_policy.h
+@@ -0,0 +1,89 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef RFS_POLICY_H
++#define RFS_POLICY_H
++
++#ifndef __VMLINUX_H__
++#include <linux/types.h>
++#else
++/* CO-RE flavors also allow building tests with CONFIG_BPF_RFS disabled. */
++struct bpf_rfs_ctx___local {
++	__u32 flow_hash;
++	__u32 ifindex;
++	__u32 rx_queue;
++	__u32 rx_cpu;
++	__s32 app_cpu_hint;
++	__s32 active_cpu;
++	__u32 nr_cpu_ids;
++	__u32 flags;
++} __attribute__((preserve_access_index));
++
++struct bpf_rfs_ops___local {
++	__u32 ifindex;
++	__u32 flags;
++	char name[16];
++	__u32 (*select_cpu)(const struct bpf_rfs_ctx___local *rctx);
++};
++
++#define RFS_CTX_APP_CPU_ONLINE (1U << 1)
++#define RFS_CTX_ACTIVE_CPU_ONLINE (1U << 2)
++#endif
++
++enum rfs_policy_mode {
++	RFS_PROCESS,
++	RFS_CLUSTER,
++	RFS_NUMA,
++};
++
++enum rfs_group_kind {
++	RFS_GLOBAL_GROUP,
++	RFS_CLUSTER_GROUP,
++	RFS_NUMA_GROUP,
++	RFS_GROUP_KINDS,
++};
++
++struct rfs_group {
++	__u32 base;
++	__u32 count;
++};
++
++struct rfs_cpu_group {
++	__u32 id;
++	__u32 rank;
++	__u32 exclude_start;
++	__u32 exclude_count;
++};
++
++struct rfs_cpu {
++	struct rfs_cpu_group group[RFS_GROUP_KINDS];
++	__u32 member;
++};
++
++struct rfs_policy_stats {
++	__u64 calls;
++	__u64 defaults;
++	__u64 proposed;
++	__u64 kept_active;
++};
++
++#ifndef __VMLINUX_H__
++struct rfs_policy;
++
++struct rfs_topology {
++	struct rfs_cpu *cpus;
++	struct rfs_group *groups;
++	__u32 *slots;
++	__u32 nr_cpus;
++	__u32 nr_groups;
++	__u32 nr_slots;
++};
++
++int rfs_parse_cpulist(const char *text, unsigned char **mask, unsigned int *size);
++int rfs_topology_load(struct rfs_topology *topo, const char *sysfs,
++		      const char *candidates, int exclude_smt);
++void rfs_topology_free(struct rfs_topology *topo);
++struct rfs_policy *rfs_policy_open(const struct rfs_topology *topo,
++				   unsigned int ifindex, enum rfs_policy_mode mode);
++int rfs_policy_load(struct rfs_policy *skel, const struct rfs_topology *topo);
++int rfs_policy_prepare(struct rfs_policy *skel);
++#endif
++#endif
+diff --git a/samples/bpf/rfs_policy_loader.c b/samples/bpf/rfs_policy_loader.c
+new file mode 100644
+index 000000000000..04737ad79a53
+--- /dev/null
++++ b/samples/bpf/rfs_policy_loader.c
+@@ -0,0 +1,131 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <errno.h>
++#include <stdlib.h>
++#include <string.h>
++#include <bpf/bpf.h>
++#include <bpf/btf.h>
++#include <bpf/libbpf.h>
++#include "rfs_policy.h"
++#include "rfs_policy.skel.h"
++
++#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
++
++struct rfs_policy *rfs_policy_open(const struct rfs_topology *topo,
++				   unsigned int ifindex, enum rfs_policy_mode mode)
++{
++	struct rfs_policy *skel = rfs_policy__open();
++
++	if (!skel)
++		return NULL;
++	skel->struct_ops.rfs_ops->ifindex = ifindex;
++	skel->rodata->mode = mode;
++	if (bpf_map__set_max_entries(skel->maps.cpu_topology, topo->nr_cpus) ||
++	    bpf_map__set_max_entries(skel->maps.groups, topo->nr_groups) ||
++	    bpf_map__set_max_entries(skel->maps.cpu_slots, topo->nr_slots ?: 1)) {
++		rfs_policy__destroy(skel);
++		return NULL;
++	}
++	return skel;
++}
++
++static int fill_map(struct bpf_map *map, const void *values, unsigned int count,
++		    size_t size)
++{
++	unsigned int i;
++	int err, fd = bpf_map__fd(map);
++
++	for (i = 0; i < count; i++) {
++		err = bpf_map_update_elem(fd, &i, values + i * size, BPF_ANY);
++		if (err)
++			return err;
++	}
++	return bpf_map_freeze(fd);
++}
++
++int rfs_policy_load(struct rfs_policy *skel, const struct rfs_topology *topo)
++{
++	int err;
++
++	err = rfs_policy__load(skel);
++	if (!err)
++		err = fill_map(skel->maps.cpu_topology, topo->cpus, topo->nr_cpus,
++			       sizeof(*topo->cpus));
++	if (!err)
++		err = fill_map(skel->maps.groups, topo->groups, topo->nr_groups,
++			       sizeof(*topo->groups));
++	if (!err)
++		err = fill_map(skel->maps.cpu_slots, topo->slots, topo->nr_slots,
++			       sizeof(*topo->slots));
++	return err;
++}
++
++static int member_offset(const struct btf *btf, int type_id, const char *name)
++{
++	const struct btf_type *t = btf__type_by_id(btf, type_id);
++	const struct btf_member *m;
++	unsigned int i;
++
++	if (!t || !btf_is_struct(t))
++		return -EINVAL;
++	m = btf_members(t);
++	for (i = 0; i < btf_vlen(t); i++, m++)
++		if (!strcmp(btf__name_by_offset(btf, m->name_off), name))
++			return btf_member_bit_offset(t, i) / 8;
++	return -ENOENT;
++}
++
++/*
++ * Prepare a link-compatible map without attaching it. Resolve the kernel's
++ * wrapper/member offsets from BTF instead of assuming its cacheline padding.
++ * This also permits raw BPF_LINK_UPDATE with expected-old-map protection on
++ * a pinned link opened by another process.
++ */
++int rfs_policy_prepare(struct rfs_policy *skel)
++{
++	struct bpf_map_info info = {};
++	unsigned int len = sizeof(info), zero = 0;
++	unsigned long prog_fd = bpf_program__fd(skel->progs.rfs_select_cpu);
++	struct btf *btf = NULL;
++	void *value = NULL;
++	int data, type, offset, err;
++	unsigned int ifindex = skel->struct_ops.rfs_ops->ifindex;
++	static const char name[16] = "rfs_policy";
++	struct {
++		const char *name;
++		const void *data;
++		size_t size;
++	} fields[] = {
++		{ "ifindex", &ifindex, sizeof(ifindex) },
++		{ "name", name, sizeof(name) },
++		{ "select_cpu", &prog_fd, sizeof(prog_fd) },
++	};
++	unsigned int i;
++
++	err = bpf_map_get_info_by_fd(bpf_map__fd(skel->maps.rfs_ops), &info, &len);
++	if (err)
++		return err;
++	btf = btf__load_vmlinux_btf();
++	if (!btf)
++		return -errno;
++	err = -EINVAL;
++	data = member_offset(btf, info.btf_vmlinux_value_type_id, "data");
++	type = btf__find_by_name_kind(btf, "bpf_rfs_ops", BTF_KIND_STRUCT);
++	if (data < 0 || type < 0)
++		goto out;
++	value = calloc(1, info.value_size);
++	if (!value) {
++		err = -ENOMEM;
++		goto out;
++	}
++	for (i = 0; i < ARRAY_SIZE(fields); i++) {
++		offset = member_offset(btf, type, fields[i].name);
++		if (offset < 0 || (size_t)data + offset + fields[i].size > info.value_size)
++			goto out;
++		memcpy(value + data + offset, fields[i].data, fields[i].size);
++	}
++	err = bpf_map_update_elem(bpf_map__fd(skel->maps.rfs_ops), &zero, value, 0);
++out:
++	free(value);
++	btf__free(btf);
++	return err;
++}
+diff --git a/samples/bpf/rfs_policy_topology.c b/samples/bpf/rfs_policy_topology.c
+new file mode 100644
+index 000000000000..96a5e9ddaca6
+--- /dev/null
++++ b/samples/bpf/rfs_policy_topology.c
+@@ -0,0 +1,284 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <ctype.h>
++#include <errno.h>
++#include <glob.h>
++#include <limits.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include "rfs_policy.h"
++
++/* Parse the complete sysfs list before intersecting it with a candidate set. */
++int rfs_parse_cpulist(const char *text, unsigned char **mask, unsigned int *size)
++{
++	unsigned char *bits = NULL, *tmp;
++	unsigned long first, last, i;
++	unsigned int n = 0;
++	char *end;
++	int err = -EINVAL;
++
++	*mask = NULL;
++	*size = 0;
++	while (isspace(*text))
++		text++;
++	while (*text) {
++		if (!isdigit(*text))
++			goto fail;
++		errno = 0;
++		first = strtoul(text, &end, 10);
++		if (errno || first >= INT_MAX)
++			goto fail;
++		text = end;
++		last = first;
++		if (*text == '-') {
++			if (!isdigit(*++text))
++				goto fail;
++			last = strtoul(text, &end, 10);
++			if (errno || last >= INT_MAX || last < first)
++				goto fail;
++			text = end;
++		}
++		if (last >= n) {
++			tmp = realloc(bits, last + 1);
++			if (!tmp) {
++				err = -ENOMEM;
++				goto fail;
++			}
++			bits = tmp;
++			memset(bits + n, 0, last + 1 - n);
++			n = last + 1;
++		}
++		for (i = first; i <= last; i++)
++			bits[i] = 1;
++		if (*text == ',') {
++			if (!*++text)
++				goto fail;
++			continue;
++		}
++		while (isspace(*text))
++			text++;
++		if (*text)
++			goto fail;
++	}
++	*mask = bits;
++	*size = n;
++	return 0;
++fail:
++	free(bits);
++	return err;
++}
++
++static int read_list(const char *path, unsigned char **mask, unsigned int *size)
++{
++	char *line = NULL;
++	size_t capacity = 0;
++	FILE *file;
++	int err;
++
++	file = fopen(path, "re");
++	if (!file)
++		return -errno;
++	if (getline(&line, &capacity, file) < 0)
++		err = -EIO;
++	else
++		err = rfs_parse_cpulist(line, mask, size);
++	free(line);
++	fclose(file);
++	return err;
++}
++
++static int first_cpu(const char *path)
++{
++	unsigned char *mask = NULL;
++	unsigned int size = 0, i;
++	int result = -1;
++
++	if (read_list(path, &mask, &size))
++		return -1;
++	for (i = 0; i < size; i++) {
++		if (!mask[i])
++			continue;
++		result = i;
++		break;
++	}
++	free(mask);
++	return result;
++}
++
++struct cpu_info {
++	int cluster;
++	int node;
++	int core;
++	unsigned int id;
++};
++
++static int compare_cpu(const void *a, const void *b)
++{
++	const struct cpu_info *ca = a, *cb = b;
++
++	if (ca->core != cb->core)
++		return ca->core < cb->core ? -1 : 1;
++	return ca->id < cb->id ? -1 : ca->id != cb->id;
++}
++
++void rfs_topology_free(struct rfs_topology *topo)
++{
++	free(topo->cpus);
++	free(topo->groups);
++	free(topo->slots);
++	memset(topo, 0, sizeof(*topo));
++}
++
++int rfs_topology_load(struct rfs_topology *topo, const char *sysfs,
++		      const char *candidates, int exclude_smt)
++{
++	unsigned char *possible = NULL, *online = NULL, *allowed = NULL;
++	unsigned int np = 0, no = 0, na = 0, i, j, kind, id, start, end;
++	struct cpu_info *info = NULL, *sorted = NULL;
++	int *keys = NULL, key, err, missing_cluster = 0;
++	char path[PATH_MAX];
++	glob_t nodes;
++
++	memset(topo, 0, sizeof(*topo));
++	snprintf(path, sizeof(path), "%s/possible", sysfs);
++	err = read_list(path, &possible, &np);
++	if (err || !np) {
++		err = err ?: -EINVAL;
++		goto out;
++	}
++	snprintf(path, sizeof(path), "%s/online", sysfs);
++	err = read_list(path, &online, &no);
++	if (err)
++		goto out;
++	if (candidates) {
++		err = rfs_parse_cpulist(candidates, &allowed, &na);
++		if (err)
++			goto out;
++		for (i = 0; i < na; i++) {
++			if (allowed[i] && (i >= np || !possible[i])) {
++				err = -EINVAL;
++				goto out;
++			}
++		}
++	}
++	/* At most two per-CPU groups plus the shared global and empty groups. */
++	if (np > (UINT_MAX - 2) / 3) {
++		err = -EOVERFLOW;
++		goto out;
++	}
++	topo->cpus = calloc(np, sizeof(*topo->cpus));
++	topo->groups = calloc(2 * np + 2, sizeof(*topo->groups));
++	topo->slots = calloc(3 * np, sizeof(*topo->slots));
++	info = calloc(np, sizeof(*info));
++	sorted = calloc(np, sizeof(*sorted));
++	keys = calloc(2 * np + 2, sizeof(*keys));
++	if (!topo->cpus || !topo->groups || !topo->slots || !info || !sorted || !keys) {
++		err = -ENOMEM;
++		goto out;
++	}
++	topo->nr_cpus = np;
++	/* Group 0 is empty (missing topology); group 1 is the global pool. */
++	topo->nr_groups = 2;
++	for (i = 0; i < np; i++) {
++		info[i].id = i;
++		info[i].core = i;
++		info[i].cluster = -1;
++		info[i].node = -1;
++		if (!possible[i])
++			continue;
++		topo->cpus[i].member = i < no && online[i] &&
++			(!candidates || (i < na && allowed[i])) && i < 0xffff;
++		topo->cpus[i].group[RFS_GLOBAL_GROUP].id = 1;
++		snprintf(path, sizeof(path), "%s/cpu%u/topology/cluster_cpus_list", sysfs, i);
++		info[i].cluster = first_cpu(path);
++		missing_cluster += info[i].cluster < 0;
++		snprintf(path, sizeof(path), "%s/cpu%u/topology/thread_siblings_list", sysfs, i);
++		key = first_cpu(path);
++		if (key >= 0) {
++			info[i].core = key;
++		} else if (exclude_smt && i < no && online[i]) {
++			err = -ENOENT;
++			goto out;
++		}
++		snprintf(path, sizeof(path), "%s/cpu%u/node[0-9]*", sysfs, i);
++		if (!glob(path, 0, NULL, &nodes)) {
++			if (nodes.gl_pathc == 1)
++				sscanf(strrchr(nodes.gl_pathv[0], '/') + 1,
++				       "node%d", &info[i].node);
++		}
++		globfree(&nodes);
++	}
++	if (missing_cluster)
++		fprintf(stderr, "cluster topology missing for %d CPUs; using NUMA fallback\n",
++			missing_cluster);
++
++	for (kind = RFS_CLUSTER_GROUP; kind <= RFS_NUMA_GROUP; kind++) {
++		start = topo->nr_groups;
++		for (i = 0; i < np; i++) {
++			key = kind == RFS_CLUSTER_GROUP ? info[i].cluster : info[i].node;
++			if (!possible[i] || key < 0)
++				continue;
++			for (id = start; id < topo->nr_groups; id++)
++				if (keys[id] == key)
++					break;
++			if (id == topo->nr_groups)
++				keys[topo->nr_groups++] = key;
++			topo->cpus[i].group[kind].id = id;
++		}
++	}
++	memcpy(sorted, info, np * sizeof(*info));
++	qsort(sorted, np, sizeof(*sorted), compare_cpu);
++	for (kind = 0; kind < RFS_GROUP_KINDS; kind++) {
++		for (id = 1; id < topo->nr_groups; id++) {
++			struct rfs_group *group = &topo->groups[id];
++
++			start = topo->nr_slots;
++			for (j = 0; j < np; j++) {
++				i = sorted[j].id;
++				if (!topo->cpus[i].member || topo->cpus[i].group[kind].id != id)
++					continue;
++				topo->cpus[i].group[kind].rank = topo->nr_slots - start;
++				topo->slots[topo->nr_slots++] = i;
++			}
++			if (topo->nr_slots == start)
++				continue;
++			group->base = start;
++			group->count = topo->nr_slots - start;
++			for (i = 0; i < np; i++) {
++				struct rfs_cpu_group *cg = &topo->cpus[i].group[kind];
++
++				if (!possible[i] || cg->id != id)
++					continue;
++				start = group->count;
++				end = 0;
++				for (j = 0; j < group->count; j++) {
++					unsigned int candidate = topo->slots[group->base + j];
++
++					if (exclude_smt ? info[candidate].core != info[i].core :
++					    candidate != i)
++						continue;
++					if (start == group->count)
++						start = j;
++					end = j + 1;
++				}
++				if (end) {
++					cg->exclude_start = start;
++					cg->exclude_count = end - start;
++				}
++			}
++		}
++	}
++	err = 0;
++out:
++	free(possible);
++	free(online);
++	free(allowed);
++	free(info);
++	free(sorted);
++	free(keys);
++	if (err)
++		rfs_topology_free(topo);
++	return err;
++}
+-- 
+2.43.0
+

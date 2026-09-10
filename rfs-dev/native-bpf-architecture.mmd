@@ -1,0 +1,58 @@
+flowchart TB
+    subgraph CONTROL["控制面：构建并发布完整策略版本"]
+        TOPO["sysfs CPU 拓扑 + 用户配置<br/>process / cluster / NUMA / 候选 CPU / SMT 排除"]
+        LOAD["rfs_policy 用户态工具<br/>加载程序 → 填充拓扑 map → freeze"]
+        LINK["struct_ops BPF link<br/>每个 netdevice 一个绑定<br/>pin / expected-old 原子 update / detach"]
+        TOPO --> LOAD --> LINK
+    end
+
+    subgraph NATIVE["原生状态：内核负责维护"]
+        APP["应用访问 socket"]
+        HINT["全局 RFS 提示表<br/>保留原始 app_cpu_hint"]
+        FLOW["每个 RX 队列的 RFS 槽位<br/>active_cpu / last_qtail"]
+        QUEUE["每 CPU backlog<br/>真实入队 tail / 已处理 head"]
+        APP --> HINT
+    end
+
+    subgraph RX["数据面：get_rps_cpu() 及原生接收路径"]
+        SKB["接收 skb"]
+        LOOKUP{"原生 RFS 查询命中？"}
+        GATE{"有绑定策略且提示有效？"}
+        BPF["只读 select_cpu(ctx)<br/>读取本代拓扑 map<br/>返回 0 或 CPU + 1"]
+        VAL["内核校验建议 CPU<br/>范围 / possible / online<br/>DEFAULT 或无效 → app_cpu_hint"]
+        NATIVECPU["期望 CPU = app_cpu_hint"]
+        GUARD["原生迁移检查<br/>新旧 CPU 不同，并且旧 CPU 未设置、<br/>离线或 head 已追上 last_qtail，才允许切换"]
+        ACTIVE["允许切换：set_rps_cpu()<br/>否则：沿用 active_cpu"]
+        FINAL{"最终原生 CPU 可用？"}
+        FALLBACK["原有 RPS / 本地接收"]
+        ENQ["enqueue_to_backlog()<br/>成功入队后保存真实 last_qtail"]
+        STACK["原生协议栈处理"]
+        SKB --> LOOKUP
+        LOOKUP -->|命中| GATE
+        LOOKUP -->|未命中或表未启用| FALLBACK
+        GATE -->|是| BPF --> VAL --> GUARD
+        GATE -->|否| NATIVECPU --> GUARD
+        GUARD --> ACTIVE --> FINAL
+        FINAL -->|可用| ENQ --> STACK
+        FINAL -->|不可用| FALLBACK
+        FALLBACK -->|RPS 选到 CPU| ENQ
+        FALLBACK -->|未选到 CPU| STACK
+    end
+
+    HINT -.->|应用提示| LOOKUP
+    FLOW -.->|读取槽位| LOOKUP
+    FLOW -.->|迁移边界| GUARD
+    QUEUE -.->|input_queue_head| GUARD
+    LINK -.->|RTNL + RCU 发布策略指针| GATE
+    LOAD -.->|本代只读配置| BPF
+    ACTIVE -.->|原生更新| FLOW
+    ENQ -.->|原生入队与进度| QUEUE
+
+    classDef control fill:#eff6ff,stroke:#2563eb,color:#12305b;
+    classDef policy fill:#f0fdfa,stroke:#0d9488,color:#134e4a;
+    classDef native fill:#f8fafc,stroke:#64748b,color:#172b4d;
+    classDef guard fill:#fff7ed,stroke:#d97706,color:#7c2d12;
+    class TOPO,LOAD,LINK control;
+    class BPF,VAL policy;
+    class APP,HINT,FLOW,QUEUE,SKB,LOOKUP,GATE,NATIVECPU,ACTIVE,FINAL,FALLBACK,ENQ,STACK native;
+    class GUARD guard;

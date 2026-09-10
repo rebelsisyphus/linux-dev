@@ -1,0 +1,46 @@
+[
+  {
+    "commit": "a9f9acc13e35cba084437aad11531e7153d613f7",
+    "subject": "net: rfs: Add a BPF struct_ops hook for CPU selection",
+    "files": [
+      "include/linux/netdevice.h",
+      "include/net/bpf_rfs.h",
+      "net/Kconfig",
+      "net/core/Makefile",
+      "net/core/dev.c",
+      "net/core/bpf_rfs.c"
+    ]
+  },
+  {
+    "commit": "36e528bcd0c99d5ee950fec5971752d9d019899f",
+    "subject": "samples/bpf: Add topology-aware RFS CPU policies",
+    "files": [
+      "samples/bpf/Makefile.rfs",
+      "samples/bpf/rfs_policy.bpf.c",
+      "samples/bpf/rfs_policy.c",
+      "samples/bpf/rfs_policy.h",
+      "samples/bpf/rfs_policy_loader.c",
+      "samples/bpf/rfs_policy_topology.c"
+    ]
+  },
+  {
+    "commit": "10905c3f4f21f7486deafbe9d19cfea9dcd7449b",
+    "subject": "selftests/bpf: Cover native RFS CPU selection and policy lifetime",
+    "files": [
+      "tools/testing/selftests/Makefile",
+      "tools/testing/selftests/bpf/rfs/Makefile",
+      "tools/testing/selftests/bpf/rfs/config",
+      "tools/testing/selftests/bpf/rfs/test_rfs.bpf.c",
+      "tools/testing/selftests/bpf/rfs/test_rfs.c",
+      "tools/testing/selftests/bpf/rfs/test_rfs.sh"
+    ]
+  },
+  {
+    "commit": "496090c2f51f12e63e954d18f214317ab3ce7b5a",
+    "subject": "docs: networking: Describe BPF CPU selection for RFS",
+    "files": [
+      "Documentation/networking/bpf_rfs.rst",
+      "Documentation/networking/index.rst"
+    ]
+  }
+]

@@ -1,0 +1,31 @@
+Warning: Permanently added '[localhost]:2242' (ED25519) to the list of known hosts.
+Linux sisyphus 7.2.0-rfs-bpf+ #296 SMP PREEMPT_DYNAMIC Mon Sep  7 12:27:25 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+#            OK  rfs.empty_candidates
+ok 22 rfs.empty_candidates
+# PASSED: 22 / 22 tests passed.
+# Totals: pass:22 fail:0 xfail:0 xpass:0 skip:0 error:0
+PASS devices found
+PASS topology load
+PASS three policy objects opened
+PASS prepare a
+PASS prepare b
+PASS prepare different device
+PASS attach without effective CAP_NET_ADMIN: EPERM
+PASS authorized attach
+PASS duplicate device: EBUSY
+PASS update without effective CAP_NET_ADMIN: EPERM
+PASS update to different device: EINVAL
+PASS wrong expected-old map: EPERM
+PASS valid expected-old update
+PASS detach after update
+PASS old map reusable after detach
+PASS detach reused map
+attach: device=review0 mode=numa candidates=2 link=/run/rfs-review-bpf/old
+PASS old link rejects update after device netns move: ENODEV
+link_id=39 map_id=168
+attach: device=review0 mode=numa candidates=2 link=/run/rfs-review-bpf/new
+PASS new policy attaches to moved device
+PASS netns deletion completes with pinned policy links
+link_id=40 map_id=186
+PASS ifindex reuse does not reactivate old link: ENODEV
+PASS no kernel failure signatures

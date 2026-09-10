@@ -1,0 +1,154 @@
+The first boot of the programmable RFS kernel panicked while registering
+bpf_rfs_ops. The cause is confirmed: the new static bpf_rfs_struct_ops
+descriptor omits its mandatory .init callback. bpf_struct_ops_desc_init()
+calls that NULL pointer during the late initcall, causing an instruction-fetch
+fault at address zero and killing PID 1.
+
+The failing kernel was 7.2.0-rfs-bpf+ #295, x86-64, SMP, PREEMPT_DYNAMIC with
+PREEMPT(full) active and KASAN enabled. The machine was QEMU Standard PC (Q35
++ ICH9, 2009), BIOS 1.16.3-debian-1.16.3-2. Booting the newly built image
+triggered the failure; no userspace reproducer or RFS traffic was required.
+
+The relevant serial output was:
+
+    BUG: kernel NULL pointer dereference, address: 0000000000000000
+    #PF: supervisor instruction fetch in kernel mode
+    #PF: error_code(0x0010) - not-present page
+    CPU: 0 UID: 0 PID: 1 Comm: swapper/0
+    RIP: 0010:0x0
+    RAX: 0000000000000000
+    R12: ffffffffa3bfab40
+
+The reliable call trace was:
+
+    bpf_struct_ops_desc_init+0x6cc/0x870
+    __register_bpf_struct_ops+0x170/0x2a0
+    bpf_rfs_init+0x2b/0x50
+    do_one_initcall+0x9a/0x2e0
+    kernel_init_freeable+0x294/0x460
+    kernel_init+0x1f/0x1e0
+    ret_from_fork+0x2ac/0x3c0
+    ret_from_fork_asm+0x1a/0x30
+
+    Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000009
+    Kernel Offset: 0x1ee00000 from 0xffffffff81000000
+
+The following source excerpts and binary evidence were captured from the
+failing build before any repair. In net/core/bpf_rfs.c, registration occurs
+directly from the built-in late initcall:
+
+    static int __init bpf_rfs_init(void)
+    {
+            int err;
+
+            err = register_netdevice_notifier(&bpf_rfs_netdev_notifier);
+            if (err)
+                    return err;
+            err = register_bpf_struct_ops(&bpf_rfs_struct_ops, bpf_rfs_ops);
+            if (err)
+                    unregister_netdevice_notifier(&bpf_rfs_netdev_notifier);
+            return err;
+    }
+    late_initcall(bpf_rfs_init);
+
+Its descriptor initializes the other operations but does not initialize .init:
+
+    static struct bpf_struct_ops bpf_rfs_struct_ops = {
+            .verifier_ops = &bpf_rfs_verifier_ops,
+            .reg = bpf_rfs_reg,
+            .unreg = bpf_rfs_unreg,
+            .update = bpf_rfs_update,
+            .check_member = bpf_rfs_check_member,
+            .init_member = bpf_rfs_init_member,
+            .validate = bpf_rfs_validate,
+            .name = "bpf_rfs_ops",
+            .cfi_stubs = &bpf_rfs_cfi_stubs,
+            .owner = THIS_MODULE,
+    };
+
+The omitted pointer has static storage and is zero-initialized. In
+include/linux/bpf.h, it is the second pointer in struct bpf_struct_ops:
+
+    struct bpf_struct_ops {
+            const struct bpf_verifier_ops *verifier_ops;
+            int (*init)(struct btf *btf);
+
+kernel/bpf/btf.c:btf_add_struct_ops() preserves the supplied descriptor
+pointer and immediately passes it to descriptor initialization:
+
+    tab->ops[btf->struct_ops_tab->cnt].st_ops = st_ops;
+
+    err = bpf_struct_ops_desc_init(&tab->ops[btf->struct_ops_tab->cnt], btf, log);
+
+After validating BTF types and member prototypes,
+kernel/bpf/bpf_struct_ops.c:bpf_struct_ops_desc_init() invokes .init
+unconditionally:
+
+    if (st_ops->init(btf)) {
+            pr_warn("Error in init bpf_struct_ops %s\n",
+                    st_ops->name);
+            err = -EINVAL;
+            goto errout;
+    }
+
+No caller supplies a default callback. The error branch requires the callback
+to return, so it cannot recover from an instruction fetch at zero.
+
+The original vmlinux has Build ID defb294bfd7ef0093b57266326729f5bf315625a.
+Its bpf_struct_ops_desc_init symbol begins at 0xffffffff8162f450. The reported
+return offset +0x6cc is 0xffffffff8162fb1c, immediately after the indirect
+call below:
+
+    ffffffff8162fb0f:       49 8b 44 24 08          mov    0x8(%r12),%rax
+    ffffffff8162fb14:       4c 89 f7                mov    %r14,%rdi
+    ffffffff8162fb17:       e8 64 ee 98 01          call   ffffffff82fbe980 <__x86_indirect_thunk_array>
+    ffffffff8162fb1c:       89 c3                   mov    %eax,%ebx
+
+The call loads the pointer at descriptor offset 8 into RAX. The thunk uses RAX
+as its branch target. That offset is struct bpf_struct_ops.init, rather than
+.init_member, .reg, or a policy callback.
+
+The original descriptor is located at 0xffffffff84dfab40. Its first 16 bytes
+in .data were:
+
+    ffffffff84dfab40 e0e65e83 ffffffff 00000000 00000000
+
+The second eight-byte word is zero. Adding the reported KASLR offset
+0x1ee00000 to the descriptor address gives 0xffffffffa3bfab40, exactly the
+crash R12. The NULL .init value therefore explains both RAX=0 and RIP=0 at the
+exact reported callsite. The disassembly of bpf_rfs_init() also passes this
+same descriptor address to __register_bpf_struct_ops().
+
+The narrow correction is to provide a separate, correctly typed initializer in
+net/core/bpf_rfs.c and assign it to .init. The RFS verifier currently uses
+generic BTF context access and requires no additional BTF lookup state in this
+initializer. The proposed callback is:
+
+    static int bpf_rfs_ops_init(struct btf *btf)
+    {
+            return 0;
+    }
+
+The descriptor then needs the following initializer:
+
+    .init = bpf_rfs_ops_init,
+
+The existing bpf_rfs_init(void) late initcall cannot serve as this callback:
+it has a different signature and performs registration itself. The generic
+struct_ops framework does not need to change to correct this integration
+error.
+
+An incorrect descriptor or an incomplete BTF lookup does not explain this
+panic. The relocated descriptor address and offset-8 load identify the actual
+callback. Missing BTF types, an invalid wrapper, and invalid member prototypes
+return before this callsite. CFI stubs and .init_member are separate fields
+and do not populate .init.
+
+No race, teardown, allocation failure, or RCU lifetime failure is needed to
+produce the fault. The NULL pointer is already present in the static data of
+the original image. No suspect or related commit was identified; the affected
+code is the newly added local RFS integration.
+
+This report confirms the cause of the original boot panic. It does not
+establish that a repaired image boots or that programmable RFS functional
+tests pass. Rebuild and boot validation must precede those functional tests.

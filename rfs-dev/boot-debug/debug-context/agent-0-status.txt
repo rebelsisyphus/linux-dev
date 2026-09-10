@@ -1,0 +1,1 @@
+[agent-0] DONE: Theory T1 confirmed; T2 eliminated for this panic. Result JSON validated with exact original vmlinux evidence (11 functions, 7 findings).

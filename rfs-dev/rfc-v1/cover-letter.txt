@@ -1,0 +1,164 @@
+Hi,
+
+This RFC adds an optional BPF policy for choosing the desired CPU in
+native Receive Flow Steering (RFS). It exposes the policy decision after
+the native flow lookup, while leaving migration checks, active CPU state
+and backlog accounting with RFS.
+
+The initial use case is to experiment with processing receive traffic on
+another CPU in the application's cluster or NUMA node. Native RFS uses
+the application's CPU hint; some workloads may prefer a nearby CPU to
+reduce competition with application work. A BPF policy allows that choice
+to be changed independently of the kernel. The series includes examples
+for exercising this interface; locality benefits and processing overhead
+still need to be measured.
+
+I would like feedback on the hook placement, attachment model and
+validation requirements before developing this beyond an RFC.
+
+Data path
+---------
+
+CONFIG_BPF_RFS adds a bpf_rfs_ops struct_ops type with one non-sleepable
+select_cpu() callback. The hook is in get_rps_cpu(), after a native RFS
+match and the RX queue's flow-slot lookup, immediately before the native
+migration check:
+
+  application socket access --> native app-CPU hint
+                                        |
+  received skb ----------------> native RFS lookup
+                                  |           |
+                                 hit         miss
+                                  |           +--> existing RPS/local path
+                                  v
+                         optional BPF select_cpu()
+                                  |
+                         validate desired CPU
+                                  |
+                       native migration/CPU checks
+                                  |
+                         native receive path
+
+The read-only context contains the flow hash, device and RX queue/CPU,
+application CPU hint, active slot CPU, CPU ID limit and online snapshot
+flags. Return 0 to retain the native desired CPU, or CPU + 1 to propose
+another CPU. Invalid or offline proposals fall back to the native hint.
+The callback does not run on an RFS miss or when the native tables are
+absent. A static key bypasses the policy lookup when no device is bound.
+
+Both the proposal and fallback pass through the existing migration check.
+A new desired CPU can therefore remain deferred while the old backlog is
+busy. The application hint is not overwritten, and the policy does not
+own active_cpu, last_qtail or the backlog. Choosing a CPU is not a record
+of a completed migration or successful enqueue. The implementation reuses
+struct_ops for the callback and the native receive path for queueing.
+
+Attachment and policy updates
+-----------------------------
+
+A link binds one struct_ops instance to one netdevice. Initial attachment
+resolves the ifindex in the caller's network namespace and requires
+CAP_NET_ADMIN there, in addition to BPF loading privileges. Update keeps
+the same device and supports expected-old-map checking.
+
+RTNL serializes control operations and RCU protects the published policy.
+Update and detach wait for old readers before the struct_ops core can
+release the old map. NETDEV_UNREGISTER, including a namespace move,
+deactivates the binding without retaining a device reference. The link
+and map remain until released, but subsequent updates return ENODEV.
+The notifier does not call link detach while holding RTNL, avoiding the
+reverse ordering with the struct_ops update mutex. A retained map ID alone
+does not indicate that the device binding is still active.
+
+The sample provides process, cluster and NUMA policies, candidate CPU
+lists and optional SMT sibling exclusion. Shared topology groups support
+sparse CPU IDs without a fixed 64-CPU bound. Each version gets its own
+program-read-only topology maps, which are filled and frozen before
+attachment. A refresh replaces the complete version through the same
+pinned link. Candidate sets are preferences; fallback can use the native
+CPU. Topology refresh is explicit in this sample.
+
+Validation and remaining work
+-----------------------------
+
+Validation used an x86_64 QEMU/KVM guest with eight vCPUs, two NUMA nodes
+and KASAN, lockdep and PROVE_RCU enabled:
+
+- The kernel builds and boots. Building net/core/dev.o with BPF_RFS
+  disabled also passes and leaves no bpf_rfs symbol references.
+- All 22 dedicated RFS selftests pass, with zero skips. TCP traffic and
+  SO_INCOMING_CPU exercise CPU selection, native and invalid/offline
+  fallback, IPv6, application migration, replacement and detach.
+- Negative tests cover context writes, sleepable callbacks, reserved
+  flags, duplicate attachment and expected-old mismatches. Device
+  removal and concurrent updates are also exercised.
+- Sample topology policies, sparse CPU-list parsing, the pinned-link
+  CLI lifecycle and an additional 512-exec smoke test pass. No relevant
+  KASAN, lockdep or RCU diagnostics were observed.
+
+A further test-kernel run disables KASAN/lockdep and enables IRQ time
+accounting. It uses one virtio-net queue over TAP/vhost, IRQs on
+CPU0/node0, and Redis on CPU4 with memory bound to node1. Native RFS
+follows CPU4; static RPS and the NUMA sample use CPU5/node1. Redis 7.2.5
+serves 64-byte GETs without persistence, using one I/O thread. The client
+uses three threads, 384 connections and pipeline 8: 20M requests after
+500K warmup requests, with mode order rotated across three rounds.
+
+Median QPS and per-CPU busy percentages are:
+
+  Mode                  QPS   CPU0   CPU4   CPU5
+  No RPS/RFS        1354738   28.4   99.9    0.0
+  Native RFS        1088732   19.4   99.7    0.1
+  RPS CPU5          1441234   23.6   99.5   18.8
+  BPF NUMA CPU5     1438332   24.8   99.6   18.5
+
+BPF NUMA is +32.1% versus native RFS and -0.2% versus static RPS here.
+Its QPS spans 1331558-1442897 across the three runs. CPU4 is 99.4-99.9%
+busy in the central half of every timed run. Separate probes put at
+least 99.88% of TCP receive skbs on the expected CPUs and are detached
+before timing. No GET misses or error replies occur in the 12 runs.
+All 22 functional selftests also pass on this performance configuration.
+
+The AMD Ryzen 7 9700X host runs WSL2 and has only one physical NUMA node.
+These are virtual-topology measurements, not evidence of real remote-
+memory locality gains. Static RPS already expresses this fixed mapping;
+small differences need more repetitions. The core hook commit includes
+the detailed parameters and ranges. Isolated callback cost, the wider
+BPF selftest suite, other architectures, real NIC/aRFS operation and
+multiple RX queues remain outside this validation. Sustained backlog,
+queue overflow, tail wraparound, hash collisions, namespace moves and
+real SMT sibling exclusion need further dedicated tests. Large CPU ID
+coverage comes from parser tests; the guest had eight vCPUs.
+
+TCP payload checks do not demonstrate absence of packet reordering before
+protocol reassembly. The native ordering assumptions and limitations
+remain, including CPU hotplug and table or hardware-queue reconfiguration.
+The global socket flow table remains a hash-based hint, so per-device
+attachment does not provide exact socket or namespace ownership.
+
+Feedback requested
+------------------
+
+1. Is the desired-CPU decision in get_rps_cpu() the appropriate boundary
+   for programmable RFS, including the choice to leave RFS misses alone?
+2. Is per-netdevice struct_ops/link attachment the right scope, with
+   rx_queue available to the program, or is a per-RX-queue binding needed?
+3. Is retaining an inactive link after device unregister acceptable?
+   Should the interface expose binding status beyond the link's map ID?
+4. Which benchmarks and migration/ordering stress cases should gate a
+   non-RFC version? Beyond the Redis VM comparison, I plan to measure
+   real NUMA hardware and compare an unbound hook, DEFAULT BPF and
+   topology policies under the same load.
+
+The series contains the kernel hook, a userspace/BPF sample, dedicated
+selftests and documentation. The base-commit trailer identifies the
+tested mainline snapshot. Target-tree rebasing is pending agreement on
+the interface.
+
+Codex assisted with the implementation, samples, tests, documentation and
+this cover letter. The work started from a request to make native RFS CPU
+selection programmable with BPF while retaining native migration and
+queue accounting; the accompanying commits carry Assisted-by tags.
+
+Thanks,
+Dong

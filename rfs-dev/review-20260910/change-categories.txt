@@ -1,0 +1,356 @@
+CHANGE-1: bpf_rfs_cpu condition, if (static_branch_unlikely(&bpf_rfs_enabled))
+CHANGE-2: bpf_rfs_cpu exit/branch, return bpf_rfs_select_cpu(dev, skb, hash, app_cpu, active_cpu);
+CHANGE-3: bpf_rfs_cpu exit/branch, return app_cpu;
+CHANGE-4: bpf_rfs_cpu exit/branch, return app_cpu;
+CHANGE-5: bpf_rfs_select_cpu initialization/ownership, struct bpf_rfs_ctx ctx = {
+CHANGE-6: bpf_rfs_select_cpu condition, if (!ops || app_cpu >= nr_cpu_ids || !cpu_possible(app_cpu))
+CHANGE-7: bpf_rfs_select_cpu exit/branch, return app_cpu;
+CHANGE-8: bpf_rfs_select_cpu condition, if (skb_rx_queue_recorded(skb)) {
+CHANGE-9: bpf_rfs_select_cpu condition, if (cpu_online(app_cpu))
+CHANGE-10: bpf_rfs_select_cpu condition, if (active_cpu < nr_cpu_ids && cpu_online(active_cpu))
+CHANGE-11: bpf_rfs_select_cpu condition, if (!cpu)
+CHANGE-12: bpf_rfs_select_cpu exit/branch, return app_cpu;
+CHANGE-13: bpf_rfs_select_cpu condition, if (cpu >= nr_cpu_ids || cpu >= RPS_NO_CPU ||
+CHANGE-14: bpf_rfs_select_cpu exit/branch, return app_cpu;
+CHANGE-15: bpf_rfs_select_cpu exit/branch, return cpu;
+CHANGE-16: bpf_rfs_in_use loop, list_for_each_entry(binding, &bpf_rfs_bindings, list)
+CHANGE-17: bpf_rfs_in_use condition, if (binding->ops == ops)
+CHANGE-18: bpf_rfs_in_use initialization/ownership, if (binding->ops == ops)
+CHANGE-19: bpf_rfs_in_use exit/branch, return true;
+CHANGE-20: bpf_rfs_in_use exit/branch, return false;
+CHANGE-21: bpf_rfs_reg condition, if (!link)
+CHANGE-22: bpf_rfs_reg exit/branch, return -EOPNOTSUPP;
+CHANGE-23: bpf_rfs_reg condition, if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
+CHANGE-24: bpf_rfs_reg exit/branch, return -EPERM;
+CHANGE-25: bpf_rfs_reg allocation/free, binding = kzalloc_obj(*binding);
+CHANGE-26: bpf_rfs_reg condition, if (!binding)
+CHANGE-27: bpf_rfs_reg exit/branch, return -ENOMEM;
+CHANGE-28: bpf_rfs_reg locking/publication/lifetime, rtnl_lock();
+CHANGE-29: bpf_rfs_reg condition, if (!dev || dev->reg_state != NETREG_REGISTERED) {
+CHANGE-30: bpf_rfs_reg exit/branch, goto out;
+CHANGE-31: bpf_rfs_reg condition, if (rcu_access_pointer(dev->bpf_rfs_ops) || bpf_rfs_in_use(ops)) {
+CHANGE-32: bpf_rfs_reg exit/branch, goto out;
+CHANGE-33: bpf_rfs_reg initialization/ownership, binding->dev = dev;
+CHANGE-34: bpf_rfs_reg initialization/ownership, binding->ops = ops;
+CHANGE-35: bpf_rfs_reg initialization/ownership, binding->link = link;
+CHANGE-36: bpf_rfs_reg initialization/ownership, list_add(&binding->list, &bpf_rfs_bindings);
+CHANGE-37: bpf_rfs_reg locking/publication/lifetime, static_branch_inc(&bpf_rfs_enabled);
+CHANGE-38: bpf_rfs_reg locking/publication/lifetime, rcu_assign_pointer(dev->bpf_rfs_ops, ops);
+CHANGE-39: bpf_rfs_reg locking/publication/lifetime, rtnl_unlock();
+CHANGE-40: bpf_rfs_reg condition, if (err)
+CHANGE-41: bpf_rfs_reg allocation/free, kfree(binding);
+CHANGE-42: bpf_rfs_reg exit/branch, return err;
+CHANGE-43: bpf_rfs_deactivate condition, if (!binding->dev)
+CHANGE-44: bpf_rfs_deactivate exit/branch, return;
+CHANGE-45: bpf_rfs_deactivate locking/publication/lifetime, rcu_assign_pointer(binding->dev->bpf_rfs_ops, NULL);
+CHANGE-46: bpf_rfs_deactivate initialization/ownership, binding->dev = NULL;
+CHANGE-47: bpf_rfs_deactivate locking/publication/lifetime, static_branch_dec(&bpf_rfs_enabled);
+CHANGE-48: bpf_rfs_unreg locking/publication/lifetime, rtnl_lock();
+CHANGE-49: bpf_rfs_unreg loop, list_for_each_entry(binding, &bpf_rfs_bindings, list) {
+CHANGE-50: bpf_rfs_unreg condition, if (binding->link != link)
+CHANGE-51: bpf_rfs_unreg exit/branch, continue;
+CHANGE-52: bpf_rfs_unreg initialization/ownership, list_del(&binding->list);
+CHANGE-53: bpf_rfs_unreg exit/branch, break;
+CHANGE-54: bpf_rfs_unreg locking/publication/lifetime, rtnl_unlock();
+CHANGE-55: bpf_rfs_unreg exit/branch, /* The struct_ops core may release the trampoline after we return. */
+CHANGE-56: bpf_rfs_unreg locking/publication/lifetime, synchronize_rcu();
+CHANGE-57: bpf_rfs_unreg allocation/free, kfree(found);
+CHANGE-58: bpf_rfs_update locking/publication/lifetime, rtnl_lock();
+CHANGE-59: bpf_rfs_update loop, list_for_each_entry(binding, &bpf_rfs_bindings, list) {
+CHANGE-60: bpf_rfs_update condition, if (binding->link != link)
+CHANGE-61: bpf_rfs_update exit/branch, continue;
+CHANGE-62: bpf_rfs_update condition, if (!dev) {
+CHANGE-63: bpf_rfs_update exit/branch, break;
+CHANGE-64: bpf_rfs_update condition, if (binding->ops != old_kdata || ops->ifindex != dev->ifindex) {
+CHANGE-65: bpf_rfs_update exit/branch, break;
+CHANGE-66: bpf_rfs_update condition, if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN)) {
+CHANGE-67: bpf_rfs_update exit/branch, break;
+CHANGE-68: bpf_rfs_update condition, if (bpf_rfs_in_use(ops)) {
+CHANGE-69: bpf_rfs_update exit/branch, break;
+CHANGE-70: bpf_rfs_update initialization/ownership, binding->ops = ops;
+CHANGE-71: bpf_rfs_update locking/publication/lifetime, rcu_assign_pointer(dev->bpf_rfs_ops, ops);
+CHANGE-72: bpf_rfs_update exit/branch, break;
+CHANGE-73: bpf_rfs_update locking/publication/lifetime, rtnl_unlock();
+CHANGE-74: bpf_rfs_update condition, if (!err)
+CHANGE-75: bpf_rfs_update locking/publication/lifetime, synchronize_rcu();
+CHANGE-76: bpf_rfs_update exit/branch, return err;
+CHANGE-77: bpf_rfs_netdev_event condition, if (event != NETDEV_UNREGISTER)
+CHANGE-78: bpf_rfs_netdev_event exit/branch, return NOTIFY_DONE;
+CHANGE-79: bpf_rfs_netdev_event loop, list_for_each_entry(binding, &bpf_rfs_bindings, list)
+CHANGE-80: bpf_rfs_netdev_event condition, if (binding->dev == dev)
+CHANGE-81: bpf_rfs_netdev_event initialization/ownership, if (binding->dev == dev)
+CHANGE-82: bpf_rfs_netdev_event exit/branch, return NOTIFY_DONE;
+CHANGE-83: bpf_rfs_netdev_event initialization/ownership, static struct notifier_block bpf_rfs_netdev_notifier = {
+CHANGE-84: bpf_rfs_check_member exit/branch, return prog->sleepable ? -EINVAL : 0;
+CHANGE-85: bpf_rfs_init_member condition, switch (off) {
+CHANGE-86: bpf_rfs_init_member condition, if (!uops->ifindex || uops->ifindex > INT_MAX)
+CHANGE-87: bpf_rfs_init_member exit/branch, return -EINVAL;
+CHANGE-88: bpf_rfs_init_member exit/branch, return 1;
+CHANGE-89: bpf_rfs_init_member condition, if (bpf_obj_name_cpy(ops->name, uops->name, sizeof(ops->name)) <= 0)
+CHANGE-90: bpf_rfs_init_member exit/branch, return -EINVAL;
+CHANGE-91: bpf_rfs_init_member exit/branch, return 1;
+CHANGE-92: bpf_rfs_init_member exit/branch, return 0;
+CHANGE-93: bpf_rfs_validate exit/branch, return ops->select_cpu ? 0 : -EINVAL;
+CHANGE-94: bpf_rfs_default exit/branch, return BPF_RFS_DEFAULT;
+CHANGE-95: bpf_rfs_default initialization/ownership, static const struct bpf_verifier_ops bpf_rfs_verifier_ops = {
+CHANGE-96: bpf_rfs_default initialization/ownership, static struct bpf_rfs_ops bpf_rfs_cfi_stubs = {
+CHANGE-97: bpf_rfs_ops_init exit/branch, return 0;
+CHANGE-98: bpf_rfs_ops_init initialization/ownership, static struct bpf_struct_ops bpf_rfs_struct_ops = {
+CHANGE-99: bpf_rfs_init condition, if (err)
+CHANGE-100: bpf_rfs_init exit/branch, return err;
+CHANGE-101: bpf_rfs_init condition, if (err)
+CHANGE-102: bpf_rfs_init exit/branch, return err;
+CHANGE-103: file-scope condition, if (!group || !group->count)
+CHANGE-104: file-scope exit/branch, return 0;
+CHANGE-105: file-scope condition, if (!exclude)
+CHANGE-106: file-scope condition, if (cg.exclude_count >= group->count)
+CHANGE-107: file-scope exit/branch, return 0;
+CHANGE-108: file-scope condition, if (active && active->member &&
+CHANGE-109: file-scope condition, if (!cg.exclude_count || rank < cg.exclude_start ||
+CHANGE-110: file-scope exit/branch, return (__u32)rctx->active_cpu + 1;
+CHANGE-111: file-scope condition, if (cg.exclude_count && rank >= cg.exclude_start)
+CHANGE-112: file-scope condition, if (!cpu)
+CHANGE-113: file-scope exit/branch, return 0;
+CHANGE-114: file-scope exit/branch, return selected + 1;
+CHANGE-115: SEC condition, if (!s)
+CHANGE-116: SEC exit/branch, return 0;
+CHANGE-117: SEC condition, if (mode == RFS_PROCESS)
+CHANGE-118: SEC exit/branch, goto out;
+CHANGE-119: SEC condition, if (!app)
+CHANGE-120: SEC exit/branch, goto out;
+CHANGE-121: SEC condition, if (mode == RFS_CLUSTER)
+CHANGE-122: SEC condition, if (!cpu && (mode == RFS_CLUSTER || mode == RFS_NUMA))
+CHANGE-123: SEC condition, if (!cpu && app->member && (rctx->flags & RFS_CTX_APP_CPU_ONLINE))
+CHANGE-124: SEC condition, if (!cpu)
+CHANGE-125: SEC condition, if (cpu)
+CHANGE-126: SEC exit/branch, return cpu;
+CHANGE-127: SEC initialization/ownership, struct bpf_rfs_ops___local rfs_ops = {
+CHANGE-128: check_rfs_tables condition, if (file) {
+CHANGE-129: check_rfs_tables condition, if (err != 1 || !count) {
+CHANGE-130: check_rfs_tables exit/branch, return -EINVAL;
+CHANGE-131: check_rfs_tables condition, if (err)
+CHANGE-132: check_rfs_tables exit/branch, return -ENOENT;
+CHANGE-133: check_rfs_tables loop, for (i = 0; i < queues.gl_pathc; i++) {
+CHANGE-134: check_rfs_tables condition, if (!file)
+CHANGE-135: check_rfs_tables exit/branch, continue;
+CHANGE-136: check_rfs_tables condition, if (fscanf(file, "%u", &count) == 1 && count)
+CHANGE-137: check_rfs_tables condition, if (!enabled) {
+CHANGE-138: check_rfs_tables exit/branch, return -EINVAL;
+CHANGE-139: check_rfs_tables exit/branch, return 0;
+CHANGE-140: main initialization/ownership, static const struct option options[] = {
+CHANGE-141: main initialization/ownership, struct bpf_link_info info = {};
+CHANGE-142: main initialization/ownership, struct rfs_topology topo = {};
+CHANGE-143: main condition, if (argc < 2) {
+CHANGE-144: main exit/branch, return 1;
+CHANGE-145: main loop, while ((opt = getopt_long(argc, argv, "i:p:s:c:x", options, NULL)) != -1) {
+CHANGE-146: main condition, switch (opt) {
+CHANGE-147: main exit/branch, break;
+CHANGE-148: main exit/branch, break;
+CHANGE-149: main exit/branch, break;
+CHANGE-150: main exit/branch, break;
+CHANGE-151: main condition, if (!strcmp(optarg, "process"))
+CHANGE-152: main condition, else if (!strcmp(optarg, "cluster"))
+CHANGE-153: main condition, else if (!strcmp(optarg, "numa"))
+CHANGE-154: main exit/branch, goto out;
+CHANGE-155: main exit/branch, break;
+CHANGE-156: main exit/branch, goto out;
+CHANGE-157: main condition, if (!pin || optind != argc)
+CHANGE-158: main exit/branch, goto out;
+CHANGE-159: main condition, if (strcmp(command, "attach")) {
+CHANGE-160: main condition, if (fd < 0) {
+CHANGE-161: main exit/branch, goto out;
+CHANGE-162: main condition, if (err)
+CHANGE-163: main exit/branch, goto out;
+CHANGE-164: main condition, if (info.type != BPF_LINK_TYPE_STRUCT_OPS) {
+CHANGE-165: main exit/branch, goto out;
+CHANGE-166: main condition, if (!strcmp(command, "show")) {
+CHANGE-167: main exit/branch, goto out;
+CHANGE-168: main condition, if (!strcmp(command, "detach")) {
+CHANGE-169: main condition, if (!err && unlink(pin))
+CHANGE-170: main exit/branch, goto out;
+CHANGE-171: main condition, if (strcmp(command, "update")) {
+CHANGE-172: main exit/branch, goto out;
+CHANGE-173: main condition, if (old_fd < 0) {
+CHANGE-174: main exit/branch, goto out;
+CHANGE-175: main condition, if (!ifindex) {
+CHANGE-176: main exit/branch, goto out;
+CHANGE-177: main condition, if (err)
+CHANGE-178: main exit/branch, goto out;
+CHANGE-179: main condition, if (err)
+CHANGE-180: main exit/branch, goto out;
+CHANGE-181: main condition, if (!skel) {
+CHANGE-182: main exit/branch, goto out;
+CHANGE-183: main condition, if (!err)
+CHANGE-184: main condition, if (err)
+CHANGE-185: main exit/branch, goto out;
+CHANGE-186: main condition, if (!strcmp(command, "attach")) {
+CHANGE-187: main condition, if (fd < 0) {
+CHANGE-188: main exit/branch, goto out;
+CHANGE-189: main condition, if (!err)
+CHANGE-190: main condition, if (err) {
+CHANGE-191: main condition, if (err == -EINVAL)
+CHANGE-192: main condition, if (fd >= 0)
+CHANGE-193: main condition, if (old_fd >= 0)
+CHANGE-194: main allocation/free, rfs_policy__destroy(skel);
+CHANGE-195: main exit/branch, return !!err;
+CHANGE-196: ARRAY_SIZE condition, if (!skel)
+CHANGE-197: ARRAY_SIZE exit/branch, return NULL;
+CHANGE-198: ARRAY_SIZE condition, if (bpf_map__set_max_entries(skel->maps.cpu_topology, topo->nr_cpus) ||
+CHANGE-199: ARRAY_SIZE allocation/free, rfs_policy__destroy(skel);
+CHANGE-200: ARRAY_SIZE exit/branch, return NULL;
+CHANGE-201: ARRAY_SIZE exit/branch, return skel;
+CHANGE-202: fill_map loop, for (i = 0; i < count; i++) {
+CHANGE-203: fill_map condition, if (err)
+CHANGE-204: fill_map exit/branch, return err;
+CHANGE-205: fill_map exit/branch, return bpf_map_freeze(fd);
+CHANGE-206: rfs_policy_load condition, if (!err)
+CHANGE-207: rfs_policy_load condition, if (!err)
+CHANGE-208: rfs_policy_load condition, if (!err)
+CHANGE-209: rfs_policy_load exit/branch, return err;
+CHANGE-210: member_offset condition, if (!t || !btf_is_struct(t))
+CHANGE-211: member_offset exit/branch, return -EINVAL;
+CHANGE-212: member_offset loop, for (i = 0; i < btf_vlen(t); i++, m++)
+CHANGE-213: member_offset condition, if (!strcmp(btf__name_by_offset(btf, m->name_off), name))
+CHANGE-214: member_offset exit/branch, return btf_member_bit_offset(t, i) / 8;
+CHANGE-215: member_offset exit/branch, return -ENOENT;
+CHANGE-216: rfs_policy_prepare initialization/ownership, struct bpf_map_info info = {};
+CHANGE-217: rfs_policy_prepare condition, if (err)
+CHANGE-218: rfs_policy_prepare exit/branch, return err;
+CHANGE-219: rfs_policy_prepare condition, if (!btf)
+CHANGE-220: rfs_policy_prepare exit/branch, return -errno;
+CHANGE-221: rfs_policy_prepare condition, if (data < 0 || type < 0)
+CHANGE-222: rfs_policy_prepare exit/branch, goto out;
+CHANGE-223: rfs_policy_prepare allocation/free, value = calloc(1, info.value_size);
+CHANGE-224: rfs_policy_prepare condition, if (!value) {
+CHANGE-225: rfs_policy_prepare exit/branch, goto out;
+CHANGE-226: rfs_policy_prepare loop, for (i = 0; i < ARRAY_SIZE(fields); i++) {
+CHANGE-227: rfs_policy_prepare condition, if (offset < 0 || (size_t)data + offset + fields[i].size > info.value_size)
+CHANGE-228: rfs_policy_prepare exit/branch, goto out;
+CHANGE-229: rfs_policy_prepare allocation/free, free(value);
+CHANGE-230: rfs_policy_prepare exit/branch, return err;
+CHANGE-231: rfs_parse_cpulist loop, while (isspace(*text))
+CHANGE-232: rfs_parse_cpulist loop, while (*text) {
+CHANGE-233: rfs_parse_cpulist condition, if (!isdigit(*text))
+CHANGE-234: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-235: rfs_parse_cpulist condition, if (errno || first >= INT_MAX)
+CHANGE-236: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-237: rfs_parse_cpulist condition, if (*text == '-') {
+CHANGE-238: rfs_parse_cpulist condition, if (!isdigit(*++text))
+CHANGE-239: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-240: rfs_parse_cpulist condition, if (errno || last >= INT_MAX || last < first)
+CHANGE-241: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-242: rfs_parse_cpulist condition, if (last >= n) {
+CHANGE-243: rfs_parse_cpulist allocation/free, tmp = realloc(bits, last + 1);
+CHANGE-244: rfs_parse_cpulist condition, if (!tmp) {
+CHANGE-245: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-246: rfs_parse_cpulist initialization/ownership, memset(bits + n, 0, last + 1 - n);
+CHANGE-247: rfs_parse_cpulist loop, for (i = first; i <= last; i++)
+CHANGE-248: rfs_parse_cpulist condition, if (*text == ',') {
+CHANGE-249: rfs_parse_cpulist condition, if (!*++text)
+CHANGE-250: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-251: rfs_parse_cpulist exit/branch, continue;
+CHANGE-252: rfs_parse_cpulist loop, while (isspace(*text))
+CHANGE-253: rfs_parse_cpulist condition, if (*text)
+CHANGE-254: rfs_parse_cpulist exit/branch, goto fail;
+CHANGE-255: rfs_parse_cpulist exit/branch, return 0;
+CHANGE-256: rfs_parse_cpulist allocation/free, free(bits);
+CHANGE-257: rfs_parse_cpulist exit/branch, return err;
+CHANGE-258: read_list condition, if (!file)
+CHANGE-259: read_list exit/branch, return -errno;
+CHANGE-260: read_list condition, if (getline(&line, &capacity, file) < 0)
+CHANGE-261: read_list allocation/free, free(line);
+CHANGE-262: read_list exit/branch, return err;
+CHANGE-263: first_cpu condition, if (read_list(path, &mask, &size))
+CHANGE-264: first_cpu exit/branch, return -1;
+CHANGE-265: first_cpu loop, for (i = 0; i < size; i++) {
+CHANGE-266: first_cpu condition, if (!mask[i])
+CHANGE-267: first_cpu exit/branch, continue;
+CHANGE-268: first_cpu exit/branch, break;
+CHANGE-269: first_cpu allocation/free, free(mask);
+CHANGE-270: first_cpu exit/branch, return result;
+CHANGE-271: compare_cpu condition, if (ca->core != cb->core)
+CHANGE-272: compare_cpu exit/branch, return ca->core < cb->core ? -1 : 1;
+CHANGE-273: compare_cpu exit/branch, return ca->id < cb->id ? -1 : ca->id != cb->id;
+CHANGE-274: rfs_topology_free allocation/free, free(topo->cpus);
+CHANGE-275: rfs_topology_free allocation/free, free(topo->groups);
+CHANGE-276: rfs_topology_free allocation/free, free(topo->slots);
+CHANGE-277: rfs_topology_free initialization/ownership, memset(topo, 0, sizeof(*topo));
+CHANGE-278: rfs_topology_load initialization/ownership, memset(topo, 0, sizeof(*topo));
+CHANGE-279: rfs_topology_load condition, if (err || !np) {
+CHANGE-280: rfs_topology_load exit/branch, goto out;
+CHANGE-281: rfs_topology_load condition, if (err)
+CHANGE-282: rfs_topology_load exit/branch, goto out;
+CHANGE-283: rfs_topology_load condition, if (candidates) {
+CHANGE-284: rfs_topology_load condition, if (err)
+CHANGE-285: rfs_topology_load exit/branch, goto out;
+CHANGE-286: rfs_topology_load loop, for (i = 0; i < na; i++) {
+CHANGE-287: rfs_topology_load condition, if (allowed[i] && (i >= np || !possible[i])) {
+CHANGE-288: rfs_topology_load exit/branch, goto out;
+CHANGE-289: rfs_topology_load condition, if (np > (UINT_MAX - 2) / 3) {
+CHANGE-290: rfs_topology_load exit/branch, goto out;
+CHANGE-291: rfs_topology_load allocation/free, topo->cpus = calloc(np, sizeof(*topo->cpus));
+CHANGE-292: rfs_topology_load initialization/ownership, topo->cpus = calloc(np, sizeof(*topo->cpus));
+CHANGE-293: rfs_topology_load allocation/free, topo->groups = calloc(2 * np + 2, sizeof(*topo->groups));
+CHANGE-294: rfs_topology_load initialization/ownership, topo->groups = calloc(2 * np + 2, sizeof(*topo->groups));
+CHANGE-295: rfs_topology_load allocation/free, topo->slots = calloc(3 * np, sizeof(*topo->slots));
+CHANGE-296: rfs_topology_load initialization/ownership, topo->slots = calloc(3 * np, sizeof(*topo->slots));
+CHANGE-297: rfs_topology_load allocation/free, info = calloc(np, sizeof(*info));
+CHANGE-298: rfs_topology_load allocation/free, sorted = calloc(np, sizeof(*sorted));
+CHANGE-299: rfs_topology_load allocation/free, keys = calloc(2 * np + 2, sizeof(*keys));
+CHANGE-300: rfs_topology_load condition, if (!topo->cpus || !topo->groups || !topo->slots || !info || !sorted || !keys) {
+CHANGE-301: rfs_topology_load exit/branch, goto out;
+CHANGE-302: rfs_topology_load initialization/ownership, topo->nr_cpus = np;
+CHANGE-303: rfs_topology_load initialization/ownership, topo->nr_groups = 2;
+CHANGE-304: rfs_topology_load loop, for (i = 0; i < np; i++) {
+CHANGE-305: rfs_topology_load condition, if (!possible[i])
+CHANGE-306: rfs_topology_load exit/branch, continue;
+CHANGE-307: rfs_topology_load initialization/ownership, topo->cpus[i].member = i < no && online[i] &&
+CHANGE-308: rfs_topology_load initialization/ownership, topo->cpus[i].group[RFS_GLOBAL_GROUP].id = 1;
+CHANGE-309: rfs_topology_load condition, if (key >= 0) {
+CHANGE-310: rfs_topology_load condition, } else if (exclude_smt && i < no && online[i]) {
+CHANGE-311: rfs_topology_load exit/branch, goto out;
+CHANGE-312: rfs_topology_load condition, if (!glob(path, 0, NULL, &nodes)) {
+CHANGE-313: rfs_topology_load condition, if (nodes.gl_pathc == 1)
+CHANGE-314: rfs_topology_load condition, if (missing_cluster)
+CHANGE-315: rfs_topology_load loop, for (kind = RFS_CLUSTER_GROUP; kind <= RFS_NUMA_GROUP; kind++) {
+CHANGE-316: rfs_topology_load loop, for (i = 0; i < np; i++) {
+CHANGE-317: rfs_topology_load condition, if (!possible[i] || key < 0)
+CHANGE-318: rfs_topology_load exit/branch, continue;
+CHANGE-319: rfs_topology_load loop, for (id = start; id < topo->nr_groups; id++)
+CHANGE-320: rfs_topology_load condition, if (keys[id] == key)
+CHANGE-321: rfs_topology_load exit/branch, break;
+CHANGE-322: rfs_topology_load condition, if (id == topo->nr_groups)
+CHANGE-323: rfs_topology_load initialization/ownership, keys[topo->nr_groups++] = key;
+CHANGE-324: rfs_topology_load initialization/ownership, topo->cpus[i].group[kind].id = id;
+CHANGE-325: rfs_topology_load loop, for (kind = 0; kind < RFS_GROUP_KINDS; kind++) {
+CHANGE-326: rfs_topology_load loop, for (id = 1; id < topo->nr_groups; id++) {
+CHANGE-327: rfs_topology_load loop, for (j = 0; j < np; j++) {
+CHANGE-328: rfs_topology_load condition, if (!topo->cpus[i].member || topo->cpus[i].group[kind].id != id)
+CHANGE-329: rfs_topology_load initialization/ownership, if (!topo->cpus[i].member || topo->cpus[i].group[kind].id != id)
+CHANGE-330: rfs_topology_load exit/branch, continue;
+CHANGE-331: rfs_topology_load initialization/ownership, topo->cpus[i].group[kind].rank = topo->nr_slots - start;
+CHANGE-332: rfs_topology_load initialization/ownership, topo->slots[topo->nr_slots++] = i;
+CHANGE-333: rfs_topology_load condition, if (topo->nr_slots == start)
+CHANGE-334: rfs_topology_load initialization/ownership, if (topo->nr_slots == start)
+CHANGE-335: rfs_topology_load exit/branch, continue;
+CHANGE-336: rfs_topology_load loop, for (i = 0; i < np; i++) {
+CHANGE-337: rfs_topology_load condition, if (!possible[i] || cg->id != id)
+CHANGE-338: rfs_topology_load exit/branch, continue;
+CHANGE-339: rfs_topology_load loop, for (j = 0; j < group->count; j++) {
+CHANGE-340: rfs_topology_load condition, if (exclude_smt ? info[candidate].core != info[i].core :
+CHANGE-341: rfs_topology_load exit/branch, continue;
+CHANGE-342: rfs_topology_load condition, if (start == group->count)
+CHANGE-343: rfs_topology_load condition, if (end) {
+CHANGE-344: rfs_topology_load allocation/free, free(possible);
+CHANGE-345: rfs_topology_load allocation/free, free(online);
+CHANGE-346: rfs_topology_load allocation/free, free(allowed);
+CHANGE-347: rfs_topology_load allocation/free, free(info);
+CHANGE-348: rfs_topology_load allocation/free, free(sorted);
+CHANGE-349: rfs_topology_load allocation/free, free(keys);
+CHANGE-350: rfs_topology_load condition, if (err)
+CHANGE-351: rfs_topology_load exit/branch, return err;
+CHANGE-352: native RFS integration native RFS integration, next_cpu = bpf_rfs_cpu(dev, skb, hash, next_cpu, tcpu);
+CHANGE-353: net_device layout and cacheline bound net_device layout and cacheline bound, CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 100);
+CHANGE-354: Kconfig and object build gates Kconfig and object build gates, depends on RPS && BPF_SYSCALL && BPF_JIT && DEBUG_INFO_BTF
+CHANGE-355: sample and selftest build/install sample and selftest build/install, TEST_GEN_PROGS_EXTENDED := test_rfs rfs_policy
+CHANGE-356: documented ABI and benchmark claims documented ABI and benchmark claims, Both this fallback and successful proposals still pass through the native migration check.

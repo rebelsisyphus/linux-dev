@@ -1,0 +1,32 @@
+samples/bpf: Add topology-aware RFS CPU policies
+
+The RFS struct_ops interface needs a userspace example that selects CPUs
+from system topology and replaces a running policy without exposing a
+partially updated configuration.
+
+Add process, cluster and NUMA policies with candidate CPU lists and
+optional SMT sibling exclusion. Parse sparse CPU lists without a fixed
+64-CPU limit and represent candidates as shared groups. Keep an eligible
+active CPU before hashing to another candidate. Treat the candidate pool
+as a preference and fall back to native RFS when no suitable proposal is
+available.
+
+Load topology into program-read-only maps and freeze them before
+attachment. Publish refreshed topology as a new program and map set
+through BPF_LINK_UPDATE with expected-old-map protection. Provide
+attach, update, show and detach commands for pinned links, preserving
+the existing policy when replacement fails.
+
+Add a standalone Makefile using the in-tree libbpf, bpftool and CO-RE
+types. Resolve struct_ops wrapper offsets from runtime BTF when
+preparing a map for a pinned-link update.
+
+The sample builds with Clang 18 against both the new kernel BTF and an
+older kernel BTF without the RFS types. Policy and pinned-link CLI tests
+pass in the test-kernel VM. The full-series Redis VM benchmark in the
+core hook commit also exercises the NUMA policy. Physical NUMA locality
+benefits and isolated callback cost remain unmeasured.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+

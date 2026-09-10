@@ -1,0 +1,19 @@
+1. e37739322a0c0cbaf9d5b1a7dd7e9dc323596a88 net: rfs: Add a BPF struct_ops hook for CPU selection
+2. ba5347a259ead20454a7a98b8020112250adfc09 samples/bpf: Add topology-aware RFS CPU policies
+3. 75c47d5b969cb4a393887cfff600f035f1f9680e selftests/bpf: Cover native RFS CPU selection and policy lifetime
+4. 9f3cd6a8fd249686dd175723ee7412dfb81160c6 docs: networking: Describe BPF CPU selection for RFS
+
+Intent: add a per-device, link-owned BPF desired-CPU policy inside native RFS.
+Review covers the complete four-commit series and supporting local benchmark claims.
+All changed hunks read in full via git show. Semcode tools are unavailable.
+Source context is obtained via git show, rg and full function reads.
+No code or commit changes are authorized by this review.
+
+Review tasks:
+[done] Read complete diff and required subsystem guides
+[done] Gather RX, RFS, struct_ops, verifier and netdev lifecycle context
+[done] Branch/loop, allocation, initialization, lock and error-path audit
+[done] Confirm entry-point reachability and input classes
+[done] Run focused validation and verify suspicions
+[done] Record confirmed issues, eliminated suspicions and limitations
+[done] Save mail-style feedback and exact metadata schema

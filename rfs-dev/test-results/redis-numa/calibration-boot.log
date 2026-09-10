@@ -1,0 +1,200 @@
+Formatting '/tmp/rfs-kernel-vm.MoTZDH/rootfs.img', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=21474836480 backing_file=/home/sisyphus/code/qemu/rootfs.img backing_fmt=raw lazy_refcounts=off refcount_bits=16
+RFS VM directory: /tmp/rfs-kernel-vm.MoTZDH
+RFS SSH port: 2246
+[0;34m========================================[0m
+[0;34m     内核测试自动化流程[0m
+[0;34m========================================[0m
+
+[0;32m✓[0m 内核镜像: /tmp/rfs-perf-build/arch/x86/boot/bzImage
+
+[1;33m[0/6] 清理历史测试记录...[0m
+[0;32m✓[0m 环境已清理
+
+[1;33m[1/6] 检查QEMU状态...[0m
+[1;33m[2/6] 准备内核镜像...[0m
+[0;32m✓[0m 内核已复制到QEMU目录
+
+[1;33m[3/6] 启动QEMU...[0m
+[0;32m✓[0m QEMU启动成功 (PID: 379779)
+
+[1;33m[4/6] 启动panic监控...[0m
+[0;32m✓[0m Panic监控已启动
+
+[1;33m[5/6] 等待VM启动和SSH就绪...[0m
+  (预计需要30-40秒，请稍候...)
+
+[0;32m✓[0m SSH连接就绪 (尝试 1 次)
+
+Warning: Permanently added '[localhost]:2246' (ED25519) to the list of known hosts.
+[1;33m[6/6] 执行测试脚本...[0m
+
+开始执行测试...
+----------------------------------------
+Warning: Permanently added '[localhost]:2246' (ED25519) to the list of known hosts.
+Linux sisyphus 7.2.0-rfs-perf+ #2 SMP PREEMPT_DYNAMIC Mon Sep  7 17:47:38 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+0-3
+4-7
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+bond0            DOWN           
+dummy0           DOWN           
+enp0s4           UP             192.0.2.2/30 fe80::5054:ff:fe7f:1/64 
+enp0s3           UP             10.0.2.15/24 metric 100 fec0::5054:ff:fe12:3456/64 fe80::5054:ff:fe12:3456/64 
+gre0@NONE        DOWN           
+gretap0@NONE     DOWN           
+erspan0@NONE     DOWN           
+ip6tnl0@NONE     DOWN           
+ip6gre0@NONE     DOWN           
+            CPU0       CPU1       CPU2       CPU3       CPU4       CPU5       CPU6       CPU7       
+   0:         62          0          0          0          0          0          0          0  IO-APIC                  2-edge      timer
+   1:          0         13          0          0          0          0          0          0  IO-APIC                  1-edge      i8042
+   4:        270          0          0          0          0          0          0          0  IO-APIC                  4-edge      ttyS0
+   8:          0          0          1          0          0          0          0          0  IO-APIC                  8-edge      rtc0
+   9:          0          0          0          0          0          0          0          0  IO-APIC                  9-fasteoi   acpi
+  12:        125          0          0          0          0          0          0          0  IO-APIC                 12-edge      i8042
+  16:          0          0          0          0          0          0          0          0  IO-APIC                 16-fasteoi   i801_smbus
+  23:          0          0          0          0        122          0          0          0  IO-APIC                 23-fasteoi   enp0s3
+  24:          0          0       1334          0          0          0          0          0  PCI-MSI-0000:00:1f.2     0-edge      ahci[0000:00:1f.2]
+  25:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:04.0    0-edge      virtio1-config
+  26:          0          0          0          0          1          0          0          0  PCI-MSIX-0000:00:04.0    1-edge      virtio1-input.0
+  27:          0          0          0          0          0          1          0          0  PCI-MSIX-0000:00:04.0    2-edge      virtio1-output.0
+  28:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:02.0    0-edge      virtio0-config
+  29:          0          0          0         82          0          0          0          0  PCI-MSIX-0000:00:02.0    1-edge      virtio0-requests
+ NMI:          0          0          0          0          0          0          0          0  Non-maskable interrupts
+ LOC:       1225       1299       1329       1235       1271       1185       1835       1193  Local timer interrupts
+ PMI:          0          0          0          0          0          0          0          0  Performance monitoring interrupts
+ IWI:         33          8          7         16         13         27         54         28  IRQ work interrupts
+ RES:         66         64         39         47         51         78         85         60  Rescheduling interrupts
+ CAL:        899       1008        804       1022        871       1076       1264        914  Function call interrupts
+ TLB:         37         34         49         59         36         36         41         25  TLB shootdowns
+ TRM:          0          0          0          0          0          0          0          0  Thermal event interrupts
+ THR:          0          0          0          0          0          0          0          0  Threshold APIC interrupts
+ DFR:          0          0          0          0          0          0          0          0  Deferred Error APIC interrupts
+ MCE:          0          0          0          0          0          0          0          0  Machine check exceptions
+ MCP:          1          1          1          1          1          1          1          1  Machine check polls
+ HYP:          1          1          1          1          1          1          1          1  Hypervisor callback interrupts
+/usr/bin/python3
+/usr/sbin/ethtool
+/usr/bin/gcc
+ldd (Ubuntu GLIBC 2.39-0ubuntu8) 2.39
+RFS performance VM ready
+TAP version 13
+1..22
+# Starting 22 tests from 2 test cases.
+#  RUN           global.cpulist_large_and_sparse ...
+#            OK  global.cpulist_large_and_sparse
+ok 1 global.cpulist_large_and_sparse
+#  RUN           rfs.native_default ...
+#            OK  rfs.native_default
+ok 2 rfs.native_default
+#  RUN           rfs.no_policy ...
+#            OK  rfs.no_policy
+ok 3 rfs.no_policy
+#  RUN           rfs.no_rfs_table ...
+#            OK  rfs.no_rfs_table
+ok 4 rfs.no_rfs_table
+#  RUN           rfs.offline_cpu_default ...
+#            OK  rfs.offline_cpu_default
+ok 5 rfs.offline_cpu_default
+#  RUN           rfs.cpu_zero_encoding ...
+#            OK  rfs.cpu_zero_encoding
+ok 6 rfs.cpu_zero_encoding
+#  RUN           rfs.alternate_cpu ...
+#            OK  rfs.alternate_cpu
+ok 7 rfs.alternate_cpu
+#  RUN           rfs.ipv6 ...
+#            OK  rfs.ipv6
+ok 8 rfs.ipv6
+#  RUN           rfs.invalid_cpu_default ...
+#            OK  rfs.invalid_cpu_default
+ok 9 rfs.invalid_cpu_default
+#  RUN           rfs.readonly_context ...
+libbpf: prog 'write_ctx': BPF program load failed: -EACCES
+libbpf: prog 'write_ctx': failed to load: -EACCES
+libbpf: failed to load object 'test_rfs'
+libbpf: failed to load BPF skeleton 'test_rfs': -EACCES
+#            OK  rfs.readonly_context
+ok 10 rfs.readonly_context
+#  RUN           rfs.sleepable_rejected ...
+libbpf: prog 'sleepable': BPF program load failed: -EINVAL
+libbpf: prog 'sleepable': -- BEGIN PROG LOAD LOG --
+attach to unsupported member select_cpu of struct bpf_rfs_ops
+processed 0 insns (limit 1000000) max_states_per_insn 0 total_states 0 peak_states 0 mark_read 0
+-- END PROG LOAD LOG --
+libbpf: prog 'sleepable': failed to load: -EINVAL
+libbpf: failed to load object 'test_rfs'
+libbpf: failed to load BPF skeleton 'test_rfs': -EINVAL
+#            OK  rfs.sleepable_rejected
+ok 11 rfs.sleepable_rejected
+#  RUN           rfs.reserved_flags ...
+#            OK  rfs.reserved_flags
+ok 12 rfs.reserved_flags
+#  RUN           rfs.duplicate_attach ...
+#            OK  rfs.duplicate_attach
+ok 13 rfs.duplicate_attach
+#  RUN           rfs.application_migration ...
+#            OK  rfs.application_migration
+ok 14 rfs.application_migration
+#  RUN           rfs.replace_during_connection ...
+#            OK  rfs.replace_during_connection
+ok 15 rfs.replace_during_connection
+#  RUN           rfs.detach_during_connection ...
+#            OK  rfs.detach_during_connection
+ok 16 rfs.detach_during_connection
+#  RUN           rfs.expected_old ...
+#            OK  rfs.expected_old
+ok 17 rfs.expected_old
+#  RUN           rfs.device_unregister ...
+#            OK  rfs.device_unregister
+ok 18 rfs.device_unregister
+#  RUN           rfs.update_unregister_race ...
+#            OK  rfs.update_unregister_race
+ok 19 rfs.update_unregister_race
+#  RUN           rfs.sample_numa ...
+#            OK  rfs.sample_numa
+ok 20 rfs.sample_numa
+#  RUN           rfs.sample_cluster ...
+#            OK  rfs.sample_cluster
+ok 21 rfs.sample_cluster
+#  RUN           rfs.empty_candidates ...
+#            OK  rfs.empty_candidates
+ok 22 rfs.empty_candidates
+# PASSED: 22 / 22 tests passed.
+# Totals: pass:22 fail:0 xfail:0 xpass:0 skip:0 error:0
+----------------------------------------
+
+[0;32m✓[0m 测试结果已保存到: /home/sisyphus/code/test/rfs-perf/test_result.txt
+
+[0;34m========================================[0m
+[0;32m         内核测试通过 ✓[0m
+[0;32m========================================[0m
+
+测试概要:
+  ✓ 内核启动正常
+  ✓ SSH连接正常 (端口: 2246)
+  ✓ 共享目录工作正常
+  ✓ 测试脚本执行成功
+
+系统信息:
+7.2.0-rfs-perf+
+ 09:48:26 up 0 min,  1 user,  load average: 0.00, 0.00, 0.00
+
+QEMU PID: 379779
+日志文件: /tmp/rfs-kernel-vm.MoTZDH/serial.log
+
+常用命令:
+  查看日志: tail -f /tmp/rfs-kernel-vm.MoTZDH/serial.log
+  连接SSH:  ssh root@localhost -p 2246
+  停止QEMU: kill 379779

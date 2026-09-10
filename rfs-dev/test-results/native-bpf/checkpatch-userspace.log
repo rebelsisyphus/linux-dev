@@ -1,0 +1,70 @@
+------------------------
+samples/bpf/rfs_policy.c
+------------------------
+total: 0 errors, 0 warnings, 0 checks, 203 lines checked
+
+samples/bpf/rfs_policy.c has no obvious style problems and is ready for submission.
+---------------------------------
+samples/bpf/rfs_policy_topology.c
+---------------------------------
+total: 0 errors, 0 warnings, 0 checks, 284 lines checked
+
+samples/bpf/rfs_policy_topology.c has no obvious style problems and is ready for submission.
+-------------------------------
+samples/bpf/rfs_policy_loader.c
+-------------------------------
+total: 0 errors, 0 warnings, 0 checks, 131 lines checked
+
+samples/bpf/rfs_policy_loader.c has no obvious style problems and is ready for submission.
+----------------------------
+samples/bpf/rfs_policy.bpf.c
+----------------------------
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#9: FILE: samples/bpf/rfs_policy.bpf.c:9:
++const volatile __u32 mode;
+
+total: 0 errors, 1 warnings, 0 checks, 122 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+samples/bpf/rfs_policy.bpf.c has style problems, please review.
+------------------------
+samples/bpf/rfs_policy.h
+------------------------
+CHECK: Prefer using the BIT macro
+#27: FILE: samples/bpf/rfs_policy.h:27:
++#define RFS_CTX_APP_CPU_ONLINE (1U << 1)
+
+CHECK: Prefer using the BIT macro
+#28: FILE: samples/bpf/rfs_policy.h:28:
++#define RFS_CTX_ACTIVE_CPU_ONLINE (1U << 2)
+
+total: 0 errors, 0 warnings, 2 checks, 89 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+samples/bpf/rfs_policy.h has style problems, please review.
+------------------------------------------
+tools/testing/selftests/bpf/rfs/test_rfs.c
+------------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 491 lines checked
+
+tools/testing/selftests/bpf/rfs/test_rfs.c has no obvious style problems and is ready for submission.
+----------------------------------------------
+tools/testing/selftests/bpf/rfs/test_rfs.bpf.c
+----------------------------------------------
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#8: FILE: tools/testing/selftests/bpf/rfs/test_rfs.bpf.c:8:
++const volatile __u32 result;
+
+total: 0 errors, 1 warnings, 0 checks, 38 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+tools/testing/selftests/bpf/rfs/test_rfs.bpf.c has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

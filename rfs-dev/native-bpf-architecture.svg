@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1520" height="1340" viewBox="0 0 1520 1340" role="img" aria-labelledby="title desc">
+<title id="title">Programmable CPU selection for native RFS</title>
+<desc id="desc">The userspace loader publishes a complete BPF policy through a per-device struct_ops link. The receive path obtains native application and active CPU hints, optionally invokes BPF, validates the desired CPU, and retains native migration checks and backlog accounting. An inactive link after device unregister is retained until released.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="context-stroke"/></marker>
+</defs>
+<style>
+  text { font-family: "DejaVu Sans", sans-serif; fill: #172b4d; }
+  .title { font-size: 32px; font-weight: 700; }
+  .subtitle { font-size: 18px; fill: #52637a; }
+  .section { font-size: 16px; font-weight: 700; letter-spacing: 1.2px; }
+  .box-title { font-size: 20px; font-weight: 700; }
+  .body { font-size: 17px; fill: #3f526b; }
+  .label { font-size: 14px; font-weight: 600; fill: #53677f; }
+  .footer { font-size: 17px; fill: #3f526b; }
+</style>
+<rect width="1520" height="1340" fill="#ffffff"/>
+
+<text x="56" y="58" class="title" text-anchor="start">Programmable CPU selection for native RFS</text>
+<text x="56" y="94" class="subtitle" text-anchor="start">BPF proposes a desired CPU. Native RFS decides when it can become active.</text>
+<rect x="40" y="128" width="1440" height="188" rx="16" fill="#edf5ff" stroke="#d3e4fb" stroke-width="1.5"/>
+<text x="64" y="158" class="section" text-anchor="start">CONTROL PLANE  /  PUBLISH ONE COMPLETE POLICY VERSION</text>
+<rect x="40" y="366" width="340" height="773" rx="16" fill="#f6f8fb" stroke="#dce4ee" stroke-width="1.5"/>
+<text x="64" y="395" class="section" text-anchor="start">EXISTING RFS STATE</text>
+<text x="480" y="384" class="section" text-anchor="start">RECEIVE PATH</text>
+<path d="M424 233 H480" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M424 233 H480" fill="none" stroke="#568bd7" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<path d="M864 233 H928" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M864 233 H928" fill="none" stroke="#568bd7" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<path d="M210 500 V550" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M210 500 V550" fill="none" stroke="#75869e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="226" y="531" class="label" text-anchor="start">record CPU hint</text>
+<path d="M356 600 H422 V455 H480" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M356 600 H422 V455 H480" fill="none" stroke="#75869e" stroke-width="2.1" stroke-dasharray="7 6" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="373" y="582" class="label" text-anchor="start">app hint</text>
+<path d="M665 350 V410" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M665 350 V410" fill="none" stroke="#75869e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="650" y="348" class="label" text-anchor="end">received skb</text>
+<path d="M665 510 V585" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M665 510 V585" fill="none" stroke="#75869e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="680" y="552" class="label" text-anchor="start">RFS hit</text>
+<path d="M850 458 H950" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M850 458 H950" fill="none" stroke="#75869e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="901" y="443" class="label" text-anchor="start">miss</text>
+<path d="M665 690 V785" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M665 690 V785" fill="none" stroke="#129681" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="686" y="732" class="label" text-anchor="start">0 = DEFAULT  /  n + 1 = CPU n</text>
+<path d="M850 836 H920" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M850 836 H920" fill="none" stroke="#129681" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="885" y="811" class="label" text-anchor="middle">desired</text>
+<text x="885" y="828" class="label" text-anchor="middle">CPU</text>
+<path d="M356 835 H420 V965 H875 V885 H920" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M356 835 H420 V965 H875 V885 H920" fill="none" stroke="#75869e" stroke-width="2.1" stroke-dasharray="7 6" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="557" y="950" class="label" text-anchor="start">active CPU / last_qtail</text>
+<path d="M356 1060 H444 V990 H900 V925 H920" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M356 1060 H444 V990 H900 V925 H920" fill="none" stroke="#75869e" stroke-width="2.1" stroke-dasharray="7 6" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="534" y="1013" class="label" text-anchor="start">input_queue_head</text>
+<path d="M1160 940 V1010" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M1160 940 V1010" fill="none" stroke="#dc952e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="1176" y="982" class="label" text-anchor="start">native CPU decision</text>
+<path d="M1400 460 H1470 V1070 H1400" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M1400 460 H1470 V1070 H1400" fill="none" stroke="#75869e" stroke-width="2.1" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="1447" y="963" class="label" text-anchor="end">native</text>
+<text x="1447" y="982" class="label" text-anchor="end">fallback</text>
+<path d="M920 1092 H356" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M920 1092 H356" fill="none" stroke="#75869e" stroke-width="2.1" stroke-dasharray="7 6" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="607" y="1118" class="label" text-anchor="middle">native enqueue / processing progress</text>
+<path d="M1178 284 V350 H894 V562 H788 V585" fill="none" stroke="#ffffff" stroke-width="7"/>
+<path d="M1178 284 V350 H894 V562 H788 V585" fill="none" stroke="#568bd7" stroke-width="2.1" stroke-dasharray="7 6" marker-end="url(#arrow)" stroke-linejoin="round"/>
+<text x="946" y="550" class="label" text-anchor="start">RCU policy pointer</text>
+<rect x="64" y="180" width="360" height="104" rx="16" fill="#ffffff" stroke="#76a8f7" stroke-width="1.5"/>
+<text x="84" y="212" class="box-title" text-anchor="start">Topology + policy</text>
+<text x="84" y="241" class="body" text-anchor="start">sysfs topology / CPU pool / SMT</text>
+<text x="84" y="265" class="body" text-anchor="start">process / cluster / NUMA</text>
+<rect x="480" y="180" width="384" height="104" rx="16" fill="#ffffff" stroke="#76a8f7" stroke-width="1.5"/>
+<text x="500" y="212" class="box-title" text-anchor="start">rfs_policy userspace loader</text>
+<text x="500" y="241" class="body" text-anchor="start">load program → fill maps → freeze</text>
+<text x="500" y="265" class="body" text-anchor="start">attach / update with expected-old map</text>
+<rect x="928" y="180" width="500" height="104" rx="16" fill="#ffffff" stroke="#76a8f7" stroke-width="1.5"/>
+<text x="948" y="212" class="box-title" text-anchor="start">BPF struct_ops link</text>
+<text x="948" y="241" class="body" text-anchor="start">One policy per netdevice; pin the link</text>
+<text x="948" y="265" class="body" text-anchor="start">Publish dev-&gt;bpf_rfs_ops with RTNL + RCU</text>
+<rect x="64" y="420" width="292" height="80" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="84" y="452" class="box-title" text-anchor="start">Application socket I/O</text>
+<text x="84" y="481" class="body" text-anchor="start">Application runs on CPU A</text>
+<rect x="64" y="550" width="292" height="104" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="84" y="582" class="box-title" text-anchor="start">Global RFS hint table</text>
+<text x="84" y="611" class="body" text-anchor="start">Original app_cpu_hint</text>
+<text x="84" y="635" class="body" text-anchor="start">Hash-based, advisory record</text>
+<rect x="64" y="785" width="292" height="104" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="84" y="817" class="box-title" text-anchor="start">RX queue flow slot</text>
+<text x="84" y="846" class="body" text-anchor="start">active_cpu</text>
+<text x="84" y="870" class="body" text-anchor="start">last_qtail</text>
+<rect x="64" y="1015" width="292" height="90" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="84" y="1047" class="box-title" text-anchor="start">Per-CPU backlog state</text>
+<text x="84" y="1076" class="body" text-anchor="start">Real queue head / tail</text>
+<rect x="480" y="410" width="370" height="100" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="500" y="442" class="box-title" text-anchor="start">Native RFS lookup</text>
+<text x="500" y="471" class="body" text-anchor="start">get_rps_cpu(): hash / table match</text>
+<text x="500" y="495" class="body" text-anchor="start">Read app hint and active RX slot</text>
+<rect x="950" y="410" width="450" height="100" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="970" y="442" class="box-title" text-anchor="start">Existing RPS / local fallback</text>
+<text x="970" y="471" class="body" text-anchor="start">RFS miss or native tables unavailable</text>
+<text x="970" y="495" class="body" text-anchor="start">No policy callback for this lookup</text>
+<rect x="480" y="585" width="370" height="105" rx="16" fill="#eafaf6" stroke="#16a085" stroke-width="1.5"/>
+<text x="500" y="617" class="box-title" text-anchor="start">Optional BPF select_cpu(ctx)</text>
+<text x="500" y="646" class="body" text-anchor="start">Read-only context + frozen maps</text>
+<text x="500" y="670" class="body" text-anchor="start">No binding → preserve native hint</text>
+<rect x="480" y="785" width="370" height="104" rx="16" fill="#f0f7ff" stroke="#609bec" stroke-width="1.5"/>
+<text x="500" y="817" class="box-title" text-anchor="start">Kernel result validation</text>
+<text x="500" y="846" class="body" text-anchor="start">Range / possible / online checks</text>
+<text x="500" y="870" class="body" text-anchor="start">DEFAULT or invalid → app CPU hint</text>
+<rect x="920" y="765" width="480" height="175" rx="16" fill="#fff5e7" stroke="#e99a31" stroke-width="1.5"/>
+<text x="940" y="797" class="box-title" text-anchor="start">Native migration guard</text>
+<text x="940" y="826" class="body" text-anchor="start">Desired CPU differs from the active CPU:</text>
+<text x="940" y="850" class="body" text-anchor="start">old CPU unset, offline, or backlog drained</text>
+<text x="940" y="874" class="body" text-anchor="start">→ set_rps_cpu(); otherwise retain active CPU</text>
+<text x="940" y="898" class="body" text-anchor="start">Keep final native CPU availability checks</text>
+<rect x="920" y="1010" width="480" height="120" rx="16" fill="#ffffff" stroke="#aab8ca" stroke-width="1.5"/>
+<text x="940" y="1042" class="box-title" text-anchor="start">Native receive / protocol processing</text>
+<text x="940" y="1071" class="body" text-anchor="start">enqueue_to_backlog() when a CPU is selected</text>
+<text x="940" y="1095" class="body" text-anchor="start">process_backlog() or existing local receive</text>
+<text x="940" y="1119" class="body" text-anchor="start">Queue ownership and progress stay native</text>
+<rect x="40" y="1172" width="1440" height="126" rx="16" fill="#f8fafc" stroke="#dce4ee" stroke-width="1.5"/>
+<text x="64" y="1204" class="section" text-anchor="start">LIFETIME AND SEMANTICS</text>
+<text x="64" y="1235" class="footer" text-anchor="start">Update / detach: unpublish or replace under RTNL, then wait for RCU readers before releasing old policy resources.</text>
+<text x="64" y="1264" class="footer" text-anchor="start">NETDEV_UNREGISTER: deactivate binding; keep link / map until user release; later updates return ENODEV.</text>
+<text x="56" y="1325" class="label" text-anchor="start">Solid: execution  |  Dashed: configuration / state access  |  Native RFS may defer a policy proposal.</text>
+</svg>

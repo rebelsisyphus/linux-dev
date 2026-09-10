@@ -1,0 +1,20 @@
+make: Entering directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'
+make -f /home/sisyphus/code/linux/samples/bpf/Makefile.rfs OUTPUT=/tmp/rfs-bpf-build/selftests/sample \
+	VMLINUX=/home/sisyphus/code/linux/vmlinux BPFTOOL=/home/sisyphus/code/test/bpf_test/bpftool CLANG=clang-18
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-bpf-build/selftests/sample -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy.c -o /tmp/rfs-bpf-build/selftests/sample/rfs_policy.o
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-bpf-build/selftests/sample -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy_loader.c -o /tmp/rfs-bpf-build/selftests/sample/rfs_policy_loader.o
+cc /tmp/rfs-bpf-build/selftests/sample/rfs_policy.o /tmp/rfs-bpf-build/selftests/sample/rfs_policy_loader.o /tmp/rfs-bpf-build/selftests/sample/rfs_policy_topology.o /tmp/rfs-bpf-build/selftests/sample/libbpf/libbpf.a -lelf -lz -o /tmp/rfs-bpf-build/selftests/sample/rfs_policy
+clang-18 -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
+	-I/tmp/rfs-bpf-build/selftests/sample -I/tmp/rfs-bpf-build/selftests/sample/libbpf -I/home/sisyphus/code/linux/samples/bpf \
+	-I/home/sisyphus/code/linux/tools/lib -c test_rfs.bpf.c -o /tmp/rfs-bpf-build/selftests/test_rfs.bpf.o
+/home/sisyphus/code/test/bpf_test/bpftool gen skeleton /tmp/rfs-bpf-build/selftests/test_rfs.bpf.o name test_rfs > /tmp/rfs-bpf-build/selftests/test_rfs.skel.h.tmp
+mv /tmp/rfs-bpf-build/selftests/test_rfs.skel.h.tmp /tmp/rfs-bpf-build/selftests/test_rfs.skel.h
+gcc -O2 -g -Wall -I/tmp/rfs-bpf-build/selftests/sample -I/tmp/rfs-bpf-build/selftests -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi test_rfs.c /tmp/rfs-bpf-build/selftests/sample/rfs_policy_loader.o \
+	/tmp/rfs-bpf-build/selftests/sample/rfs_policy_topology.o /tmp/rfs-bpf-build/selftests/sample/libbpf/libbpf.a \
+	-lelf -lz -o /tmp/rfs-bpf-build/selftests/test_rfs
+rsync -a --copy-unsafe-links test_rfs.sh /home/sisyphus/code/test/rfs-native/bpf/rfs/
+rsync -a --copy-unsafe-links ../../net/lib.sh /home/sisyphus/code/test/rfs-native/bpf/rfs/
+rsync -a --copy-unsafe-links /tmp/rfs-bpf-build/selftests/test_rfs /home/sisyphus/code/test/rfs-native/bpf/rfs/
+rsync -a --copy-unsafe-links /tmp/rfs-bpf-build/selftests/lib /home/sisyphus/code/test/rfs-native/bpf/rfs/
+rsync -a --copy-unsafe-links config /home/sisyphus/code/test/rfs-native/bpf/rfs/
+make: Leaving directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'

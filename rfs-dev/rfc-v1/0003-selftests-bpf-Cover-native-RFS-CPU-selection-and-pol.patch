@@ -1,0 +1,708 @@
+From 75c47d5b969cb4a393887cfff600f035f1f9680e Mon Sep 17 00:00:00 2001
+Message-ID: <75c47d5b969cb4a393887cfff600f035f1f9680e.1788775763.git.superdcc97@163.com>
+In-Reply-To: <cover.1788775763.git.superdcc97@163.com>
+References: <cover.1788775763.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 7 Sep 2026 14:26:34 +0800
+Subject: [RFC net-next 3/4] selftests/bpf: Cover native RFS CPU selection and
+ policy lifetime
+
+Programmable RFS needs coverage for the CPU actually processing received
+traffic as well as verifier restrictions and policy replacement.
+Checking a BPF return value alone does not establish the resulting
+receive CPU.
+
+Add a dedicated bpf/rfs kselftest target. Exchange TCP traffic over
+loopback and inspect SO_INCOMING_CPU while pinning the application and
+sender to different CPUs. Cover native fallback, CPU zero encoding,
+invalid and offline results, IPv6, application migration, and policy
+replacement or detach during a connection.
+
+Reject context writes, sleepable callbacks and reserved flags. Exercise
+duplicate attachment, expected-old mismatches, device removal and
+concurrent link updates. Reuse the RFS sample loader to test NUMA
+migration, the cluster policy, empty candidate pools and sparse CPU-list
+parsing.
+
+Install the test wrapper, net selftest helpers and sample CLI. Run the
+traffic tests in a temporary network namespace, restoring the global RFS
+table size afterward. The tests require a disposable environment for CPU
+hotplug, and the NUMA case requires the documented CPU layout.
+
+All 22 tests pass in an eight-vCPU, two-node QEMU/KVM guest through
+test-kernel with KASAN, lockdep and RCU checking enabled. TCP payload
+checks do not establish absence of packet reordering before protocol
+reassembly.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ tools/testing/selftests/Makefile              |   1 +
+ tools/testing/selftests/bpf/rfs/Makefile      |  47 ++
+ tools/testing/selftests/bpf/rfs/config        |   9 +
+ .../testing/selftests/bpf/rfs/test_rfs.bpf.c  |  38 ++
+ tools/testing/selftests/bpf/rfs/test_rfs.c    | 491 ++++++++++++++++++
+ tools/testing/selftests/bpf/rfs/test_rfs.sh   |  26 +
+ 6 files changed, 612 insertions(+)
+ create mode 100644 tools/testing/selftests/bpf/rfs/Makefile
+ create mode 100644 tools/testing/selftests/bpf/rfs/config
+ create mode 100644 tools/testing/selftests/bpf/rfs/test_rfs.bpf.c
+ create mode 100644 tools/testing/selftests/bpf/rfs/test_rfs.c
+ create mode 100755 tools/testing/selftests/bpf/rfs/test_rfs.sh
+
+diff --git a/tools/testing/selftests/Makefile b/tools/testing/selftests/Makefile
+index c62642302c84..6f865c9aabe0 100644
+--- a/tools/testing/selftests/Makefile
++++ b/tools/testing/selftests/Makefile
+@@ -4,6 +4,7 @@ TARGETS += alsa
+ TARGETS += amd-pstate
+ TARGETS += arm64
+ TARGETS += bpf
++TARGETS += bpf/rfs
+ TARGETS += breakpoints
+ TARGETS += cachestat
+ TARGETS += capabilities
+diff --git a/tools/testing/selftests/bpf/rfs/Makefile b/tools/testing/selftests/bpf/rfs/Makefile
+new file mode 100644
+index 000000000000..e96662a857ee
+--- /dev/null
++++ b/tools/testing/selftests/bpf/rfs/Makefile
+@@ -0,0 +1,47 @@
++# SPDX-License-Identifier: GPL-2.0
++RFS_TEST_ROOT := $(abspath ../../../../..)
++OUTPUT ?= $(CURDIR)
++ifneq ($(abspath $(OUTPUT)),$(CURDIR))
++building_out_of_srctree := 1
++endif
++TEST_PROGS := test_rfs.sh
++TEST_GEN_PROGS_EXTENDED := test_rfs rfs_policy
++TEST_GEN_FILES := lib
++TEST_FILES := ../../net/lib.sh
++EXTRA_CLEAN := $(addprefix $(OUTPUT)/,test_rfs.bpf.o test_rfs.skel.h sample)
++
++include ../../lib.mk
++
++VMLINUX ?= $(RFS_TEST_ROOT)/vmlinux
++BPFTOOL ?= bpftool
++CLANG ?= clang
++RFS_SAMPLE := $(RFS_TEST_ROOT)/samples/bpf
++RFS_BUILD := $(abspath $(OUTPUT))/sample
++RFS_CFLAGS := -O2 -g -Wall -I$(RFS_BUILD) -I$(OUTPUT) -I$(RFS_SAMPLE) \
++	-I$(RFS_TEST_ROOT)/tools/lib -I$(RFS_TEST_ROOT)/tools/include/uapi
++
++$(RFS_BUILD)/rfs_policy: $(wildcard $(RFS_SAMPLE)/rfs_policy*.c) \
++		       $(RFS_SAMPLE)/rfs_policy.h $(RFS_SAMPLE)/Makefile.rfs $(VMLINUX)
++	$(MAKE) -f $(RFS_SAMPLE)/Makefile.rfs OUTPUT=$(RFS_BUILD) \
++		VMLINUX=$(VMLINUX) BPFTOOL=$(BPFTOOL) CLANG=$(CLANG)
++
++$(OUTPUT)/test_rfs.bpf.o: test_rfs.bpf.c $(RFS_BUILD)/rfs_policy
++	$(CLANG) -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
++		-I$(RFS_BUILD) -I$(RFS_BUILD)/libbpf -I$(RFS_SAMPLE) \
++		-I$(RFS_TEST_ROOT)/tools/lib -c $< -o $@
++
++$(OUTPUT)/test_rfs.skel.h: $(OUTPUT)/test_rfs.bpf.o
++	$(BPFTOOL) gen skeleton $< name test_rfs > $@.tmp
++	mv $@.tmp $@
++
++$(OUTPUT)/test_rfs: test_rfs.c $(OUTPUT)/test_rfs.skel.h
++	$(CC) $(RFS_CFLAGS) $< $(RFS_BUILD)/rfs_policy_loader.o \
++		$(RFS_BUILD)/rfs_policy_topology.o $(RFS_BUILD)/libbpf/libbpf.a \
++		-lelf -lz -o $@
++
++$(OUTPUT)/rfs_policy: $(RFS_BUILD)/rfs_policy
++	cp $< $@
++
++$(OUTPUT)/lib: ../../net/lib/sh/defer.sh
++	mkdir -p $@/sh
++	cp $< $@/sh/
+diff --git a/tools/testing/selftests/bpf/rfs/config b/tools/testing/selftests/bpf/rfs/config
+new file mode 100644
+index 000000000000..cceb9fbe0279
+--- /dev/null
++++ b/tools/testing/selftests/bpf/rfs/config
+@@ -0,0 +1,9 @@
++CONFIG_BPF=y
++CONFIG_BPF_SYSCALL=y
++CONFIG_BPF_JIT=y
++CONFIG_DEBUG_INFO_BTF=y
++CONFIG_BPF_RFS=y
++CONFIG_RPS=y
++CONFIG_NET_NS=y
++CONFIG_DUMMY=y
++CONFIG_IPV6=y
+diff --git a/tools/testing/selftests/bpf/rfs/test_rfs.bpf.c b/tools/testing/selftests/bpf/rfs/test_rfs.bpf.c
+new file mode 100644
+index 000000000000..62448495a7be
+--- /dev/null
++++ b/tools/testing/selftests/bpf/rfs/test_rfs.bpf.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "vmlinux.h"
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_tracing.h>
++#include "rfs_policy.h"
++
++char LICENSE[] SEC("license") = "GPL";
++const volatile __u32 result;
++__u64 calls;
++__u64 different_active;
++
++SEC("struct_ops/select_cpu")
++__u32 BPF_PROG(select_cpu, const struct bpf_rfs_ctx___local *rctx)
++{
++	__sync_fetch_and_add(&calls, 1);
++	if (result && (__u32)rctx->active_cpu != result - 1)
++		__sync_fetch_and_add(&different_active, 1);
++	return result;
++}
++
++SEC("?struct_ops/select_cpu")
++__u32 BPF_PROG(write_ctx, struct bpf_rfs_ctx___local *rctx)
++{
++	rctx->app_cpu_hint = 0;
++	return 0;
++}
++
++SEC("?struct_ops.s/select_cpu")
++__u32 BPF_PROG(sleepable, const struct bpf_rfs_ctx___local *rctx)
++{
++	return 0;
++}
++
++SEC(".struct_ops.link")
++struct bpf_rfs_ops___local test_ops = {
++	.name = "rfs_test",
++	.select_cpu = (void *)select_cpu,
++};
+diff --git a/tools/testing/selftests/bpf/rfs/test_rfs.c b/tools/testing/selftests/bpf/rfs/test_rfs.c
+new file mode 100644
+index 000000000000..f1b6a6c162ee
+--- /dev/null
++++ b/tools/testing/selftests/bpf/rfs/test_rfs.c
+@@ -0,0 +1,491 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <arpa/inet.h>
++#include <errno.h>
++#include <net/if.h>
++#include <netinet/tcp.h>
++#include <sched.h>
++#include <signal.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <sys/wait.h>
++#include <unistd.h>
++#include <bpf/bpf.h>
++#include <bpf/btf.h>
++#include <bpf/libbpf.h>
++#include "../../kselftest_harness.h"
++#include "rfs_policy.h"
++#include "rfs_policy.skel.h"
++#include "test_rfs.skel.h"
++
++static int quiet_libbpf(enum libbpf_print_level level, const char *fmt, va_list args)
++{
++	return level == LIBBPF_DEBUG ? 0 : vfprintf(stderr, fmt, args);
++}
++
++static int pin_cpu(int cpu)
++{
++	cpu_set_t set;
++
++	CPU_ZERO(&set);
++	CPU_SET(cpu, &set);
++	return sched_setaffinity(0, sizeof(set), &set);
++}
++
++/* SO_INCOMING_CPU observes protocol processing, not the recv() task's CPU. */
++static int traffic(int family, int app_cpu, int expected_cpu,
++		   int (*midway)(void *), void *arg, int after_cpu)
++{
++	struct sockaddr_storage addr = {};
++	struct sockaddr_in6 *v6 = (void *)&addr;
++	struct sockaddr_in *v4 = (void *)&addr;
++	struct timeval timeout = { .tv_sec = 5 };
++	socklen_t len, cpu_len;
++	int listener = -1, fd = -1, child_status, cpu, i, one = 1, err = -1;
++	pid_t child = -1;
++	unsigned int value;
++
++	if (pin_cpu(app_cpu))
++		return -1;
++	listener = socket(family, SOCK_STREAM, 0);
++	if (listener < 0)
++		goto out;
++	if (family == AF_INET6) {
++		v6->sin6_family = family;
++		v6->sin6_addr = in6addr_loopback;
++		len = sizeof(*v6);
++	} else {
++		v4->sin_family = family;
++		v4->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++		len = sizeof(*v4);
++	}
++	setsockopt(listener, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
++	if (bind(listener, (void *)&addr, len) || listen(listener, 1) ||
++	    getsockname(listener, (void *)&addr, &len))
++		goto out;
++	child = fork();
++	if (child < 0)
++		goto out;
++	if (!child) {
++		close(listener);
++		if (pin_cpu(app_cpu ? 0 : 1))
++			_exit(1);
++		fd = socket(family, SOCK_STREAM, 0);
++		if (fd < 0)
++			_exit(2);
++		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
++		setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
++		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
++		if (connect(fd, (void *)&addr, len))
++			_exit(3);
++		for (i = 0; i < 128; i++) {
++			value = i;
++			if (send(fd, &value, sizeof(value), MSG_NOSIGNAL) != sizeof(value) ||
++			    recv(fd, &value, sizeof(value), MSG_WAITALL) != sizeof(value) ||
++			    value != i)
++				_exit(4);
++		}
++		close(fd);
++		_exit(0);
++	}
++	fd = accept(listener, NULL, NULL);
++	if (fd < 0)
++		goto out;
++	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
++	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
++	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
++	for (i = 0; i < 128; i++) {
++		if (i == 64 && midway) {
++			if (midway(arg))
++				goto out;
++			expected_cpu = after_cpu;
++		}
++		if (recv(fd, &value, sizeof(value), MSG_WAITALL) != sizeof(value) || value != i)
++			goto out;
++		cpu_len = sizeof(cpu);
++		if (getsockopt(fd, SOL_SOCKET, SO_INCOMING_CPU, &cpu, &cpu_len))
++			goto out;
++		/* Warm up application hints and allow in-flight data at replacement. */
++		if ((i >= 16 && i < 64) || i >= 80) {
++			if (cpu != expected_cpu) {
++				fprintf(stderr, "sequence=%d incoming_cpu=%d expected=%d app=%d\n",
++					i, cpu, expected_cpu, app_cpu);
++				goto out;
++			}
++		}
++		if (send(fd, &value, sizeof(value), MSG_NOSIGNAL) != sizeof(value))
++			goto out;
++	}
++	err = 0;
++out:
++	if (fd >= 0)
++		close(fd);
++	if (listener >= 0)
++		close(listener);
++	if (child > 0) {
++		if (err)
++			kill(child, SIGKILL);
++		if (waitpid(child, &child_status, 0) < 0 || !WIFEXITED(child_status) ||
++		    WEXITSTATUS(child_status))
++			err = -1;
++	}
++	return err;
++}
++
++FIXTURE(rfs) {
++	struct test_rfs *skel;
++	struct bpf_link *link;
++	cpu_set_t affinity;
++	bool restore_cpu2;
++	bool restore_flow_count;
++};
++
++FIXTURE_SETUP(rfs)
++{
++	struct btf *btf;
++	int type;
++
++	libbpf_set_print(quiet_libbpf);
++	ASSERT_EQ(sched_getaffinity(0, sizeof(self->affinity), &self->affinity), 0);
++	if (!CPU_ISSET(0, &self->affinity) || !CPU_ISSET(1, &self->affinity) ||
++	    !CPU_ISSET(2, &self->affinity))
++		SKIP(return, "need online CPUs 0, 1 and 2");
++	btf = btf__load_vmlinux_btf();
++	if (!btf)
++		SKIP(return, "kernel BTF unavailable");
++	type = btf__find_by_name_kind(btf, "bpf_rfs_ops", BTF_KIND_STRUCT);
++	btf__free(btf);
++	if (type < 0)
++		SKIP(return, "CONFIG_BPF_RFS is unavailable");
++	self->skel = test_rfs__open();
++	ASSERT_NE(self->skel, NULL);
++	self->skel->struct_ops.test_ops->ifindex = if_nametoindex("lo");
++}
++
++FIXTURE_TEARDOWN(rfs)
++{
++	if (self->restore_cpu2)
++		ASSERT_EQ(system("echo 1 > /sys/devices/system/cpu/cpu2/online"), 0);
++	if (self->restore_flow_count)
++		ASSERT_EQ(system("echo 4096 > /sys/class/net/lo/queues/rx-0/rps_flow_cnt"), 0);
++	bpf_link__destroy(self->link);
++	test_rfs__destroy(self->skel);
++	ASSERT_EQ(sched_setaffinity(0, sizeof(self->affinity), &self->affinity), 0);
++}
++
++#define ATTACH_RESULT(value) do { \
++	self->skel->rodata->result = (value); \
++	ASSERT_EQ(test_rfs__load(self->skel), 0); \
++	self->link = bpf_map__attach_struct_ops(self->skel->maps.test_ops); \
++	ASSERT_NE(self->link, NULL); \
++} while (0)
++
++TEST_F(rfs, native_default)
++{
++	ATTACH_RESULT(0);
++	ASSERT_EQ(traffic(AF_INET, 0, 0, NULL, NULL, 0), 0);
++	ASSERT_GT(self->skel->bss->calls, 0);
++}
++
++TEST_F(rfs, no_policy)
++{
++	ASSERT_EQ(traffic(AF_INET, 0, 0, NULL, NULL, 0), 0);
++}
++
++TEST_F(rfs, no_rfs_table)
++{
++	ATTACH_RESULT(3);
++	self->restore_flow_count = true;
++	ASSERT_EQ(system("echo 0 > /sys/class/net/lo/queues/rx-0/rps_flow_cnt"), 0);
++	ASSERT_EQ(traffic(AF_INET, 0, 1, NULL, NULL, 0), 0);
++	ASSERT_EQ(self->skel->bss->calls, 0);
++}
++
++TEST_F(rfs, offline_cpu_default)
++{
++	if (access("/sys/devices/system/cpu/cpu2/online", W_OK))
++		SKIP(return, "CPU hotplug is unavailable");
++	ATTACH_RESULT(3);
++	self->restore_cpu2 = true;
++	ASSERT_EQ(system("echo 0 > /sys/devices/system/cpu/cpu2/online"), 0);
++	ASSERT_EQ(traffic(AF_INET, 0, 0, NULL, NULL, 0), 0);
++	ASSERT_GT(self->skel->bss->calls, 0);
++}
++
++TEST_F(rfs, cpu_zero_encoding)
++{
++	ATTACH_RESULT(1);
++	ASSERT_EQ(traffic(AF_INET, 2, 0, NULL, NULL, 0), 0);
++	ASSERT_GT(self->skel->bss->calls, 0);
++}
++
++TEST_F(rfs, alternate_cpu)
++{
++	ATTACH_RESULT(3);
++	ASSERT_EQ(traffic(AF_INET, 0, 2, NULL, NULL, 0), 0);
++	ASSERT_GT(self->skel->bss->different_active, 0);
++}
++
++TEST_F(rfs, ipv6)
++{
++	ATTACH_RESULT(3);
++	ASSERT_EQ(traffic(AF_INET6, 0, 2, NULL, NULL, 0), 0);
++}
++
++TEST_F(rfs, invalid_cpu_default)
++{
++	ATTACH_RESULT(~0U);
++	ASSERT_EQ(traffic(AF_INET, 0, 0, NULL, NULL, 0), 0);
++	ASSERT_GT(self->skel->bss->calls, 0);
++}
++
++TEST_F(rfs, readonly_context)
++{
++	char log[65536] = {};
++	struct bpf_program *prog = self->skel->progs.write_ctx;
++
++	self->skel->struct_ops.test_ops->select_cpu = prog;
++	bpf_program__set_autoload(prog, true);
++	bpf_program__set_log_buf(prog, log, sizeof(log));
++	bpf_program__set_log_level(prog, 1);
++	ASSERT_LT(test_rfs__load(self->skel), 0);
++	ASSERT_NE(strstr(log, "only read is supported"), NULL);
++}
++
++TEST_F(rfs, sleepable_rejected)
++{
++	self->skel->struct_ops.test_ops->select_cpu = self->skel->progs.sleepable;
++	bpf_program__set_autoload(self->skel->progs.sleepable, true);
++	ASSERT_LT(test_rfs__load(self->skel), 0);
++}
++
++TEST_F(rfs, reserved_flags)
++{
++	self->skel->struct_ops.test_ops->flags = 1;
++	ASSERT_EQ(test_rfs__load(self->skel), 0);
++	self->link = bpf_map__attach_struct_ops(self->skel->maps.test_ops);
++	ASSERT_EQ(self->link, NULL);
++	ASSERT_EQ(errno, EINVAL);
++}
++
++TEST_F(rfs, duplicate_attach)
++{
++	struct bpf_link *duplicate;
++
++	ATTACH_RESULT(3);
++	duplicate = bpf_map__attach_struct_ops(self->skel->maps.test_ops);
++	ASSERT_EQ(duplicate, NULL);
++	ASSERT_EQ(errno, EBUSY);
++	ASSERT_EQ(traffic(AF_INET, 0, 2, NULL, NULL, 0), 0);
++}
++
++struct replacement {
++	struct bpf_link *link;
++	struct test_rfs *next;
++};
++
++static int replace_policy(void *arg)
++{
++	struct replacement *r = arg;
++
++	return bpf_link__update_map(r->link, r->next->maps.test_ops);
++}
++
++static int detach_policy(void *arg)
++{
++	return bpf_link__detach(arg);
++}
++
++static int migrate_application(void *arg)
++{
++	return pin_cpu(*(int *)arg);
++}
++
++TEST_F(rfs, application_migration)
++{
++	int cpu = 2;
++
++	ATTACH_RESULT(0);
++	ASSERT_EQ(traffic(AF_INET, 0, 0, migrate_application, &cpu, cpu), 0);
++}
++
++TEST_F(rfs, replace_during_connection)
++{
++	struct test_rfs *next;
++	struct replacement r;
++
++	ATTACH_RESULT(3);
++	next = test_rfs__open();
++	ASSERT_NE(next, NULL);
++	next->struct_ops.test_ops->ifindex = if_nametoindex("lo");
++	next->rodata->result = 2;
++	ASSERT_EQ(test_rfs__load(next), 0);
++	r.link = self->link;
++	r.next = next;
++	EXPECT_EQ(traffic(AF_INET, 0, 2, replace_policy, &r, 1), 0);
++	EXPECT_GT(next->bss->calls, 0);
++	test_rfs__destroy(next);
++}
++
++TEST_F(rfs, detach_during_connection)
++{
++	ATTACH_RESULT(3);
++	ASSERT_EQ(traffic(AF_INET, 0, 2, detach_policy, self->link, 0), 0);
++}
++
++TEST_F(rfs, expected_old)
++{
++	struct test_rfs *next = test_rfs__open();
++	struct bpf_link *unused;
++
++	LIBBPF_OPTS(bpf_link_update_opts, opts, .flags = BPF_F_REPLACE);
++
++	ASSERT_NE(next, NULL);
++	ATTACH_RESULT(3);
++	next->struct_ops.test_ops->ifindex = if_nametoindex("lo");
++	ASSERT_EQ(test_rfs__load(next), 0);
++	/* Initialize the new map; attaching it must fail because lo is occupied. */
++	unused = bpf_map__attach_struct_ops(next->maps.test_ops);
++	ASSERT_EQ(unused, NULL);
++	ASSERT_EQ(errno, EBUSY);
++	opts.old_map_fd = bpf_map__fd(next->maps.test_ops);
++	EXPECT_LT(bpf_link_update(bpf_link__fd(self->link), opts.old_map_fd, &opts), 0);
++	EXPECT_EQ(errno, EPERM);
++	EXPECT_EQ(traffic(AF_INET, 0, 2, NULL, NULL, 0), 0);
++	test_rfs__destroy(next);
++}
++
++TEST_F(rfs, device_unregister)
++{
++	struct test_rfs *next;
++
++	ASSERT_EQ(system("ip link add rfsdummy type dummy"), 0);
++	self->skel->struct_ops.test_ops->ifindex = if_nametoindex("rfsdummy");
++	ATTACH_RESULT(3);
++	ASSERT_EQ(system("ip link del rfsdummy"), 0);
++	next = test_rfs__open();
++	ASSERT_NE(next, NULL);
++	next->struct_ops.test_ops->ifindex = self->skel->struct_ops.test_ops->ifindex;
++	ASSERT_EQ(test_rfs__load(next), 0);
++	EXPECT_EQ(bpf_link__update_map(self->link, next->maps.test_ops), -ENODEV);
++	test_rfs__destroy(next);
++	ASSERT_EQ(system("ip link add rfsdummy type dummy"), 0);
++	ASSERT_EQ(system("ip link del rfsdummy"), 0);
++}
++
++TEST_F(rfs, update_unregister_race)
++{
++	struct test_rfs *next = test_rfs__open();
++	struct bpf_link *link;
++	int round, update, err, status;
++	pid_t child;
++
++	ASSERT_NE(next, NULL);
++	self->skel->struct_ops.test_ops->ifindex = 1000;
++	next->struct_ops.test_ops->ifindex = 1000;
++	ASSERT_EQ(test_rfs__load(self->skel), 0);
++	ASSERT_EQ(test_rfs__load(next), 0);
++	for (round = 0; round < 16; round++) {
++		ASSERT_EQ(system("ip link add rfsrace index 1000 type dummy"), 0);
++		link = bpf_map__attach_struct_ops(self->skel->maps.test_ops);
++		ASSERT_NE(link, NULL);
++		child = fork();
++		ASSERT_GE(child, 0);
++		if (!child)
++			_exit(system("ip link del rfsrace") ? 1 : 0);
++		for (update = 0; update < 16; update++) {
++			struct bpf_map *map = update & 1 ? self->skel->maps.test_ops :
++							 next->maps.test_ops;
++
++			err = bpf_link__update_map(link, map);
++			EXPECT_TRUE(!err || err == -ENODEV);
++			if (err)
++				break;
++		}
++		ASSERT_EQ(waitpid(child, &status, 0), child);
++		EXPECT_TRUE(WIFEXITED(status) && !WEXITSTATUS(status));
++		bpf_link__destroy(link);
++	}
++	test_rfs__destroy(next);
++}
++
++TEST_F(rfs, sample_numa)
++{
++	struct rfs_topology topo;
++	struct rfs_policy *policy;
++	struct bpf_link *link;
++	int next_cpu = 4;
++
++	if (!CPU_ISSET(4, &self->affinity) || !CPU_ISSET(5, &self->affinity) ||
++	    access("/sys/devices/system/cpu/cpu0/node0", F_OK) ||
++	    access("/sys/devices/system/cpu/cpu4/node1", F_OK))
++		SKIP(return, "need node0 CPU0 and node1 CPUs4/5");
++	ASSERT_EQ(rfs_topology_load(&topo, "/sys/devices/system/cpu", "1,5", 0), 0);
++	policy = rfs_policy_open(&topo, if_nametoindex("lo"), RFS_NUMA);
++	ASSERT_NE(policy, NULL);
++	ASSERT_EQ(rfs_policy_load(policy, &topo), 0);
++	link = bpf_map__attach_struct_ops(policy->maps.rfs_ops);
++	ASSERT_NE(link, NULL);
++	EXPECT_EQ(traffic(AF_INET, 0, 1, migrate_application, &next_cpu, 5), 0);
++	bpf_link__destroy(link);
++	rfs_policy__destroy(policy);
++	rfs_topology_free(&topo);
++}
++
++TEST_F(rfs, sample_cluster)
++{
++	struct rfs_topology topo;
++	struct rfs_policy *policy;
++	struct bpf_link *link;
++
++	ASSERT_EQ(rfs_topology_load(&topo, "/sys/devices/system/cpu", "2", 1), 0);
++	policy = rfs_policy_open(&topo, if_nametoindex("lo"), RFS_CLUSTER);
++	ASSERT_NE(policy, NULL);
++	ASSERT_EQ(rfs_policy_load(policy, &topo), 0);
++	link = bpf_map__attach_struct_ops(policy->maps.rfs_ops);
++	ASSERT_NE(link, NULL);
++	EXPECT_EQ(traffic(AF_INET, 0, 2, NULL, NULL, 0), 0);
++	bpf_link__destroy(link);
++	rfs_policy__destroy(policy);
++	rfs_topology_free(&topo);
++}
++
++TEST_F(rfs, empty_candidates)
++{
++	struct rfs_topology topo;
++	struct rfs_policy *policy;
++	struct bpf_link *link;
++
++	ASSERT_EQ(rfs_topology_load(&topo, "/sys/devices/system/cpu", "", 0), 0);
++	policy = rfs_policy_open(&topo, if_nametoindex("lo"), RFS_NUMA);
++	ASSERT_NE(policy, NULL);
++	ASSERT_EQ(rfs_policy_load(policy, &topo), 0);
++	link = bpf_map__attach_struct_ops(policy->maps.rfs_ops);
++	ASSERT_NE(link, NULL);
++	EXPECT_EQ(traffic(AF_INET, 0, 0, NULL, NULL, 0), 0);
++	bpf_link__destroy(link);
++	rfs_policy__destroy(policy);
++	rfs_topology_free(&topo);
++}
++
++TEST(cpulist_large_and_sparse)
++{
++	unsigned char *mask;
++	unsigned int size;
++
++	ASSERT_EQ(rfs_parse_cpulist("0-31,64-127,511\n", &mask, &size), 0);
++	ASSERT_EQ(size, 512);
++	EXPECT_EQ(mask[31], 1);
++	EXPECT_EQ(mask[32], 0);
++	EXPECT_EQ(mask[64], 1);
++	EXPECT_EQ(mask[511], 1);
++	free(mask);
++	ASSERT_EQ(rfs_parse_cpulist("4-2", &mask, &size), -EINVAL);
++	ASSERT_EQ(rfs_parse_cpulist("0,", &mask, &size), -EINVAL);
++	ASSERT_EQ(rfs_parse_cpulist("-1", &mask, &size), -EINVAL);
++}
++
++TEST_HARNESS_MAIN
+diff --git a/tools/testing/selftests/bpf/rfs/test_rfs.sh b/tools/testing/selftests/bpf/rfs/test_rfs.sh
+new file mode 100755
+index 000000000000..0e6732694ad6
+--- /dev/null
++++ b/tools/testing/selftests/bpf/rfs/test_rfs.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++# SPDX-License-Identifier: GPL-2.0
++set -e
++cd "$(dirname "$0")"
++if [[ -f ./lib.sh ]]; then
++	source ./lib.sh
++else
++	source ../../net/lib.sh
++fi
++
++require_command ip
++if [[ $EUID -ne 0 || ! -f /proc/sys/net/core/rps_sock_flow_entries ]]; then
++	echo "SKIP: root and CONFIG_RPS required"
++	exit 4
++fi
++old_entries=$(cat /proc/sys/net/core/rps_sock_flow_entries)
++cleanup()
++{
++	cleanup_all_ns
++	echo "$old_entries" > /proc/sys/net/core/rps_sock_flow_entries
++}
++trap cleanup EXIT
++setup_ns rfs_ns
++echo 32768 > /proc/sys/net/core/rps_sock_flow_entries
++ip netns exec "$rfs_ns" sh -c 'echo 4096 > /sys/class/net/lo/queues/rx-0/rps_flow_cnt'
++ip netns exec "$rfs_ns" ./test_rfs
+-- 
+2.43.0
+

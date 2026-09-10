@@ -1,0 +1,7 @@
+make: Entering directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'
+rsync -a --copy-unsafe-links test_rfs.sh /home/sisyphus/code/test/rfs-review-20260910/selftests/
+rsync -a --copy-unsafe-links ../../net/lib.sh /home/sisyphus/code/test/rfs-review-20260910/selftests/
+rsync -a --copy-unsafe-links /tmp/rfs-review-build/test_rfs /tmp/rfs-review-build/rfs_policy /home/sisyphus/code/test/rfs-review-20260910/selftests/
+rsync -a --copy-unsafe-links /tmp/rfs-review-build/lib /home/sisyphus/code/test/rfs-review-20260910/selftests/
+rsync -a --copy-unsafe-links config /home/sisyphus/code/test/rfs-review-20260910/selftests/
+make: Leaving directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'

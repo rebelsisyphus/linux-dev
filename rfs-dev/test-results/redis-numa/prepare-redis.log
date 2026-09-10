@@ -1,0 +1,34 @@
+PONG
+OK
+pid 611's current affinity list: 4
+00400000 bind:1 file=/mnt/shared/bin/redis-server
+00401000 bind:1 file=/mnt/shared/bin/redis-server mapped=281 active=0 N1=281 kernelpagesize_kB=4
+00678000 bind:1 file=/mnt/shared/bin/redis-server mapped=52 active=0 N1=52 kernelpagesize_kB=4
+00755000 bind:1 file=/mnt/shared/bin/redis-server anon=2 dirty=2 mapped=6 active=0 N1=6 kernelpagesize_kB=4
+0075b000 bind:1 file=/mnt/shared/bin/redis-server anon=35 dirty=35 mapped=55 active=0 N1=55 kernelpagesize_kB=4
+0079f000 bind:1 anon=33 dirty=33 active=0 N1=33 kernelpagesize_kB=4
+0d0c8000 bind:1 heap anon=67 dirty=67 active=0 N1=67 kernelpagesize_kB=4
+0d10b000 bind:1 heap anon=103 dirty=103 active=0 N1=103 kernelpagesize_kB=4
+7f686cf3f000 bind:1
+7f686cf40000 bind:1 anon=2 dirty=2 active=0 N1=2 kernelpagesize_kB=4
+7f686d740000 bind:1
+7f686d741000 bind:1 anon=2 dirty=2 active=0 N1=2 kernelpagesize_kB=4
+7f686df41000 bind:1
+7f686df42000 bind:1 anon=82 dirty=82 active=0 N1=82 kernelpagesize_kB=4
+7f686e792000 bind:1 file=/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache mapped=7 mapmax=7 N1=7 kernelpagesize_kB=4
+7f686e799000 bind:1 file=/usr/lib/locale/C.utf8/LC_COLLATE mapped=1 mapmax=6 N1=1 kernelpagesize_kB=4
+7f686e79a000 bind:1 mapped=1 mapmax=18 active=0 N0=1 kernelpagesize_kB=4
+7f686e79e000 bind:1
+7f686e7a0000 bind:1
+7ffc73026000 bind:1 stack anon=3 dirty=3 active=1 N1=3 kernelpagesize_kB=4
+bind 192.0.2.2
+port 6379
+protected-mode no
+save ""
+appendonly no
+io-threads 1
+io-threads-do-reads no
+daemonize yes
+pidfile /run/redis-rfs.pid
+logfile /run/redis-rfs.log
+dir /run

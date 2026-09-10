@@ -1,0 +1,6 @@
+Initial 192-client calibration, not the final 384-client comparison.
+The old analysis reported CPU4 at 94.93% (RPS) / 96.8-97.0% (BPF), which
+prompted increasing concurrency uniformly. Subsequent per-second analysis
+showed that the old window included client teardown idle time. The final
+series uses the central half of samples uniformly, without selecting by
+QPS or CPU value. This initial series was interrupted; all data retained.

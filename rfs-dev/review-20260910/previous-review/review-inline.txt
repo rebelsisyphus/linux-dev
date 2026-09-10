@@ -1,0 +1,416 @@
+commit de4111cfc3d835438b7c5ee3b558d71f0ccbc7e9
+Author: Dong Chenchen <superdcc97@163.com>
+
+samples/bpf: add xdp RPS/RFS steering sample
+
+This sample combines cpumap steering, socket-based processor hints, and
+userspace topology selection. The review examines the supplied patch against
+the current source tree, with particular attention to migration ordering and
+whether the learning and validation paths observe the intended events.
+
+> diff --git a/samples/bpf/xdp_rps_rfs_kern.c b/samples/bpf/xdp_rps_rfs_kern.c
+> new file mode 100644
+> index 000000000000..705eaf613d62
+> --- /dev/null
+> +++ b/samples/bpf/xdp_rps_rfs_kern.c
+> @@ -0,0 +1,700 @@
+
+[ ... ]
+
+> +struct rfs_hlist_node {
+> +	void *next;
+> +	void **pprev;
+> +};
+> +
+> +struct rfs_sock_common_prefix {
+> +	__u32 daddr;
+> +	__u32 rcv_saddr;
+> +	__u32 hash;
+> +	__u16 dport;
+> +	__u16 num;
+> +	__u16 family;
+> +	__u8 state;
+> +	__u8 flags;
+> +	int bound_dev_if;
+> +	struct rfs_hlist_node bind_node;
+> +	void *prot;
+> +	void *net;
+> +	struct rfs_in6_addr v6_daddr;
+> +	struct rfs_in6_addr v6_rcv_saddr;
+> +};
+> +
+> +#define SKC_V6_DADDR_OFF offsetof(struct rfs_sock_common_prefix, v6_daddr)
+> +#define SKC_V6_RCV_SADDR_OFF offsetof(struct rfs_sock_common_prefix, v6_rcv_saddr)
+
+Could these socket fields be read using target-kernel type information instead
+of a reconstructed prefix? The sample always reserves a pointer for the
+network namespace, but possible_net_t is empty when network namespaces are
+disabled. On x86-64, the source-derived sock_common prefix then places the
+IPv6 addresses at offsets 48 and 64, while the sample reads offsets 56 and 72.
+Both addresses are wrong even though the family check succeeds. The current
+configuration has network namespaces enabled and matches the sample offsets;
+the configuration change exposes the regression.
+
+[ ... ]
+
+> +};
+> +
+> +struct l4_ports {
+> +	__be16 source;
+> +	__be16 dest;
+> +};
+> +
+> +struct flow_key {
+> +	__u8 family;
+> +	__u8 proto;
+> +	__u16 sport;
+> +	__u16 dport;
+> +	union {
+> +		struct {
+> +			__u32 saddr;
+> +			__u32 daddr;
+> +		} v4;
+> +		struct {
+> +			__u32 saddr[4];
+> +			__u32 daddr[4];
+> +		} v6;
+> +	};
+> +};
+
+What limits receive-side learning to the ingress instance and selected cgroup?
+The flow key has no namespace or interface identity, and attach_recvmsg()
+installs a system-wide tcp_recvmsg kprobe without a socket or cgroup filter.
+Two network namespaces can use the same address/port tuple; a receive in an
+unrelated namespace can then overwrite the desired processor of the monitored
+flow. Passing -g only scopes the separate sockops attachment. Please define a
+matching identity and scope for both packet and socket observations.
+
+[ ... ]
+
+> +struct {
+> +	__uint(type, BPF_MAP_TYPE_LRU_HASH);
+> +	__uint(key_size, sizeof(struct flow_key));
+> +	__uint(value_size, sizeof(struct flow_state));
+> +	__uint(max_entries, MAX_FLOW_ENTRIES);
+> +} flow_state SEC(".maps");
+> +
+
+How is the previous steering state retained while packets remain in flight?
+This least-recently-used map can evict an entry independently of its queue
+progress. delete_rfs_flow() also removes entries immediately. If a flow has
+been moved from its hash-selected processor to another processor, eviction or
+deletion makes the next packet recreate state on the hash-selected processor,
+with no check of the old queue. This bypasses the migration barrier. Capacity
+pressure and explicit deletion need a state-retirement protocol, or the
+ordering guarantee needs to exclude these paths.
+
+[ ... ]
+
+> +		key->family = FLOW_FAMILY_V4;
+> +		key->proto = iph->protocol;
+> +		key->v4.saddr = iph->saddr;
+> +		key->v4.daddr = iph->daddr;
+> +		off += iph->ihl * 4;
+> +		if (parse_ports(data, data_end, iph->protocol, off, key))
+> +			return -1;
+
+Should fragmented packets be excluded before reading transport ports? For a
+noninitial IPv4 fragment, these bytes are payload rather than a transport
+header. A host execution of the original parser with fragment offset 1
+returned success and interpreted payload bytes 0x1234/0x5678 as ports
+4660/22136. Fragments of one datagram can therefore acquire unrelated steering
+states.
+
+The IPv6 path also uses the base header's next-header field directly. Hop-by-
+hop and other extension headers are not traversed. Since parse_ports() returns
+success for unsupported protocols, those packets are redirected with zero
+ports instead of taking the unsupported-packet pass path. The same applies to
+icmp. Could supported parsing be made explicit, with a consistent policy for
+fragments and extension headers?
+
+[ ... ]
+
+> +static __always_inline void flow_save_qtail(struct flow_state *state, __u32 cpu)
+> +{
+> +	__u32 *tail;
+> +
+> +	if (cpu >= MAX_CPUS)
+> +		return;
+> +
+> +	tail = bpf_map_lookup_elem(&cpu_queue_tail, &cpu);
+> +	if (tail) {
+> +		*tail += 1;
+> +		state->last_qtail = *tail;
+> +	}
+> +}
+
+How does this counter provide a queue position with multiple receive
+processors? The counter map is a shared array, and this increment is a
+load/add/store without cross-processor exclusion. Two different flows sent to
+the same destination can both save the same incremented value. The receive-
+side napi context does not serialize different processors, and the cpumap
+producer lock is acquired only later.
+
+Even an atomic increment would not establish ring order: native cpumap
+redirect first stores frames in a per-source bulk queue, which is flushed
+later. Another source can enqueue and complete later-numbered packets before
+this source flushes its earlier-numbered frame. A count reaching last_qtail
+then does not prove that this flow's frame has left the queue. Queue positions
+need to be coupled to the actual enqueue order.
+
+[ ... ]
+
+> +		target_cpu = flow_active_cpu(state);
+> +		flow_save_qtail(state, target_cpu);
+> +		ret = bpf_redirect_map(&cpu_map, target_cpu, XDP_PASS);
+
+Could queue accounting be tied to successful enqueue rather than the redirect
+request? bpf_redirect_map() only records the target and returns an action. The
+later bq_flush_to_queue() can drop a frame when the cpumap ring is full; the
+generic path can likewise fail in ptr_ring_produce(). A dropped frame
+increments this tail but never executes the secondary program that increments
+the head.
+
+For example, two redirect attempts with one ring-full drop leave tail at 2 and
+head at 1 after the real queue is empty. A flow saving tail 2 cannot migrate;
+further packets from that flow advance both counters while preserving the
+deficit. The sample has no correction for this state.
+
+There is also an inverse imbalance in the miss path: when the initial lookup
+misses and the no-exist insertion fails, the packet is redirected without
+flow_save_qtail(), but still increments the head. A concurrent receive hook
+can cause that insertion to fail by installing the same key. Please account
+for unsuccessful insertion and redirect outcomes together.
+
+[ ... ]
+
+> +		if (ret == XDP_REDIRECT)
+> +			count(STAT_RFS_REDIRECT);
+> +		else if (ret == XDP_PASS)
+> +			count(STAT_FALLBACK_PASS);
+> +		else
+> +			count(STAT_DROP);
+
+Could this counter distinguish a learned affinity from an ordinary cached hash
+choice? The miss path inserts every supported flow into flow_state, even when
+neither learning hook is attached. Consequently the second and subsequent
+packets of a pure hash-steered flow increment the affinity counter here.
+
+The drop counter also cannot observe ring-full drops after the helper returns,
+and update_desired_cpu() discards insertion errors before the learning
+counters are incremented. These counters are attempts or cache hits, not
+evidence of successful learning, enqueue, or delivery. The documented
+validation should use counters with those distinctions and observe committed
+migrations and receive processing.
+
+[ ... ]
+
+> +SEC("xdp/cpumap")
+> +int xdp_rps_rfs_cpumap(struct xdp_md *ctx)
+> +{
+> +	__u32 cpu = bpf_get_smp_processor_id();
+> +	__u32 *head;
+> +
+> +	if (cpu >= MAX_CPUS)
+> +		return XDP_PASS;
+> +
+> +	head = bpf_map_lookup_elem(&cpu_queue_head, &cpu);
+> +	if (head)
+> +		*head += 1;
+> +
+> +	return XDP_PASS;
+> +}
+
+Does reaching this program really establish the completion condition required
+by flow_active_cpu()? In cpu_map_kthread_run(), cpu_map_bpf_prog_run()
+executes before skb construction, gro_receive_skb(), and the subsequent flush
+to the receive stack. Advancing the head here allows the next packet to move
+to a new processor while the previous packet is still being built or held by
+the old processor's gro state. The new processor can deliver its packet first.
+
+The classic path has a different boundary: enqueue_to_backlog() increments its
+tail with the actual queue insertion, and process_backlog() advances its head
+after __netif_receive_skb(). Could migration use a completion boundary that
+includes the relevant stack and gro work, or stop promising in-order migration
+with the current hook set?
+
+[ ... ]
+
+> +	if (skops->op != BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB &&
+> +	    skops->op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
+> +		return 1;
+> +
+> +	cpu = bpf_get_smp_processor_id();
+> +
+> +	if (skops->family == FLOW_FAMILY_V4) {
+> +		key.family = FLOW_FAMILY_V4;
+> +		key.proto = IPPROTO_TCP;
+
+Can the established callback identify the application processor here? The
+active callback is reached through tcp_finish_connect(), and the passive
+callback through tcp_rcv_state_process() and tcp_init_transfer(), while
+processing handshake packets. In particular, the passive callback can run
+before userspace accepts the child socket. Its current processor is commonly
+the receive or cpumap processor rather than the processor running the
+receiver.
+
+Without -R, no later application receive observation corrects the hint. The
+process strategy can therefore retain the receive processor, and the
+cluster/numa strategies select topology relative to that processor. Could
+established events be treated as initialization and actual application
+execution supply the locality hint?
+
+[ ... ]
+
+> +	} else if (skops->family == FLOW_FAMILY_V6) {
+> +		key.family = FLOW_FAMILY_V6;
+> +		key.proto = IPPROTO_TCP;
+> +		key.v6.saddr[0] = skops->remote_ip6[0];
+> +		key.v6.saddr[1] = skops->remote_ip6[1];
+> +		key.v6.saddr[2] = skops->remote_ip6[2];
+> +		key.v6.saddr[3] = skops->remote_ip6[3];
+> +		key.v6.daddr[0] = skops->local_ip6[0];
+> +		key.v6.daddr[1] = skops->local_ip6[1];
+> +		key.v6.daddr[2] = skops->local_ip6[2];
+> +		key.v6.daddr[3] = skops->local_ip6[3];
+
+Could IPv4-mapped IPv6 sockets be normalized to the packet's IPv4 key? An IPv6
+listener with the v6-only option disabled can accept an IPv4 connection while
+its child socket family remains IPv6. tcp_v6_syn_recv_sock() delegates those
+packets to tcp_v4_syn_recv_sock() with tcp_v6_mapped_child_init(). Both this
+callback and the receive kprobe then create a family-10 key, whereas
+parse_flow() creates a family-2 key for the incoming IPv4 packet. Automatic
+affinity lookup never matches for these common dual-stack connections.
+
+[ ... ]
+
+> +	key.sport = skops->remote_port >> 16;
+> +	key.dport = bpf_htons(skops->local_port);
+
+Is the remote port conversion intended to depend on host byte order?
+sock_ops_convert_ctx_access() shifts the 16-bit socket port left by 16 only on
+little-endian targets. On a big-endian target, remote_port contains the port
+in its low 16 bits, so this unconditional right shift produces zero. Could the
+conversion use explicit network/host byte-order operations rather than
+assuming the little-endian representation?
+
+[ ... ]
+
+> +	words[8] = ((__u32)key.sport << 16) | key.dport;
+> +	words[9] = ((__u32)key.family << 24) | ((__u32)key.proto << 16);
+> +
+> +	hash = hash_words(words);
+
+Could all three programs share the same flow hashing routine and word layout?
+For IPv4, parse_flow() and the receive kprobe put ports and family/protocol in
+words 2 and 3, but sockops uses words 8 and 9. For
+tcp4,192.0.2.1,198.51.100.2,443,51514, the original routines produce hashes
+0xee7c1177 and 0x0cca1bf0, selecting slots 0 and 1 with three candidates. Even
+with an unchanged application processor, switching between learning sources
+changes the cluster/numa target.
+
+> diff --git a/samples/bpf/xdp_rps_rfs_user.c b/samples/bpf/xdp_rps_rfs_user.c
+> new file mode 100644
+> index 000000000000..a95b9e376c0e
+> --- /dev/null
+> +++ b/samples/bpf/xdp_rps_rfs_user.c
+> @@ -0,0 +1,900 @@
+
+[ ... ]
+
+> +
+> +		for (cpu = first; cpu <= last; cpu++) {
+> +			if (nr == MAX_CPUS || cpu >= MAX_CPUS)
+> +				goto invalid;
+> +			cpus[nr++] = cpu;
+> +		}
+
+Could topology parsing accept the full system CPU list before intersecting it
+with the allowed set? read_cluster_group() and read_numa_group() reuse this
+parser. A valid node list such as 0-31,64-95 fails in its entirety, even when
+the user only allows 0-3. populate_topology_maps() silently publishes an empty
+candidate group and the topology strategy falls back to the process or first
+allowed processor.
+
+The hardcoded map size also prevents choosing processors numbered 64 and
+above. In the other direction, cpu_map_alloc() rejects a map with 64 entries
+when the kernel's configured maximum processor count is smaller than 64.
+Please size maps against the target system, keep system-topology parsing
+separate from allowed-set validation, and expose topology discovery failures.
+
+[ ... ]
+
+> +	if (!bpf_map_lookup_elem(fd, &key, &old_state))
+> +		state = old_state;
+> +	else
+> +		state.active_cpu = cpu;
+> +	state.desired_cpu = cpu;
+> +	err = bpf_map_update_elem(fd, &key, &state, BPF_ANY);
+
+Could manual changes update a separate hint value instead of replacing the
+whole dataplane state? Between this lookup and update, xdp can advance
+last_qtail or commit a migration. Reinstalling old_state then restores an
+older tail and possibly an older active processor. For example, userspace
+reads tail 100, xdp enqueues another packet and saves 101, and userspace
+replaces the value with tail 100 plus a new desired processor. Seeing head 100
+allows a premature migration while packet 101 remains outstanding.
+
+The hash-map update's internal locking cannot make these two userspace
+operations a transaction. A separate hint map would also allow the tracing
+program to avoid sharing a value containing dataplane locking fields; the
+current verifier rejects tracing access to maps containing a bpf spin lock.
+
+[ ... ]
+
+> +		err = bpf_map__pin(map, path);
+> +		if (err == -EEXIST) {
+> +			if (unlink(path))
+> +				return -errno;
+> +			err = bpf_map__pin(map, path);
+> +		}
+
+Can existing pins be preserved until the new attachment succeeds? main() calls
+pin_maps_replace() before bpf_xdp_attach(). Starting a second instance with
+the same interface and pin directory first removes all old map pins, then
+normally fails the attach because an xdp program is already present. The
+running instance still references its old maps, while statistics and manual
+operations through the pin directory address the new, inactive maps. Partial
+pin failures can also leave mixed generations. Could staging and rollback keep
+the pin set associated with the active instance?
+
+[ ... ]
+
+> +static int detach(void)
+> +{
+> +	if (!ifindex)
+> +		return -EINVAL;
+> +
+> +	return bpf_xdp_detach(ifindex, xdp_flags, NULL);
+> +}
+
+Could cleanup detach only the program this loader installed? detach() supplies
+no expected old program. If a second invocation uses -F to replace the first
+program while the first loader remains alive, interrupting the first loader
+removes the second program. The expected-program option on bpf_xdp_detach(),
+or ownership through an xdp link, can distinguish cleanup from an explicit
+administrative detach request.
+
+[ ... ]
+
+> +	bpf_program__set_type(prog, BPF_PROG_TYPE_XDP);
+> +
+> +	err = bpf_object__load(obj);
+> +	if (err) {
+> +		fprintf(stderr, "failed to load BPF object: %s\n", strerror(-err));
+> +		return 1;
+> +	}
+> +
+
+Could unused learning programs have autoload disabled before loading the
+object? The kprobe program is loaded even when -R was not requested; -R only
+controls attachment later. A kernel without bpf event support can provide xdp
+and cpumap but rejects this kprobe program type, causing the basic hash-
+steering command to fail. Feature selection should control program loading as
+well as attachment.
+
+

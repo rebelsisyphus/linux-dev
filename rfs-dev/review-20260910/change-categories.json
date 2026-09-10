@@ -1,0 +1,3562 @@
+[
+  {
+    "id": 1,
+    "file": "include/net/bpf_rfs.h",
+    "function": "bpf_rfs_cpu",
+    "line": 49,
+    "category": "condition",
+    "code": "if (static_branch_unlikely(&bpf_rfs_enabled))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 2,
+    "file": "include/net/bpf_rfs.h",
+    "function": "bpf_rfs_cpu",
+    "line": 50,
+    "category": "exit/branch",
+    "code": "return bpf_rfs_select_cpu(dev, skb, hash, app_cpu, active_cpu);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 3,
+    "file": "include/net/bpf_rfs.h",
+    "function": "bpf_rfs_cpu",
+    "line": 51,
+    "category": "exit/branch",
+    "code": "return app_cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 4,
+    "file": "include/net/bpf_rfs.h",
+    "function": "bpf_rfs_cpu",
+    "line": 57,
+    "category": "exit/branch",
+    "code": "return app_cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 5,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 37,
+    "category": "initialization/ownership",
+    "code": "struct bpf_rfs_ctx ctx = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 6,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 48,
+    "category": "condition",
+    "code": "if (!ops || app_cpu >= nr_cpu_ids || !cpu_possible(app_cpu))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 7,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 49,
+    "category": "exit/branch",
+    "code": "return app_cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 8,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 51,
+    "category": "condition",
+    "code": "if (skb_rx_queue_recorded(skb)) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 9,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 55,
+    "category": "condition",
+    "code": "if (cpu_online(app_cpu))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 10,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 57,
+    "category": "condition",
+    "code": "if (active_cpu < nr_cpu_ids && cpu_online(active_cpu))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 11,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 61,
+    "category": "condition",
+    "code": "if (!cpu)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 12,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 62,
+    "category": "exit/branch",
+    "code": "return app_cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 13,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 64,
+    "category": "condition",
+    "code": "if (cpu >= nr_cpu_ids || cpu >= RPS_NO_CPU ||",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 14,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 66,
+    "category": "exit/branch",
+    "code": "return app_cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 15,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_select_cpu",
+    "line": 68,
+    "category": "exit/branch",
+    "code": "return cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 16,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_in_use",
+    "line": 75,
+    "category": "loop",
+    "code": "list_for_each_entry(binding, &bpf_rfs_bindings, list)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 17,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_in_use",
+    "line": 76,
+    "category": "condition",
+    "code": "if (binding->ops == ops)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 18,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_in_use",
+    "line": 76,
+    "category": "initialization/ownership",
+    "code": "if (binding->ops == ops)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 19,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_in_use",
+    "line": 77,
+    "category": "exit/branch",
+    "code": "return true;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 20,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_in_use",
+    "line": 78,
+    "category": "exit/branch",
+    "code": "return false;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 21,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 90,
+    "category": "condition",
+    "code": "if (!link)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 22,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 91,
+    "category": "exit/branch",
+    "code": "return -EOPNOTSUPP;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 23,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 92,
+    "category": "condition",
+    "code": "if (!ns_capable(net->user_ns, CAP_NET_ADMIN))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 24,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 93,
+    "category": "exit/branch",
+    "code": "return -EPERM;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 25,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 94,
+    "category": "allocation/free",
+    "code": "binding = kzalloc_obj(*binding);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 26,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 95,
+    "category": "condition",
+    "code": "if (!binding)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 27,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 96,
+    "category": "exit/branch",
+    "code": "return -ENOMEM;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 28,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 98,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_lock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 29,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 100,
+    "category": "condition",
+    "code": "if (!dev || dev->reg_state != NETREG_REGISTERED) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 30,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 102,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 31,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 104,
+    "category": "condition",
+    "code": "if (rcu_access_pointer(dev->bpf_rfs_ops) || bpf_rfs_in_use(ops)) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 32,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 106,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 33,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 108,
+    "category": "initialization/ownership",
+    "code": "binding->dev = dev;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 34,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 109,
+    "category": "initialization/ownership",
+    "code": "binding->ops = ops;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 35,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 110,
+    "category": "initialization/ownership",
+    "code": "binding->link = link;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 36,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 111,
+    "category": "initialization/ownership",
+    "code": "list_add(&binding->list, &bpf_rfs_bindings);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 37,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 112,
+    "category": "locking/publication/lifetime",
+    "code": "static_branch_inc(&bpf_rfs_enabled);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 38,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 113,
+    "category": "locking/publication/lifetime",
+    "code": "rcu_assign_pointer(dev->bpf_rfs_ops, ops);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 39,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 115,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_unlock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 40,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 116,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 41,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 117,
+    "category": "allocation/free",
+    "code": "kfree(binding);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 42,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_reg",
+    "line": 118,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 43,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_deactivate",
+    "line": 123,
+    "category": "condition",
+    "code": "if (!binding->dev)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 44,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_deactivate",
+    "line": 124,
+    "category": "exit/branch",
+    "code": "return;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 45,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_deactivate",
+    "line": 125,
+    "category": "locking/publication/lifetime",
+    "code": "rcu_assign_pointer(binding->dev->bpf_rfs_ops, NULL);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 46,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_deactivate",
+    "line": 126,
+    "category": "initialization/ownership",
+    "code": "binding->dev = NULL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 47,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_deactivate",
+    "line": 127,
+    "category": "locking/publication/lifetime",
+    "code": "static_branch_dec(&bpf_rfs_enabled);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 48,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 134,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_lock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 49,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 135,
+    "category": "loop",
+    "code": "list_for_each_entry(binding, &bpf_rfs_bindings, list) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 50,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 136,
+    "category": "condition",
+    "code": "if (binding->link != link)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 51,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 137,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 52,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 139,
+    "category": "initialization/ownership",
+    "code": "list_del(&binding->list);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 53,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 141,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 54,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 143,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_unlock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 55,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 144,
+    "category": "exit/branch",
+    "code": "/* The struct_ops core may release the trampoline after we return. */",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 56,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 145,
+    "category": "locking/publication/lifetime",
+    "code": "synchronize_rcu();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 57,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_unreg",
+    "line": 146,
+    "category": "allocation/free",
+    "code": "kfree(found);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 58,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 156,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_lock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 59,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 157,
+    "category": "loop",
+    "code": "list_for_each_entry(binding, &bpf_rfs_bindings, list) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 60,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 158,
+    "category": "condition",
+    "code": "if (binding->link != link)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 61,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 159,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 62,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 161,
+    "category": "condition",
+    "code": "if (!dev) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 63,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 163,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 64,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 165,
+    "category": "condition",
+    "code": "if (binding->ops != old_kdata || ops->ifindex != dev->ifindex) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 65,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 167,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 66,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 169,
+    "category": "condition",
+    "code": "if (!ns_capable(dev_net(dev)->user_ns, CAP_NET_ADMIN)) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 67,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 171,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 68,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 173,
+    "category": "condition",
+    "code": "if (bpf_rfs_in_use(ops)) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 69,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 175,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 70,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 177,
+    "category": "initialization/ownership",
+    "code": "binding->ops = ops;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 71,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 178,
+    "category": "locking/publication/lifetime",
+    "code": "rcu_assign_pointer(dev->bpf_rfs_ops, ops);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 72,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 180,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 73,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 182,
+    "category": "locking/publication/lifetime",
+    "code": "rtnl_unlock();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 74,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 183,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 75,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 184,
+    "category": "locking/publication/lifetime",
+    "code": "synchronize_rcu();",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 76,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_update",
+    "line": 185,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 77,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 194,
+    "category": "condition",
+    "code": "if (event != NETDEV_UNREGISTER)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 78,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 195,
+    "category": "exit/branch",
+    "code": "return NOTIFY_DONE;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 79,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 196,
+    "category": "loop",
+    "code": "list_for_each_entry(binding, &bpf_rfs_bindings, list)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 80,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 197,
+    "category": "condition",
+    "code": "if (binding->dev == dev)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 81,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 197,
+    "category": "initialization/ownership",
+    "code": "if (binding->dev == dev)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 82,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 200,
+    "category": "exit/branch",
+    "code": "return NOTIFY_DONE;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 83,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_netdev_event",
+    "line": 203,
+    "category": "initialization/ownership",
+    "code": "static struct notifier_block bpf_rfs_netdev_notifier = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 84,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_check_member",
+    "line": 211,
+    "category": "exit/branch",
+    "code": "return prog->sleepable ? -EINVAL : 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 85,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 222,
+    "category": "condition",
+    "code": "switch (off) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 86,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 224,
+    "category": "condition",
+    "code": "if (!uops->ifindex || uops->ifindex > INT_MAX)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 87,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 225,
+    "category": "exit/branch",
+    "code": "return -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 88,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 227,
+    "category": "exit/branch",
+    "code": "return 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 89,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 229,
+    "category": "condition",
+    "code": "if (bpf_obj_name_cpy(ops->name, uops->name, sizeof(ops->name)) <= 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 90,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 230,
+    "category": "exit/branch",
+    "code": "return -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 91,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 231,
+    "category": "exit/branch",
+    "code": "return 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 92,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init_member",
+    "line": 234,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 93,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_validate",
+    "line": 241,
+    "category": "exit/branch",
+    "code": "return ops->select_cpu ? 0 : -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 94,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_default",
+    "line": 246,
+    "category": "exit/branch",
+    "code": "return BPF_RFS_DEFAULT;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 95,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_default",
+    "line": 249,
+    "category": "initialization/ownership",
+    "code": "static const struct bpf_verifier_ops bpf_rfs_verifier_ops = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 96,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_default",
+    "line": 255,
+    "category": "initialization/ownership",
+    "code": "static struct bpf_rfs_ops bpf_rfs_cfi_stubs = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 97,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_ops_init",
+    "line": 261,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 98,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_ops_init",
+    "line": 264,
+    "category": "initialization/ownership",
+    "code": "static struct bpf_struct_ops bpf_rfs_struct_ops = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 99,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init",
+    "line": 283,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 100,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init",
+    "line": 284,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 101,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init",
+    "line": 286,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 102,
+    "file": "net/core/bpf_rfs.c",
+    "function": "bpf_rfs_init",
+    "line": 288,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 103,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 53,
+    "category": "condition",
+    "code": "if (!group || !group->count)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 104,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 54,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 105,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 55,
+    "category": "condition",
+    "code": "if (!exclude)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 106,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 57,
+    "category": "condition",
+    "code": "if (cg.exclude_count >= group->count)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 107,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 58,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 108,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 61,
+    "category": "condition",
+    "code": "if (active && active->member &&",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 109,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 65,
+    "category": "condition",
+    "code": "if (!cg.exclude_count || rank < cg.exclude_start ||",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 110,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 68,
+    "category": "exit/branch",
+    "code": "return (__u32)rctx->active_cpu + 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 111,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 72,
+    "category": "condition",
+    "code": "if (cg.exclude_count && rank >= cg.exclude_start)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 112,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 76,
+    "category": "condition",
+    "code": "if (!cpu)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 113,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 77,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 114,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "file-scope",
+    "line": 81,
+    "category": "exit/branch",
+    "code": "return selected + 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 115,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 93,
+    "category": "condition",
+    "code": "if (!s)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 116,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 94,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 117,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 96,
+    "category": "condition",
+    "code": "if (mode == RFS_PROCESS)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 118,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 97,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 119,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 100,
+    "category": "condition",
+    "code": "if (!app)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 120,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 101,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 121,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 102,
+    "category": "condition",
+    "code": "if (mode == RFS_CLUSTER)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 122,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 104,
+    "category": "condition",
+    "code": "if (!cpu && (mode == RFS_CLUSTER || mode == RFS_NUMA))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 123,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 106,
+    "category": "condition",
+    "code": "if (!cpu && app->member && (rctx->flags & RFS_CTX_APP_CPU_ONLINE))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 124,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 108,
+    "category": "condition",
+    "code": "if (!cpu)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 125,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 111,
+    "category": "condition",
+    "code": "if (cpu)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 126,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 115,
+    "category": "exit/branch",
+    "code": "return cpu;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 127,
+    "file": "samples/bpf/rfs_policy.bpf.c",
+    "function": "SEC",
+    "line": 119,
+    "category": "initialization/ownership",
+    "code": "struct bpf_rfs_ops___local rfs_ops = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 128,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 37,
+    "category": "condition",
+    "code": "if (file) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 129,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 40,
+    "category": "condition",
+    "code": "if (err != 1 || !count) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 130,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 43,
+    "category": "exit/branch",
+    "code": "return -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 131,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 48,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 132,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 49,
+    "category": "exit/branch",
+    "code": "return -ENOENT;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 133,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 50,
+    "category": "loop",
+    "code": "for (i = 0; i < queues.gl_pathc; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 134,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 52,
+    "category": "condition",
+    "code": "if (!file)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 135,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 53,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 136,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 54,
+    "category": "condition",
+    "code": "if (fscanf(file, \"%u\", &count) == 1 && count)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 137,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 59,
+    "category": "condition",
+    "code": "if (!enabled) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 138,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 61,
+    "category": "exit/branch",
+    "code": "return -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 139,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "check_rfs_tables",
+    "line": 63,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 140,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 68,
+    "category": "initialization/ownership",
+    "code": "static const struct option options[] = {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 141,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 72,
+    "category": "initialization/ownership",
+    "code": "struct bpf_link_info info = {};",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 142,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 73,
+    "category": "initialization/ownership",
+    "code": "struct rfs_topology topo = {};",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 143,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 80,
+    "category": "condition",
+    "code": "if (argc < 2) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 144,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 82,
+    "category": "exit/branch",
+    "code": "return 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 145,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 86,
+    "category": "loop",
+    "code": "while ((opt = getopt_long(argc, argv, \"i:p:s:c:x\", options, NULL)) != -1) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 146,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 87,
+    "category": "condition",
+    "code": "switch (opt) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 147,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 90,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 148,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 93,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 149,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 96,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 150,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 99,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 151,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 101,
+    "category": "condition",
+    "code": "if (!strcmp(optarg, \"process\"))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 152,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 103,
+    "category": "condition",
+    "code": "else if (!strcmp(optarg, \"cluster\"))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 153,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 105,
+    "category": "condition",
+    "code": "else if (!strcmp(optarg, \"numa\"))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 154,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 108,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 155,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 109,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 156,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 111,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 157,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 114,
+    "category": "condition",
+    "code": "if (!pin || optind != argc)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 158,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 115,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 159,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 116,
+    "category": "condition",
+    "code": "if (strcmp(command, \"attach\")) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 160,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 118,
+    "category": "condition",
+    "code": "if (fd < 0) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 161,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 120,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 162,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 123,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 163,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 124,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 164,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 125,
+    "category": "condition",
+    "code": "if (info.type != BPF_LINK_TYPE_STRUCT_OPS) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 165,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 127,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 166,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 129,
+    "category": "condition",
+    "code": "if (!strcmp(command, \"show\")) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 167,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 131,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 168,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 133,
+    "category": "condition",
+    "code": "if (!strcmp(command, \"detach\")) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 169,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 135,
+    "category": "condition",
+    "code": "if (!err && unlink(pin))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 170,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 137,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 171,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 139,
+    "category": "condition",
+    "code": "if (strcmp(command, \"update\")) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 172,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 141,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 173,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 144,
+    "category": "condition",
+    "code": "if (old_fd < 0) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 174,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 146,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 175,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 150,
+    "category": "condition",
+    "code": "if (!ifindex) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 176,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 152,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 177,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 155,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 178,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 156,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 179,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 158,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 180,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 159,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 181,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 161,
+    "category": "condition",
+    "code": "if (!skel) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 182,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 163,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 183,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 166,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 184,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 168,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 185,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 169,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 186,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 170,
+    "category": "condition",
+    "code": "if (!strcmp(command, \"attach\")) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 187,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 172,
+    "category": "condition",
+    "code": "if (fd < 0) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 188,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 174,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 189,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 185,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 190,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 191,
+    "category": "condition",
+    "code": "if (err) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 191,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 193,
+    "category": "condition",
+    "code": "if (err == -EINVAL)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 192,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 196,
+    "category": "condition",
+    "code": "if (fd >= 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 193,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 198,
+    "category": "condition",
+    "code": "if (old_fd >= 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 194,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 200,
+    "category": "allocation/free",
+    "code": "rfs_policy__destroy(skel);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 195,
+    "file": "samples/bpf/rfs_policy.c",
+    "function": "main",
+    "line": 202,
+    "category": "exit/branch",
+    "code": "return !!err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 196,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 18,
+    "category": "condition",
+    "code": "if (!skel)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 197,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 19,
+    "category": "exit/branch",
+    "code": "return NULL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 198,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 22,
+    "category": "condition",
+    "code": "if (bpf_map__set_max_entries(skel->maps.cpu_topology, topo->nr_cpus) ||",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 199,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 25,
+    "category": "allocation/free",
+    "code": "rfs_policy__destroy(skel);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 200,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 26,
+    "category": "exit/branch",
+    "code": "return NULL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 201,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "ARRAY_SIZE",
+    "line": 28,
+    "category": "exit/branch",
+    "code": "return skel;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 202,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "fill_map",
+    "line": 37,
+    "category": "loop",
+    "code": "for (i = 0; i < count; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 203,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "fill_map",
+    "line": 39,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 204,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "fill_map",
+    "line": 40,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 205,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "fill_map",
+    "line": 42,
+    "category": "exit/branch",
+    "code": "return bpf_map_freeze(fd);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 206,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_load",
+    "line": 50,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 207,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_load",
+    "line": 53,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 208,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_load",
+    "line": 56,
+    "category": "condition",
+    "code": "if (!err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 209,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_load",
+    "line": 59,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 210,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 68,
+    "category": "condition",
+    "code": "if (!t || !btf_is_struct(t))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 211,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 69,
+    "category": "exit/branch",
+    "code": "return -EINVAL;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 212,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 71,
+    "category": "loop",
+    "code": "for (i = 0; i < btf_vlen(t); i++, m++)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 213,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 72,
+    "category": "condition",
+    "code": "if (!strcmp(btf__name_by_offset(btf, m->name_off), name))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 214,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 73,
+    "category": "exit/branch",
+    "code": "return btf_member_bit_offset(t, i) / 8;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 215,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "member_offset",
+    "line": 74,
+    "category": "exit/branch",
+    "code": "return -ENOENT;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 216,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 85,
+    "category": "initialization/ownership",
+    "code": "struct bpf_map_info info = {};",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 217,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 105,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 218,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 106,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 219,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 108,
+    "category": "condition",
+    "code": "if (!btf)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 220,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 109,
+    "category": "exit/branch",
+    "code": "return -errno;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 221,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 113,
+    "category": "condition",
+    "code": "if (data < 0 || type < 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 222,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 114,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 223,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 115,
+    "category": "allocation/free",
+    "code": "value = calloc(1, info.value_size);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 224,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 116,
+    "category": "condition",
+    "code": "if (!value) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 225,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 118,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 226,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 120,
+    "category": "loop",
+    "code": "for (i = 0; i < ARRAY_SIZE(fields); i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 227,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 122,
+    "category": "condition",
+    "code": "if (offset < 0 || (size_t)data + offset + fields[i].size > info.value_size)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 228,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 123,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 229,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 128,
+    "category": "allocation/free",
+    "code": "free(value);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 230,
+    "file": "samples/bpf/rfs_policy_loader.c",
+    "function": "rfs_policy_prepare",
+    "line": 130,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 231,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 24,
+    "category": "loop",
+    "code": "while (isspace(*text))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 232,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 26,
+    "category": "loop",
+    "code": "while (*text) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 233,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 27,
+    "category": "condition",
+    "code": "if (!isdigit(*text))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 234,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 28,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 235,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 31,
+    "category": "condition",
+    "code": "if (errno || first >= INT_MAX)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 236,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 32,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 237,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 35,
+    "category": "condition",
+    "code": "if (*text == '-') {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 238,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 36,
+    "category": "condition",
+    "code": "if (!isdigit(*++text))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 239,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 37,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 240,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 39,
+    "category": "condition",
+    "code": "if (errno || last >= INT_MAX || last < first)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 241,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 40,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 242,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 43,
+    "category": "condition",
+    "code": "if (last >= n) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 243,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 44,
+    "category": "allocation/free",
+    "code": "tmp = realloc(bits, last + 1);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 244,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 45,
+    "category": "condition",
+    "code": "if (!tmp) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 245,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 47,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 246,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 50,
+    "category": "initialization/ownership",
+    "code": "memset(bits + n, 0, last + 1 - n);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 247,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 53,
+    "category": "loop",
+    "code": "for (i = first; i <= last; i++)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 248,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 55,
+    "category": "condition",
+    "code": "if (*text == ',') {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 249,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 56,
+    "category": "condition",
+    "code": "if (!*++text)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 250,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 57,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 251,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 58,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 252,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 60,
+    "category": "loop",
+    "code": "while (isspace(*text))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 253,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 62,
+    "category": "condition",
+    "code": "if (*text)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 254,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 63,
+    "category": "exit/branch",
+    "code": "goto fail;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 255,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 67,
+    "category": "exit/branch",
+    "code": "return 0;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 256,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 69,
+    "category": "allocation/free",
+    "code": "free(bits);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 257,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_parse_cpulist",
+    "line": 70,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 258,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "read_list",
+    "line": 81,
+    "category": "condition",
+    "code": "if (!file)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 259,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "read_list",
+    "line": 82,
+    "category": "exit/branch",
+    "code": "return -errno;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 260,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "read_list",
+    "line": 83,
+    "category": "condition",
+    "code": "if (getline(&line, &capacity, file) < 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 261,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "read_list",
+    "line": 87,
+    "category": "allocation/free",
+    "code": "free(line);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 262,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "read_list",
+    "line": 89,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 263,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 98,
+    "category": "condition",
+    "code": "if (read_list(path, &mask, &size))",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 264,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 99,
+    "category": "exit/branch",
+    "code": "return -1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 265,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 100,
+    "category": "loop",
+    "code": "for (i = 0; i < size; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 266,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 101,
+    "category": "condition",
+    "code": "if (!mask[i])",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 267,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 102,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 268,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 104,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 269,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 106,
+    "category": "allocation/free",
+    "code": "free(mask);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 270,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "first_cpu",
+    "line": 107,
+    "category": "exit/branch",
+    "code": "return result;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 271,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "compare_cpu",
+    "line": 121,
+    "category": "condition",
+    "code": "if (ca->core != cb->core)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 272,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "compare_cpu",
+    "line": 122,
+    "category": "exit/branch",
+    "code": "return ca->core < cb->core ? -1 : 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 273,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "compare_cpu",
+    "line": 123,
+    "category": "exit/branch",
+    "code": "return ca->id < cb->id ? -1 : ca->id != cb->id;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 274,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_free",
+    "line": 128,
+    "category": "allocation/free",
+    "code": "free(topo->cpus);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 275,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_free",
+    "line": 129,
+    "category": "allocation/free",
+    "code": "free(topo->groups);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 276,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_free",
+    "line": 130,
+    "category": "allocation/free",
+    "code": "free(topo->slots);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 277,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_free",
+    "line": 131,
+    "category": "initialization/ownership",
+    "code": "memset(topo, 0, sizeof(*topo));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 278,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 144,
+    "category": "initialization/ownership",
+    "code": "memset(topo, 0, sizeof(*topo));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 279,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 147,
+    "category": "condition",
+    "code": "if (err || !np) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 280,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 149,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 281,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 153,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 282,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 154,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 283,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 155,
+    "category": "condition",
+    "code": "if (candidates) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 284,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 157,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 285,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 158,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 286,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 159,
+    "category": "loop",
+    "code": "for (i = 0; i < na; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 287,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 160,
+    "category": "condition",
+    "code": "if (allowed[i] && (i >= np || !possible[i])) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 288,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 162,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 289,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 167,
+    "category": "condition",
+    "code": "if (np > (UINT_MAX - 2) / 3) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 290,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 169,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 291,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 171,
+    "category": "allocation/free",
+    "code": "topo->cpus = calloc(np, sizeof(*topo->cpus));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 292,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 171,
+    "category": "initialization/ownership",
+    "code": "topo->cpus = calloc(np, sizeof(*topo->cpus));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 293,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 172,
+    "category": "allocation/free",
+    "code": "topo->groups = calloc(2 * np + 2, sizeof(*topo->groups));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 294,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 172,
+    "category": "initialization/ownership",
+    "code": "topo->groups = calloc(2 * np + 2, sizeof(*topo->groups));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 295,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 173,
+    "category": "allocation/free",
+    "code": "topo->slots = calloc(3 * np, sizeof(*topo->slots));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 296,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 173,
+    "category": "initialization/ownership",
+    "code": "topo->slots = calloc(3 * np, sizeof(*topo->slots));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 297,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 174,
+    "category": "allocation/free",
+    "code": "info = calloc(np, sizeof(*info));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 298,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 175,
+    "category": "allocation/free",
+    "code": "sorted = calloc(np, sizeof(*sorted));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 299,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 176,
+    "category": "allocation/free",
+    "code": "keys = calloc(2 * np + 2, sizeof(*keys));",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 300,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 177,
+    "category": "condition",
+    "code": "if (!topo->cpus || !topo->groups || !topo->slots || !info || !sorted || !keys) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 301,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 179,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 302,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 181,
+    "category": "initialization/ownership",
+    "code": "topo->nr_cpus = np;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 303,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 183,
+    "category": "initialization/ownership",
+    "code": "topo->nr_groups = 2;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 304,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 184,
+    "category": "loop",
+    "code": "for (i = 0; i < np; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 305,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 189,
+    "category": "condition",
+    "code": "if (!possible[i])",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 306,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 190,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 307,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 191,
+    "category": "initialization/ownership",
+    "code": "topo->cpus[i].member = i < no && online[i] &&",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 308,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 193,
+    "category": "initialization/ownership",
+    "code": "topo->cpus[i].group[RFS_GLOBAL_GROUP].id = 1;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 309,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 199,
+    "category": "condition",
+    "code": "if (key >= 0) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 310,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 201,
+    "category": "condition",
+    "code": "} else if (exclude_smt && i < no && online[i]) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 311,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 203,
+    "category": "exit/branch",
+    "code": "goto out;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 312,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 206,
+    "category": "condition",
+    "code": "if (!glob(path, 0, NULL, &nodes)) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 313,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 207,
+    "category": "condition",
+    "code": "if (nodes.gl_pathc == 1)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 314,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 213,
+    "category": "condition",
+    "code": "if (missing_cluster)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 315,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 217,
+    "category": "loop",
+    "code": "for (kind = RFS_CLUSTER_GROUP; kind <= RFS_NUMA_GROUP; kind++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 316,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 219,
+    "category": "loop",
+    "code": "for (i = 0; i < np; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 317,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 221,
+    "category": "condition",
+    "code": "if (!possible[i] || key < 0)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 318,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 222,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 319,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 223,
+    "category": "loop",
+    "code": "for (id = start; id < topo->nr_groups; id++)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 320,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 224,
+    "category": "condition",
+    "code": "if (keys[id] == key)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 321,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 225,
+    "category": "exit/branch",
+    "code": "break;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 322,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 226,
+    "category": "condition",
+    "code": "if (id == topo->nr_groups)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 323,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 227,
+    "category": "initialization/ownership",
+    "code": "keys[topo->nr_groups++] = key;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 324,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 228,
+    "category": "initialization/ownership",
+    "code": "topo->cpus[i].group[kind].id = id;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 325,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 233,
+    "category": "loop",
+    "code": "for (kind = 0; kind < RFS_GROUP_KINDS; kind++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 326,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 234,
+    "category": "loop",
+    "code": "for (id = 1; id < topo->nr_groups; id++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 327,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 238,
+    "category": "loop",
+    "code": "for (j = 0; j < np; j++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 328,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 240,
+    "category": "condition",
+    "code": "if (!topo->cpus[i].member || topo->cpus[i].group[kind].id != id)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 329,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 240,
+    "category": "initialization/ownership",
+    "code": "if (!topo->cpus[i].member || topo->cpus[i].group[kind].id != id)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 330,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 241,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 331,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 242,
+    "category": "initialization/ownership",
+    "code": "topo->cpus[i].group[kind].rank = topo->nr_slots - start;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 332,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 243,
+    "category": "initialization/ownership",
+    "code": "topo->slots[topo->nr_slots++] = i;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 333,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 245,
+    "category": "condition",
+    "code": "if (topo->nr_slots == start)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 334,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 245,
+    "category": "initialization/ownership",
+    "code": "if (topo->nr_slots == start)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 335,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 246,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 336,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 249,
+    "category": "loop",
+    "code": "for (i = 0; i < np; i++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 337,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 252,
+    "category": "condition",
+    "code": "if (!possible[i] || cg->id != id)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 338,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 253,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 339,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 256,
+    "category": "loop",
+    "code": "for (j = 0; j < group->count; j++) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 340,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 259,
+    "category": "condition",
+    "code": "if (exclude_smt ? info[candidate].core != info[i].core :",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 341,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 261,
+    "category": "exit/branch",
+    "code": "continue;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 342,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 262,
+    "category": "condition",
+    "code": "if (start == group->count)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 343,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 266,
+    "category": "condition",
+    "code": "if (end) {",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 344,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 275,
+    "category": "allocation/free",
+    "code": "free(possible);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 345,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 276,
+    "category": "allocation/free",
+    "code": "free(online);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 346,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 277,
+    "category": "allocation/free",
+    "code": "free(allowed);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 347,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 278,
+    "category": "allocation/free",
+    "code": "free(info);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 348,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 279,
+    "category": "allocation/free",
+    "code": "free(sorted);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 349,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 280,
+    "category": "allocation/free",
+    "code": "free(keys);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 350,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 281,
+    "category": "condition",
+    "code": "if (err)",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 351,
+    "file": "samples/bpf/rfs_policy_topology.c",
+    "function": "rfs_topology_load",
+    "line": 283,
+    "category": "exit/branch",
+    "code": "return err;",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 352,
+    "file": "series",
+    "function": "native RFS integration",
+    "line": 0,
+    "category": "native RFS integration",
+    "code": "next_cpu = bpf_rfs_cpu(dev, skb, hash, next_cpu, tcpu);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 353,
+    "file": "series",
+    "function": "net_device layout and cacheline bound",
+    "line": 0,
+    "category": "net_device layout and cacheline bound",
+    "code": "CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_rx, 100);",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 354,
+    "file": "series",
+    "function": "Kconfig and object build gates",
+    "line": 0,
+    "category": "Kconfig and object build gates",
+    "code": "depends on RPS && BPF_SYSCALL && BPF_JIT && DEBUG_INFO_BTF",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 355,
+    "file": "series",
+    "function": "sample and selftest build/install",
+    "line": 0,
+    "category": "sample and selftest build/install",
+    "code": "TEST_GEN_PROGS_EXTENDED := test_rfs rfs_policy",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  },
+  {
+    "id": 356,
+    "file": "series",
+    "function": "documented ABI and benchmark claims",
+    "line": 0,
+    "category": "documented ABI and benchmark claims",
+    "code": "Both this fallback and successful proposals still pass through the native migration check.",
+    "status": "reviewed",
+    "result": "No confirmed regression; scope and runtime limitations in audit.txt."
+  }
+]

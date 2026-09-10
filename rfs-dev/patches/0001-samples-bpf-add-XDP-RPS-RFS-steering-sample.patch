@@ -1,0 +1,1689 @@
+From de4111cfc3d835438b7c5ee3b558d71f0ccbc7e9 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 13 May 2026 15:48:43 +0800
+Subject: [PATCH] samples/bpf: add XDP RPS/RFS steering sample
+
+Add an XDP sample that demonstrates receive packet steering with a
+CPUMAP-backed data path. The sample parses IPv4/IPv6 TCP and UDP flows,
+uses a hash-selected RPS CPU when no flow affinity is known, and redirects
+packets through a configured CPUMAP.
+
+Add an RFS state table that tracks active and desired CPUs per flow. TCP
+sockops callbacks and an explicit tcp_recvmsg kprobe can record userspace
+CPU hints and update the desired CPU. The kprobe path refreshes the hint on
+each receive so process migration is reflected after connection setup.
+
+Support three RFS CPU selection strategies: use the process CPU, choose an
+alternate CPU from the same cluster, or choose an alternate CPU from the
+same NUMA node. Topology is read in userspace and precomputed into simple
+maps for verifier-friendly BPF lookups.
+
+Preserve packet ordering during CPU migration by tracking CPUMAP enqueue
+and dequeue progress. XDP keeps using the old active CPU until the old CPU
+queue has drained past the saved tail value, then commits the desired CPU
+as active.
+
+Also add pinned map operations for manual flow updates, statistics,
+and flow state inspection.
+
+Developed with assistance from Codex:GPT-5.
+
+Tested with:
+  make M=samples/bpf xdp_rps_rfs_user.o xdp_rps_rfs_kern.o \
+    CLANG=clang-18 LLC=llc-18 OPT=opt-18 LLVM_DIS=llvm-dis-18 \
+    LLVM_OBJCOPY=llvm-objcopy-18 LLVM_READELF=llvm-readelf-18 -j$(nproc)
+  scripts/checkpatch.pl --strict --no-tree -f \
+    samples/bpf/xdp_rps_rfs_kern.c samples/bpf/xdp_rps_rfs_user.c
+  test-kernel arch/x86/boot/bzImage
+  /mnt/shared/bpf_rfs_numa_test.sh
+---
+ samples/bpf/Makefile           |   3 +
+ samples/bpf/xdp_rps_rfs_kern.c | 700 +++++++++++++++++++++++++
+ samples/bpf/xdp_rps_rfs_user.c | 900 +++++++++++++++++++++++++++++++++
+ 3 files changed, 1603 insertions(+)
+ create mode 100644 samples/bpf/xdp_rps_rfs_kern.c
+ create mode 100644 samples/bpf/xdp_rps_rfs_user.c
+
+diff --git a/samples/bpf/Makefile b/samples/bpf/Makefile
+index 95a4fa1f1e44..23a413806009 100644
+--- a/samples/bpf/Makefile
++++ b/samples/bpf/Makefile
+@@ -34,6 +34,7 @@ tprogs-y += syscall_tp
+ tprogs-y += cpustat
+ tprogs-y += xdp_adjust_tail
+ tprogs-y += xdp_fwd
++tprogs-y += xdp_rps_rfs
+ tprogs-y += task_fd_query
+ tprogs-y += ibumad
+ tprogs-y += hbm
+@@ -75,6 +76,7 @@ syscall_tp-objs := syscall_tp_user.o
+ cpustat-objs := cpustat_user.o
+ xdp_adjust_tail-objs := xdp_adjust_tail_user.o
+ xdp_fwd-objs := xdp_fwd_user.o
++xdp_rps_rfs-objs := xdp_rps_rfs_user.o
+ task_fd_query-objs := task_fd_query_user.o $(TRACE_HELPERS)
+ ibumad-objs := ibumad_user.o
+ hbm-objs := hbm.o $(CGROUP_HELPERS)
+@@ -118,6 +120,7 @@ always-y += syscall_tp_kern.o
+ always-y += cpustat_kern.o
+ always-y += xdp_adjust_tail_kern.o
+ always-y += xdp_fwd_kern.o
++always-y += xdp_rps_rfs_kern.o
+ always-y += task_fd_query_kern.o
+ always-y += ibumad_kern.o
+ always-y += hbm_out_kern.o
+diff --git a/samples/bpf/xdp_rps_rfs_kern.c b/samples/bpf/xdp_rps_rfs_kern.c
+new file mode 100644
+index 000000000000..705eaf613d62
+--- /dev/null
++++ b/samples/bpf/xdp_rps_rfs_kern.c
+@@ -0,0 +1,700 @@
++// SPDX-License-Identifier: GPL-2.0
++#define KBUILD_MODNAME "xdp_rps_rfs"
++
++#include <uapi/linux/bpf.h>
++#include <uapi/linux/if_ether.h>
++#include <uapi/linux/if_vlan.h>
++#include <uapi/linux/ip.h>
++#include <uapi/linux/ipv6.h>
++#include <uapi/asm/ptrace.h>
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_tracing.h>
++#include <bpf/bpf_endian.h>
++
++#define MAX_CPUS 64
++#define MAX_FLOW_ENTRIES 65536
++#define FLOW_FAMILY_V4 2
++#define FLOW_FAMILY_V6 10
++#define IPPROTO_TCP 6
++#define IPPROTO_UDP 17
++#define SKC_DADDR_OFF 0
++#define SKC_RCV_SADDR_OFF 4
++#define SKC_DPORT_OFF 12
++#define SKC_NUM_OFF 14
++#define SKC_FAMILY_OFF 16
++
++struct rfs_in6_addr {
++	__u32 words[4];
++};
++
++struct rfs_hlist_node {
++	void *next;
++	void **pprev;
++};
++
++struct rfs_sock_common_prefix {
++	__u32 daddr;
++	__u32 rcv_saddr;
++	__u32 hash;
++	__u16 dport;
++	__u16 num;
++	__u16 family;
++	__u8 state;
++	__u8 flags;
++	int bound_dev_if;
++	struct rfs_hlist_node bind_node;
++	void *prot;
++	void *net;
++	struct rfs_in6_addr v6_daddr;
++	struct rfs_in6_addr v6_rcv_saddr;
++};
++
++#define SKC_V6_DADDR_OFF offsetof(struct rfs_sock_common_prefix, v6_daddr)
++#define SKC_V6_RCV_SADDR_OFF offsetof(struct rfs_sock_common_prefix, v6_rcv_saddr)
++
++struct pt_regs {
++	unsigned long r15;
++	unsigned long r14;
++	unsigned long r13;
++	unsigned long r12;
++	unsigned long rbp;
++	unsigned long rbx;
++	unsigned long r11;
++	unsigned long r10;
++	unsigned long r9;
++	unsigned long r8;
++	unsigned long rax;
++	unsigned long rcx;
++	unsigned long dx;
++	unsigned long si;
++	unsigned long di;
++	unsigned long orig_rax;
++	unsigned long rip;
++	unsigned long cs;
++	unsigned long eflags;
++	unsigned long rsp;
++	unsigned long ss;
++};
++
++enum rfs_strategy {
++	RFS_STRATEGY_PROCESS_CPU,
++	RFS_STRATEGY_CLUSTER_OTHER,
++	RFS_STRATEGY_NUMA_OTHER,
++};
++
++struct vlan_hdr {
++	__be16 h_vlan_TCI;
++	__be16 h_vlan_encapsulated_proto;
++};
++
++struct l4_ports {
++	__be16 source;
++	__be16 dest;
++};
++
++struct flow_key {
++	__u8 family;
++	__u8 proto;
++	__u16 sport;
++	__u16 dport;
++	union {
++		struct {
++			__u32 saddr;
++			__u32 daddr;
++		} v4;
++		struct {
++			__u32 saddr[4];
++			__u32 daddr[4];
++		} v6;
++	};
++};
++
++struct rps_config {
++	__u32 nr_cpus;
++	__u32 rfs_strategy;
++};
++
++struct flow_state {
++	__u32 active_cpu;
++	__u32 desired_cpu;
++	__u32 last_qtail;
++};
++
++enum {
++	STAT_PASS,
++	STAT_RPS_REDIRECT,
++	STAT_RFS_REDIRECT,
++	STAT_FALLBACK_PASS,
++	STAT_DROP,
++	STAT_SOCKOPS_UPDATE,
++	STAT_RECV_ENTER,
++	STAT_RECV_BAD_FAMILY,
++	STAT_RECV_UPDATE,
++	STAT_MAX,
++};
++
++struct {
++	__uint(type, BPF_MAP_TYPE_CPUMAP);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(struct bpf_cpumap_val));
++	__uint(max_entries, MAX_CPUS);
++} cpu_map SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS);
++} cpu_slots SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(struct rps_config));
++	__uint(max_entries, 1);
++} config SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u8));
++	__uint(max_entries, MAX_CPUS);
++} allowed_cpus SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS);
++} cluster_cpu_counts SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS * MAX_CPUS);
++} cluster_cpu_slots SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS);
++	__uint(value_size, sizeof(__u32));
++} numa_cpu_counts SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS * MAX_CPUS);
++} numa_cpu_slots SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_LRU_HASH);
++	__uint(key_size, sizeof(struct flow_key));
++	__uint(value_size, sizeof(struct flow_state));
++	__uint(max_entries, MAX_FLOW_ENTRIES);
++} flow_state SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS);
++} cpu_queue_head SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u32));
++	__uint(max_entries, MAX_CPUS);
++} cpu_queue_tail SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++	__uint(key_size, sizeof(__u32));
++	__uint(value_size, sizeof(__u64));
++	__uint(max_entries, STAT_MAX);
++} stats SEC(".maps");
++
++static __always_inline void count(__u32 idx)
++{
++	__u64 *value;
++
++	value = bpf_map_lookup_elem(&stats, &idx);
++	if (value)
++		(*value)++;
++}
++
++static __always_inline __u32 hash_words(const __u32 *words)
++{
++	__u32 hash = 0x811c9dc5;
++	int i;
++
++#pragma unroll
++	for (i = 0; i < 12; i++) {
++		hash ^= words[i];
++		hash *= 0x01000193;
++		hash ^= hash >> 16;
++	}
++
++	return hash;
++}
++
++static __always_inline int parse_ports(void *data, void *data_end,
++				       __u8 proto, __u64 off,
++				       struct flow_key *key)
++{
++	struct l4_ports *ports;
++
++	if (proto != IPPROTO_TCP && proto != IPPROTO_UDP)
++		return 0;
++
++	ports = data + off;
++	if (ports + 1 > data_end)
++		return -1;
++
++	key->sport = ports->source;
++	key->dport = ports->dest;
++	return 0;
++}
++
++static __always_inline int parse_flow(struct xdp_md *ctx, struct flow_key *key,
++				      __u32 *hash)
++{
++	void *data_end = (void *)(long)ctx->data_end;
++	void *data = (void *)(long)ctx->data;
++	struct ethhdr *eth = data;
++	__u64 off = sizeof(*eth);
++	__u16 h_proto;
++
++	if (eth + 1 > data_end)
++		return -1;
++
++	h_proto = eth->h_proto;
++	if (h_proto == bpf_htons(ETH_P_8021Q) ||
++	    h_proto == bpf_htons(ETH_P_8021AD)) {
++		struct vlan_hdr *vh = data + off;
++
++		if (vh + 1 > data_end)
++			return -1;
++		h_proto = vh->h_vlan_encapsulated_proto;
++		off += sizeof(*vh);
++	}
++
++	if (h_proto == bpf_htons(ETH_P_IP)) {
++		struct iphdr *iph = data + off;
++		__u32 words[12] = {};
++
++		if (iph + 1 > data_end)
++			return -1;
++		if (iph->ihl < 5)
++			return -1;
++
++		key->family = FLOW_FAMILY_V4;
++		key->proto = iph->protocol;
++		key->v4.saddr = iph->saddr;
++		key->v4.daddr = iph->daddr;
++		off += iph->ihl * 4;
++		if (parse_ports(data, data_end, iph->protocol, off, key))
++			return -1;
++
++		words[0] = key->v4.saddr;
++		words[1] = key->v4.daddr;
++		words[2] = ((__u32)key->sport << 16) | key->dport;
++		words[3] = ((__u32)key->family << 24) | ((__u32)key->proto << 16);
++		*hash = hash_words(words);
++		return 0;
++	}
++
++	if (h_proto == bpf_htons(ETH_P_IPV6)) {
++		struct ipv6hdr *ip6h = data + off;
++		__u32 words[12];
++		int i;
++
++		if (ip6h + 1 > data_end)
++			return -1;
++
++		key->family = FLOW_FAMILY_V6;
++		key->proto = ip6h->nexthdr;
++#pragma unroll
++		for (i = 0; i < 4; i++) {
++			key->v6.saddr[i] = ip6h->saddr.s6_addr32[i];
++			key->v6.daddr[i] = ip6h->daddr.s6_addr32[i];
++			words[i] = key->v6.saddr[i];
++			words[i + 4] = key->v6.daddr[i];
++		}
++
++		off += sizeof(*ip6h);
++		if (parse_ports(data, data_end, ip6h->nexthdr, off, key))
++			return -1;
++
++		words[8] = ((__u32)key->sport << 16) | key->dport;
++		words[9] = ((__u32)key->family << 24) | ((__u32)key->proto << 16);
++		words[10] = 0;
++		words[11] = 0;
++		*hash = hash_words(words);
++		return 0;
++	}
++
++	return -1;
++}
++
++static __always_inline bool cpu_allowed(__u32 cpu)
++{
++	__u8 *allowed;
++
++	if (cpu >= MAX_CPUS)
++		return false;
++
++	allowed = bpf_map_lookup_elem(&allowed_cpus, &cpu);
++	return allowed && *allowed;
++}
++
++static __always_inline __u32 first_rps_cpu(void)
++{
++	__u32 zero = 0, *cpu;
++
++	cpu = bpf_map_lookup_elem(&cpu_slots, &zero);
++	if (cpu)
++		return *cpu;
++
++	return 0;
++}
++
++static __always_inline __u32 cluster_cpu(__u32 app_cpu, __u32 hash)
++{
++	__u32 *nr_cpus, *cpu, key, slot;
++
++	nr_cpus = bpf_map_lookup_elem(&cluster_cpu_counts, &app_cpu);
++	if (!nr_cpus || !*nr_cpus || *nr_cpus > MAX_CPUS)
++		return MAX_CPUS;
++
++	slot = hash % *nr_cpus;
++	key = app_cpu * MAX_CPUS + slot;
++	cpu = bpf_map_lookup_elem(&cluster_cpu_slots, &key);
++	if (!cpu)
++		return MAX_CPUS;
++
++	return *cpu;
++}
++
++static __always_inline __u32 numa_cpu(__u32 app_cpu, __u32 hash)
++{
++	__u32 *nr_cpus, *cpu, key, slot;
++
++	nr_cpus = bpf_map_lookup_elem(&numa_cpu_counts, &app_cpu);
++	if (!nr_cpus || !*nr_cpus || *nr_cpus > MAX_CPUS)
++		return MAX_CPUS;
++
++	slot = hash % *nr_cpus;
++	key = app_cpu * MAX_CPUS + slot;
++	cpu = bpf_map_lookup_elem(&numa_cpu_slots, &key);
++	if (!cpu)
++		return MAX_CPUS;
++
++	return *cpu;
++}
++
++static __always_inline __u32 choose_rfs_cpu(__u32 app_cpu, __u32 hash,
++					    struct rps_config *cfg)
++{
++	__u32 cpu;
++
++	if (!cfg)
++		return app_cpu;
++
++	if (cfg->rfs_strategy == RFS_STRATEGY_CLUSTER_OTHER) {
++		cpu = cluster_cpu(app_cpu, hash);
++		if (cpu < MAX_CPUS)
++			return cpu;
++	}
++
++	if (cfg->rfs_strategy == RFS_STRATEGY_NUMA_OTHER) {
++		cpu = numa_cpu(app_cpu, hash);
++		if (cpu < MAX_CPUS)
++			return cpu;
++	}
++
++	if (cpu_allowed(app_cpu))
++		return app_cpu;
++
++	return first_rps_cpu();
++}
++
++static __always_inline bool cpu_queue_drained(__u32 cpu, __u32 last_qtail)
++{
++	__u32 *head;
++
++	if (cpu >= MAX_CPUS)
++		return true;
++
++	head = bpf_map_lookup_elem(&cpu_queue_head, &cpu);
++	if (!head)
++		return false;
++
++	return (__s32)(*head - last_qtail) >= 0;
++}
++
++static __always_inline __u32 flow_active_cpu(struct flow_state *state)
++{
++	__u32 active_cpu = state->active_cpu;
++
++	if (active_cpu != state->desired_cpu &&
++	    cpu_queue_drained(active_cpu, state->last_qtail)) {
++		active_cpu = state->desired_cpu;
++		state->active_cpu = active_cpu;
++	}
++
++	return active_cpu;
++}
++
++static __always_inline void flow_save_qtail(struct flow_state *state, __u32 cpu)
++{
++	__u32 *tail;
++
++	if (cpu >= MAX_CPUS)
++		return;
++
++	tail = bpf_map_lookup_elem(&cpu_queue_tail, &cpu);
++	if (tail) {
++		*tail += 1;
++		state->last_qtail = *tail;
++	}
++}
++
++static __always_inline struct flow_state new_flow_state(__u32 cpu)
++{
++	struct flow_state state = {};
++
++	state.active_cpu = cpu;
++	state.desired_cpu = cpu;
++	return state;
++}
++
++static __always_inline void update_desired_cpu(struct flow_key *key, __u32 cpu)
++{
++	struct flow_state initial, *state;
++
++	state = bpf_map_lookup_elem(&flow_state, key);
++	if (state) {
++		if (state->desired_cpu != cpu)
++			state->desired_cpu = cpu;
++	} else {
++		initial = new_flow_state(cpu);
++		bpf_map_update_elem(&flow_state, key, &initial, BPF_NOEXIST);
++	}
++}
++
++SEC("xdp")
++int xdp_rps_rfs_prog(struct xdp_md *ctx)
++{
++	struct flow_state initial, *state;
++	struct flow_key key = {};
++	struct rps_config *cfg;
++	__u32 zero = 0, hash = 0;
++	__u32 slot, *cpu, target_cpu;
++	int ret;
++
++	if (parse_flow(ctx, &key, &hash)) {
++		count(STAT_PASS);
++		return XDP_PASS;
++	}
++
++	state = bpf_map_lookup_elem(&flow_state, &key);
++	if (state) {
++		target_cpu = flow_active_cpu(state);
++		flow_save_qtail(state, target_cpu);
++		ret = bpf_redirect_map(&cpu_map, target_cpu, XDP_PASS);
++		if (ret == XDP_REDIRECT)
++			count(STAT_RFS_REDIRECT);
++		else if (ret == XDP_PASS)
++			count(STAT_FALLBACK_PASS);
++		else
++			count(STAT_DROP);
++		return ret;
++	}
++
++	cfg = bpf_map_lookup_elem(&config, &zero);
++	if (!cfg || !cfg->nr_cpus || cfg->nr_cpus > MAX_CPUS) {
++		count(STAT_PASS);
++		return XDP_PASS;
++	}
++
++	slot = hash % cfg->nr_cpus;
++	cpu = bpf_map_lookup_elem(&cpu_slots, &slot);
++	if (!cpu) {
++		count(STAT_PASS);
++		return XDP_PASS;
++	}
++
++	initial = new_flow_state(*cpu);
++	if (!bpf_map_update_elem(&flow_state, &key, &initial, BPF_NOEXIST))
++		state = bpf_map_lookup_elem(&flow_state, &key);
++
++	if (state) {
++		target_cpu = flow_active_cpu(state);
++		flow_save_qtail(state, target_cpu);
++	} else {
++		target_cpu = *cpu;
++	}
++
++	ret = bpf_redirect_map(&cpu_map, target_cpu, XDP_PASS);
++	if (ret == XDP_REDIRECT)
++		count(STAT_RPS_REDIRECT);
++	else if (ret == XDP_PASS)
++		count(STAT_FALLBACK_PASS);
++	else
++		count(STAT_DROP);
++
++	return ret;
++}
++
++SEC("xdp/cpumap")
++int xdp_rps_rfs_cpumap(struct xdp_md *ctx)
++{
++	__u32 cpu = bpf_get_smp_processor_id();
++	__u32 *head;
++
++	if (cpu >= MAX_CPUS)
++		return XDP_PASS;
++
++	head = bpf_map_lookup_elem(&cpu_queue_head, &cpu);
++	if (head)
++		*head += 1;
++
++	return XDP_PASS;
++}
++
++SEC("sockops")
++int xdp_rps_rfs_sockops(struct bpf_sock_ops *skops)
++{
++	struct flow_key key = {};
++	struct rps_config *cfg;
++	__u32 zero = 0, cpu, hash;
++	__u32 words[12] = {};
++
++	if (skops->op != BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB &&
++	    skops->op != BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)
++		return 1;
++
++	cpu = bpf_get_smp_processor_id();
++
++	if (skops->family == FLOW_FAMILY_V4) {
++		key.family = FLOW_FAMILY_V4;
++		key.proto = IPPROTO_TCP;
++		key.v4.saddr = skops->remote_ip4;
++		key.v4.daddr = skops->local_ip4;
++		words[0] = key.v4.saddr;
++		words[1] = key.v4.daddr;
++	} else if (skops->family == FLOW_FAMILY_V6) {
++		key.family = FLOW_FAMILY_V6;
++		key.proto = IPPROTO_TCP;
++		key.v6.saddr[0] = skops->remote_ip6[0];
++		key.v6.saddr[1] = skops->remote_ip6[1];
++		key.v6.saddr[2] = skops->remote_ip6[2];
++		key.v6.saddr[3] = skops->remote_ip6[3];
++		key.v6.daddr[0] = skops->local_ip6[0];
++		key.v6.daddr[1] = skops->local_ip6[1];
++		key.v6.daddr[2] = skops->local_ip6[2];
++		key.v6.daddr[3] = skops->local_ip6[3];
++		words[0] = key.v6.saddr[0];
++		words[1] = key.v6.saddr[1];
++		words[2] = key.v6.saddr[2];
++		words[3] = key.v6.saddr[3];
++		words[4] = key.v6.daddr[0];
++		words[5] = key.v6.daddr[1];
++		words[6] = key.v6.daddr[2];
++		words[7] = key.v6.daddr[3];
++	} else {
++		return 1;
++	}
++
++	key.sport = skops->remote_port >> 16;
++	key.dport = bpf_htons(skops->local_port);
++	words[8] = ((__u32)key.sport << 16) | key.dport;
++	words[9] = ((__u32)key.family << 24) | ((__u32)key.proto << 16);
++
++	hash = hash_words(words);
++	cfg = bpf_map_lookup_elem(&config, &zero);
++	cpu = choose_rfs_cpu(cpu, hash, cfg);
++	update_desired_cpu(&key, cpu);
++	count(STAT_SOCKOPS_UPDATE);
++
++	return 1;
++}
++
++SEC("kprobe/tcp_recvmsg")
++int xdp_rps_rfs_tcp_recvmsg(struct pt_regs *ctx)
++{
++	void *sk = (void *)PT_REGS_PARM1(ctx);
++	struct rfs_in6_addr v6_addr;
++	struct flow_key key = {};
++	struct rps_config *cfg;
++	__u32 zero = 0, cpu, hash;
++	__u32 words[12] = {};
++	__u16 family, num;
++	int i;
++
++	count(STAT_RECV_ENTER);
++
++	if (!sk)
++		return 0;
++
++	bpf_probe_read_kernel(&family, sizeof(family), sk + SKC_FAMILY_OFF);
++	if (family == FLOW_FAMILY_V4) {
++		key.family = FLOW_FAMILY_V4;
++		key.proto = IPPROTO_TCP;
++		bpf_probe_read_kernel(&key.v4.saddr, sizeof(key.v4.saddr),
++				      sk + SKC_DADDR_OFF);
++		bpf_probe_read_kernel(&key.v4.daddr, sizeof(key.v4.daddr),
++				      sk + SKC_RCV_SADDR_OFF);
++		words[0] = key.v4.saddr;
++		words[1] = key.v4.daddr;
++	} else if (family == FLOW_FAMILY_V6) {
++		key.family = FLOW_FAMILY_V6;
++		key.proto = IPPROTO_TCP;
++		bpf_probe_read_kernel(&v6_addr, sizeof(v6_addr),
++				      sk + SKC_V6_DADDR_OFF);
++#pragma unroll
++		for (i = 0; i < 4; i++) {
++			key.v6.saddr[i] = v6_addr.words[i];
++			words[i] = key.v6.saddr[i];
++		}
++		bpf_probe_read_kernel(&v6_addr, sizeof(v6_addr),
++				      sk + SKC_V6_RCV_SADDR_OFF);
++#pragma unroll
++		for (i = 0; i < 4; i++) {
++			key.v6.daddr[i] = v6_addr.words[i];
++			words[i + 4] = key.v6.daddr[i];
++		}
++		} else {
++			count(STAT_RECV_BAD_FAMILY);
++			return 0;
++		}
++
++	bpf_probe_read_kernel(&key.sport, sizeof(key.sport),
++			      sk + SKC_DPORT_OFF);
++	bpf_probe_read_kernel(&num, sizeof(num), sk + SKC_NUM_OFF);
++	key.dport = bpf_htons(num);
++
++	if (key.family == FLOW_FAMILY_V4) {
++		words[2] = ((__u32)key.sport << 16) | key.dport;
++		words[3] = ((__u32)key.family << 24) |
++			   ((__u32)key.proto << 16);
++	} else {
++		words[8] = ((__u32)key.sport << 16) | key.dport;
++		words[9] = ((__u32)key.family << 24) |
++			   ((__u32)key.proto << 16);
++	}
++
++	hash = hash_words(words);
++	cfg = bpf_map_lookup_elem(&config, &zero);
++	cpu = choose_rfs_cpu(bpf_get_smp_processor_id(), hash, cfg);
++	update_desired_cpu(&key, cpu);
++	count(STAT_RECV_UPDATE);
++
++	return 0;
++}
++
++char _license[] SEC("license") = "GPL";
+diff --git a/samples/bpf/xdp_rps_rfs_user.c b/samples/bpf/xdp_rps_rfs_user.c
+new file mode 100644
+index 000000000000..a95b9e376c0e
+--- /dev/null
++++ b/samples/bpf/xdp_rps_rfs_user.c
+@@ -0,0 +1,900 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/bpf.h>
++#include <linux/if_link.h>
++#include <linux/limits.h>
++#include <sys/resource.h>
++#include <sys/stat.h>
++#include <arpa/inet.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <libgen.h>
++#include <net/if.h>
++#include <signal.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <bpf/bpf.h>
++#include <bpf/libbpf.h>
++
++#define MAX_CPUS 64
++#define FLOW_FAMILY_V4 2
++#define FLOW_FAMILY_V6 10
++
++enum rfs_strategy {
++	RFS_STRATEGY_PROCESS_CPU,
++	RFS_STRATEGY_CLUSTER_OTHER,
++	RFS_STRATEGY_NUMA_OTHER,
++};
++
++struct flow_key {
++	__u8 family;
++	__u8 proto;
++	__u16 sport;
++	__u16 dport;
++	union {
++		struct {
++			__u32 saddr;
++			__u32 daddr;
++		} v4;
++		struct {
++			__u32 saddr[4];
++			__u32 daddr[4];
++		} v6;
++	};
++};
++
++struct rps_config {
++	__u32 nr_cpus;
++	__u32 rfs_strategy;
++};
++
++struct flow_state {
++	__u32 active_cpu;
++	__u32 desired_cpu;
++	__u32 last_qtail;
++};
++
++struct cpu_group {
++	__u32 nr_cpus;
++	__u32 cpus[MAX_CPUS];
++};
++
++enum {
++	STAT_PASS,
++	STAT_RPS_REDIRECT,
++	STAT_RFS_REDIRECT,
++	STAT_FALLBACK_PASS,
++	STAT_DROP,
++	STAT_SOCKOPS_UPDATE,
++	STAT_RECV_ENTER,
++	STAT_RECV_BAD_FAMILY,
++	STAT_RECV_UPDATE,
++	STAT_MAX,
++};
++
++static const char *stat_names[STAT_MAX] = {
++	"pass",
++	"rps_redirect",
++	"rfs_redirect",
++	"fallback_pass",
++	"drop",
++	"sockops_update",
++	"recv_enter",
++	"recv_bad_family",
++	"recv_update",
++};
++
++static __u32 xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
++static int ifindex;
++static sig_atomic_t exiting;
++
++static void int_exit(int sig)
++{
++	exiting = true;
++}
++
++static int bump_memlock_rlimit(void)
++{
++	struct rlimit rlim = {
++		.rlim_cur = RLIM_INFINITY,
++		.rlim_max = RLIM_INFINITY,
++	};
++
++	return setrlimit(RLIMIT_MEMLOCK, &rlim);
++}
++
++static int parse_cpu_list(const char *arg, __u32 *cpus, __u32 *nr_cpus)
++{
++	char *list, *p, *tok;
++	__u32 nr = 0;
++
++	list = strdup(arg);
++	if (!list)
++		return -ENOMEM;
++
++	p = list;
++	while ((tok = strsep(&p, ",")) != NULL) {
++		char *dash, *end;
++		unsigned long first, last, cpu;
++
++		if (!*tok)
++			continue;
++
++		dash = strchr(tok, '-');
++		if (dash)
++			*dash = '\0';
++
++		errno = 0;
++		first = strtoul(tok, &end, 10);
++		if (errno || *end)
++			goto invalid;
++
++		if (dash) {
++			last = strtoul(dash + 1, &end, 10);
++			if (errno || *end || last < first)
++				goto invalid;
++		} else {
++			last = first;
++		}
++
++		for (cpu = first; cpu <= last; cpu++) {
++			if (nr == MAX_CPUS || cpu >= MAX_CPUS)
++				goto invalid;
++			cpus[nr++] = cpu;
++		}
++	}
++
++	free(list);
++	if (!nr)
++		return -EINVAL;
++
++	*nr_cpus = nr;
++	return 0;
++
++invalid:
++	free(list);
++	return -EINVAL;
++}
++
++static int read_cpu_list_file(const char *path, __u32 *cpus, __u32 *nr_cpus)
++{
++	char buf[4096];
++	FILE *file;
++	int err;
++
++	file = fopen(path, "r");
++	if (!file)
++		return -errno;
++
++	if (!fgets(buf, sizeof(buf), file)) {
++		err = ferror(file) ? -errno : -EINVAL;
++		fclose(file);
++		return err;
++	}
++	fclose(file);
++
++	buf[strcspn(buf, "\n")] = '\0';
++	return parse_cpu_list(buf, cpus, nr_cpus);
++}
++
++static bool cpu_in_list(__u32 cpu, const __u32 *cpus, __u32 nr_cpus)
++{
++	__u32 i;
++
++	for (i = 0; i < nr_cpus; i++) {
++		if (cpus[i] == cpu)
++			return true;
++	}
++
++	return false;
++}
++
++static int parse_strategy(const char *arg, __u32 *strategy)
++{
++	if (!strcmp(arg, "process")) {
++		*strategy = RFS_STRATEGY_PROCESS_CPU;
++		return 0;
++	}
++	if (!strcmp(arg, "cluster")) {
++		*strategy = RFS_STRATEGY_CLUSTER_OTHER;
++		return 0;
++	}
++	if (!strcmp(arg, "numa")) {
++		*strategy = RFS_STRATEGY_NUMA_OTHER;
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++static void build_group(struct cpu_group *group, __u32 app_cpu,
++			const __u32 *topo_cpus, __u32 nr_topo_cpus,
++			const __u32 *allowed_cpus, __u32 nr_allowed_cpus)
++{
++	__u32 i;
++
++	memset(group, 0, sizeof(*group));
++	for (i = 0; i < nr_topo_cpus; i++) {
++		__u32 cpu = topo_cpus[i];
++
++		if (cpu == app_cpu || cpu >= MAX_CPUS)
++			continue;
++		if (!cpu_in_list(cpu, allowed_cpus, nr_allowed_cpus))
++			continue;
++		group->cpus[group->nr_cpus++] = cpu;
++	}
++}
++
++static int read_cluster_group(__u32 cpu, __u32 *cpus, __u32 *nr_cpus)
++{
++	char path[PATH_MAX];
++
++	snprintf(path, sizeof(path),
++		 "/sys/devices/system/cpu/cpu%u/topology/cluster_cpus_list",
++		 cpu);
++	if (!read_cpu_list_file(path, cpus, nr_cpus))
++		return 0;
++
++	snprintf(path, sizeof(path),
++		 "/sys/devices/system/cpu/cpu%u/topology/package_cpus_list",
++		 cpu);
++	return read_cpu_list_file(path, cpus, nr_cpus);
++}
++
++static int read_numa_group(__u32 cpu, __u32 *cpus, __u32 *nr_cpus)
++{
++	char path[PATH_MAX];
++	struct stat st;
++	__u32 node;
++
++	for (node = 0; node < 1024; node++) {
++		snprintf(path, sizeof(path),
++			 "/sys/devices/system/node/node%u/cpulist", node);
++		if (stat(path, &st))
++			continue;
++		if (read_cpu_list_file(path, cpus, nr_cpus))
++			continue;
++		if (cpu_in_list(cpu, cpus, *nr_cpus))
++			return 0;
++	}
++
++	return -ENOENT;
++}
++
++static int parse_flow(const char *arg, struct flow_key *key)
++{
++	char *copy, *p, *proto, *src, *dst, *sport, *dport, *end;
++	unsigned long port;
++	int family;
++
++	copy = strdup(arg);
++	if (!copy)
++		return -ENOMEM;
++
++	p = copy;
++	proto = strsep(&p, ",");
++	src = strsep(&p, ",");
++	dst = strsep(&p, ",");
++	sport = strsep(&p, ",");
++	dport = strsep(&p, ",");
++	if (!proto || !src || !dst || !sport || !dport || strsep(&p, ","))
++		goto invalid;
++
++	memset(key, 0, sizeof(*key));
++	if (!strcmp(proto, "tcp4")) {
++		key->family = FLOW_FAMILY_V4;
++		key->proto = IPPROTO_TCP;
++		family = AF_INET;
++	} else if (!strcmp(proto, "udp4")) {
++		key->family = FLOW_FAMILY_V4;
++		key->proto = IPPROTO_UDP;
++		family = AF_INET;
++	} else if (!strcmp(proto, "tcp6")) {
++		key->family = FLOW_FAMILY_V6;
++		key->proto = IPPROTO_TCP;
++		family = AF_INET6;
++	} else if (!strcmp(proto, "udp6")) {
++		key->family = FLOW_FAMILY_V6;
++		key->proto = IPPROTO_UDP;
++		family = AF_INET6;
++	} else {
++		goto invalid;
++	}
++
++	if (family == AF_INET) {
++		if (inet_pton(family, src, &key->v4.saddr) != 1 ||
++		    inet_pton(family, dst, &key->v4.daddr) != 1)
++			goto invalid;
++	} else {
++		if (inet_pton(family, src, key->v6.saddr) != 1 ||
++		    inet_pton(family, dst, key->v6.daddr) != 1)
++			goto invalid;
++	}
++
++	errno = 0;
++	port = strtoul(sport, &end, 10);
++	if (errno || *end || port > 65535)
++		goto invalid;
++	key->sport = htons(port);
++
++	port = strtoul(dport, &end, 10);
++	if (errno || *end || port > 65535)
++		goto invalid;
++	key->dport = htons(port);
++
++	free(copy);
++	return 0;
++
++invalid:
++	free(copy);
++	return -EINVAL;
++}
++
++static int pinned_map_fd(const char *pin_dir, const char *name)
++{
++	char path[PATH_MAX];
++	int fd;
++
++	if (snprintf(path, sizeof(path), "%s/%s", pin_dir, name) >= sizeof(path))
++		return -ENAMETOOLONG;
++
++	fd = bpf_obj_get(path);
++	return fd < 0 ? -errno : fd;
++}
++
++static int update_rfs_flow(const char *pin_dir, const char *flow, __u32 cpu)
++{
++	struct flow_state old_state, state = {};
++	struct flow_key key;
++	int fd, err;
++
++	err = parse_flow(flow, &key);
++	if (err)
++		return err;
++
++	fd = pinned_map_fd(pin_dir, "flow_state");
++	if (fd < 0)
++		return fd;
++
++	if (!bpf_map_lookup_elem(fd, &key, &old_state))
++		state = old_state;
++	else
++		state.active_cpu = cpu;
++	state.desired_cpu = cpu;
++	err = bpf_map_update_elem(fd, &key, &state, BPF_ANY);
++	if (err)
++		err = -errno;
++	close(fd);
++	return err;
++}
++
++static int delete_rfs_flow(const char *pin_dir, const char *flow)
++{
++	struct flow_key key;
++	int fd, err;
++
++	err = parse_flow(flow, &key);
++	if (err)
++		return err;
++
++	fd = pinned_map_fd(pin_dir, "flow_state");
++	if (fd < 0)
++		return fd;
++
++	err = bpf_map_delete_elem(fd, &key);
++	if (err)
++		err = -errno;
++	close(fd);
++	return err;
++}
++
++static int print_stats(const char *pin_dir)
++{
++	__u64 values[STAT_MAX] = {}, *percpu;
++	int fd, nr_cpus, i, cpu;
++
++	fd = pinned_map_fd(pin_dir, "stats");
++	if (fd < 0)
++		return fd;
++
++	nr_cpus = libbpf_num_possible_cpus();
++	if (nr_cpus < 0) {
++		close(fd);
++		return nr_cpus;
++	}
++
++	percpu = calloc(nr_cpus, sizeof(*percpu));
++	if (!percpu) {
++		close(fd);
++		return -ENOMEM;
++	}
++
++	for (i = 0; i < STAT_MAX; i++) {
++		__u32 key = i;
++
++		if (bpf_map_lookup_elem(fd, &key, percpu))
++			continue;
++		for (cpu = 0; cpu < nr_cpus; cpu++)
++			values[i] += percpu[cpu];
++	}
++
++	for (i = 0; i < STAT_MAX; i++)
++		printf("%-16s %llu\n", stat_names[i], values[i]);
++
++	free(percpu);
++	close(fd);
++	return 0;
++}
++
++static int list_rfs_flows(const char *pin_dir)
++{
++	struct flow_key key, next_key;
++	struct flow_state state;
++	void *prev_key = NULL;
++	int fd, err;
++
++	fd = pinned_map_fd(pin_dir, "flow_state");
++	if (fd < 0)
++		return fd;
++
++	while (!bpf_map_get_next_key(fd, prev_key, &next_key)) {
++		if (!bpf_map_lookup_elem(fd, &next_key, &state)) {
++			printf("family %u proto %u sport %u dport %u",
++			       next_key.family, next_key.proto, ntohs(next_key.sport),
++			       ntohs(next_key.dport));
++			printf(" active_cpu %u desired_cpu %u last_qtail %u\n",
++			       state.active_cpu, state.desired_cpu,
++			       state.last_qtail);
++		}
++		key = next_key;
++		prev_key = &key;
++	}
++
++	err = errno == ENOENT ? 0 : -errno;
++	close(fd);
++	return err;
++}
++
++static int pin_maps_replace(struct bpf_object *obj, const char *pin_dir)
++{
++	struct bpf_map *map;
++	int err;
++
++	if (mkdir(pin_dir, 0755) && errno != EEXIST)
++		return -errno;
++
++	bpf_object__for_each_map(map, obj) {
++		const char *name = bpf_map__name(map);
++		char path[PATH_MAX];
++
++		if (snprintf(path, sizeof(path), "%s/%s", pin_dir, name) >=
++		    sizeof(path))
++			return -ENAMETOOLONG;
++
++		err = bpf_map__pin(map, path);
++		if (err == -EEXIST) {
++			if (unlink(path))
++				return -errno;
++			err = bpf_map__pin(map, path);
++		}
++		if (err)
++			return err;
++	}
++
++	return 0;
++}
++
++static int populate_group_maps(int count_fd, int slot_fd, __u32 app_cpu,
++			       const struct cpu_group *group)
++{
++	__u32 i, zero = 0;
++	int err;
++
++	err = bpf_map_update_elem(count_fd, &app_cpu, &group->nr_cpus, 0);
++	if (err)
++		return err;
++
++	for (i = 0; i < MAX_CPUS; i++) {
++		__u32 key = app_cpu * MAX_CPUS + i;
++		__u32 value = i < group->nr_cpus ? group->cpus[i] : 0;
++
++		err = bpf_map_update_elem(slot_fd, &key, &value, 0);
++		if (err)
++			return err;
++	}
++
++	if (!group->nr_cpus)
++		return bpf_map_update_elem(count_fd, &app_cpu, &zero, 0);
++
++	return 0;
++}
++
++static int populate_topology_maps(struct bpf_object *obj, const __u32 *cpus,
++				  __u32 nr_cpus)
++{
++	int allowed_fd, cluster_count_fd, cluster_slot_fd;
++	int numa_count_fd, numa_slot_fd;
++	__u32 cpu;
++	int err;
++
++	allowed_fd = bpf_map__fd(bpf_object__find_map_by_name(obj, "allowed_cpus"));
++	cluster_count_fd = bpf_map__fd(bpf_object__find_map_by_name(obj,
++								    "cluster_cpu_counts"));
++	cluster_slot_fd = bpf_map__fd(bpf_object__find_map_by_name(obj,
++								   "cluster_cpu_slots"));
++	numa_count_fd = bpf_map__fd(bpf_object__find_map_by_name(obj,
++								 "numa_cpu_counts"));
++	numa_slot_fd = bpf_map__fd(bpf_object__find_map_by_name(obj,
++								"numa_cpu_slots"));
++	if (allowed_fd < 0 || cluster_count_fd < 0 || cluster_slot_fd < 0 ||
++	    numa_count_fd < 0 || numa_slot_fd < 0)
++		return -ENOENT;
++
++	for (cpu = 0; cpu < MAX_CPUS; cpu++) {
++		__u32 topo_cpus[MAX_CPUS], nr_topo_cpus = 0;
++		struct cpu_group group;
++		__u8 allowed;
++
++		allowed = cpu_in_list(cpu, cpus, nr_cpus);
++		err = bpf_map_update_elem(allowed_fd, &cpu, &allowed, 0);
++		if (err)
++			return err;
++
++		if (!read_cluster_group(cpu, topo_cpus, &nr_topo_cpus))
++			build_group(&group, cpu, topo_cpus, nr_topo_cpus,
++				    cpus, nr_cpus);
++		else
++			memset(&group, 0, sizeof(group));
++
++		err = populate_group_maps(cluster_count_fd, cluster_slot_fd,
++					  cpu, &group);
++		if (err)
++			return err;
++
++		if (!read_numa_group(cpu, topo_cpus, &nr_topo_cpus))
++			build_group(&group, cpu, topo_cpus, nr_topo_cpus,
++				    cpus, nr_cpus);
++		else
++			memset(&group, 0, sizeof(group));
++
++		err = populate_group_maps(numa_count_fd, numa_slot_fd,
++					  cpu, &group);
++		if (err)
++			return err;
++	}
++
++	return 0;
++}
++
++static int populate_maps(struct bpf_object *obj, __u32 *cpus, __u32 nr_cpus,
++			 __u32 qsize, __u32 rfs_strategy)
++{
++	int cpu_map_fd, cpu_slots_fd, config_fd;
++	struct bpf_cpumap_val cpu_val = {};
++	struct bpf_program *cpumap_prog;
++	struct rps_config cfg = {};
++	__u32 i, zero = 0;
++	int err;
++
++	cpu_map_fd = bpf_map__fd(bpf_object__find_map_by_name(obj, "cpu_map"));
++	cpu_slots_fd = bpf_map__fd(bpf_object__find_map_by_name(obj, "cpu_slots"));
++	config_fd = bpf_map__fd(bpf_object__find_map_by_name(obj, "config"));
++	if (cpu_map_fd < 0 || cpu_slots_fd < 0 || config_fd < 0)
++		return -ENOENT;
++
++	cpumap_prog = bpf_object__find_program_by_name(obj,
++						       "xdp_rps_rfs_cpumap");
++	if (!cpumap_prog)
++		return -ENOENT;
++
++	cpu_val.qsize = qsize;
++	cpu_val.bpf_prog.fd = bpf_program__fd(cpumap_prog);
++	for (i = 0; i < nr_cpus; i++) {
++		err = bpf_map_update_elem(cpu_map_fd, &cpus[i], &cpu_val, 0);
++		if (err)
++			return err;
++		err = bpf_map_update_elem(cpu_slots_fd, &i, &cpus[i], 0);
++		if (err)
++			return err;
++	}
++
++	cfg.nr_cpus = nr_cpus;
++	cfg.rfs_strategy = rfs_strategy;
++	err = bpf_map_update_elem(config_fd, &zero, &cfg, 0);
++	if (err)
++		return err;
++
++	return populate_topology_maps(obj, cpus, nr_cpus);
++}
++
++static int detach(void)
++{
++	if (!ifindex)
++		return -EINVAL;
++
++	return bpf_xdp_detach(ifindex, xdp_flags, NULL);
++}
++
++static struct bpf_link *attach_sockops(struct bpf_object *obj,
++				       const char *cgroup_path)
++{
++	struct bpf_program *prog;
++	struct bpf_link *link;
++	int cgroup_fd;
++
++	prog = bpf_object__find_program_by_name(obj, "xdp_rps_rfs_sockops");
++	if (!prog)
++		return NULL;
++
++	cgroup_fd = open(cgroup_path, O_RDONLY);
++	if (cgroup_fd < 0)
++		return NULL;
++
++	link = bpf_program__attach_cgroup(prog, cgroup_fd);
++	close(cgroup_fd);
++	if (libbpf_get_error(link))
++		return NULL;
++
++	return link;
++}
++
++static struct bpf_link *attach_recvmsg(struct bpf_object *obj)
++{
++	struct bpf_program *prog;
++	struct bpf_link *link;
++
++	prog = bpf_object__find_program_by_name(obj, "xdp_rps_rfs_tcp_recvmsg");
++	if (!prog)
++		return NULL;
++
++	link = bpf_program__attach_kprobe(prog, false, "tcp_recvmsg");
++	if (libbpf_get_error(link))
++		return NULL;
++
++	return link;
++}
++
++static void usage(const char *prog)
++{
++	fprintf(stderr,
++		"Usage: %s -i <ifname|ifindex> -c <cpu-list> [OPTS]\n"
++		"       %s -p <dir> -r <flow> -t <cpu>\n"
++		"       %s -p <dir> -D <flow>\n"
++		"       %s -p <dir> -s\n"
++		"       %s -p <dir> -l\n"
++		"\nOPTS:\n"
++		"    -d           detach XDP program\n"
++		"    -S           use skb-mode\n"
++		"    -N           enforce native mode\n"
++		"    -F           force replacing existing XDP program\n"
++		"    -q <qsize>   CPUMAP queue size, default 2048\n"
++		"    -p <dir>     pin maps under directory for RFS updates\n"
++		"    -g <path>    attach sockops RFS updater to cgroup path\n"
++		"    -R           attach tcp_recvmsg hook for per-receive CPU updates\n"
++		"    -m <mode>    RFS CPU strategy: process, cluster, or numa\n"
++		"    -r <flow>    update RFS flow entry, format tcp4,src,dst,sport,dport\n"
++		"    -t <cpu>     target CPU for -r\n"
++		"    -D <flow>    delete RFS flow entry\n"
++		"    -s           print pinned map statistics\n"
++		"    -l           list pinned RFS flow states\n"
++		"\nExample:\n"
++		"    %s -i eth0 -c 0-3 -p /sys/fs/bpf/xdp_rps_rfs\n"
++		"    %s -i eth0 -c 0-3 -g /sys/fs/cgroup -m numa\n"
++		"    %s -p /sys/fs/bpf/xdp_rps_rfs -r tcp4,192.0.2.1,198.51.100.2,443,51514 -t 2\n",
++		prog, prog, prog, prog, prog, prog, prog, prog);
++}
++
++int main(int argc, char **argv)
++{
++	const char *pin_dir = NULL;
++	const char *cgroup_path = NULL;
++	const char *rfs_flow = NULL, *delete_flow = NULL;
++	struct bpf_link *sockops_link = NULL;
++	struct bpf_link *recvmsg_link = NULL;
++	struct bpf_program *prog;
++	struct bpf_object *obj;
++	__u32 cpus[MAX_CPUS];
++	__u32 nr_cpus = 0;
++	__u32 rfs_strategy = RFS_STRATEGY_PROCESS_CPU;
++	__u32 qsize = 2048;
++	char filename[256];
++	int prog_fd, opt;
++	__u32 rfs_cpu = 0;
++	bool have_rfs_cpu = false;
++	bool do_detach = false;
++	bool attach_recv = false;
++	bool show_stats = false;
++	bool list_flows = false;
++	int err;
++
++	while ((opt = getopt(argc, argv, "i:c:q:p:g:m:r:t:D:slRdSNFh")) != -1) {
++		switch (opt) {
++		case 'i':
++			ifindex = if_nametoindex(optarg);
++			if (!ifindex)
++				ifindex = atoi(optarg);
++			break;
++		case 'c':
++			err = parse_cpu_list(optarg, cpus, &nr_cpus);
++			if (err) {
++				fprintf(stderr, "invalid cpu list: %s\n", optarg);
++				return 1;
++			}
++			break;
++		case 'q':
++			qsize = atoi(optarg);
++			break;
++		case 'p':
++			pin_dir = optarg;
++			break;
++		case 'g':
++			cgroup_path = optarg;
++			break;
++		case 'm':
++			err = parse_strategy(optarg, &rfs_strategy);
++			if (err) {
++				fprintf(stderr, "invalid RFS strategy: %s\n",
++					optarg);
++				return 1;
++			}
++			break;
++		case 'r':
++			rfs_flow = optarg;
++			break;
++		case 't':
++			rfs_cpu = atoi(optarg);
++			have_rfs_cpu = true;
++			break;
++		case 'D':
++			delete_flow = optarg;
++			break;
++		case 's':
++			show_stats = true;
++			break;
++		case 'l':
++			list_flows = true;
++			break;
++		case 'R':
++			attach_recv = true;
++			break;
++		case 'd':
++			do_detach = true;
++			break;
++		case 'S':
++			xdp_flags |= XDP_FLAGS_SKB_MODE;
++			break;
++		case 'N':
++			xdp_flags |= XDP_FLAGS_DRV_MODE;
++			break;
++		case 'F':
++			xdp_flags &= ~XDP_FLAGS_UPDATE_IF_NOEXIST;
++			break;
++		default:
++			usage(basename(argv[0]));
++			return 1;
++		}
++	}
++
++	if (rfs_flow || delete_flow || show_stats || list_flows) {
++		if (!pin_dir || (rfs_flow && !have_rfs_cpu) ||
++		    (!!rfs_flow + !!delete_flow + !!show_stats + !!list_flows != 1)) {
++			usage(basename(argv[0]));
++			return 1;
++		}
++
++		if (rfs_flow)
++			err = update_rfs_flow(pin_dir, rfs_flow, rfs_cpu);
++		else if (delete_flow)
++			err = delete_rfs_flow(pin_dir, delete_flow);
++		else if (show_stats)
++			err = print_stats(pin_dir);
++		else
++			err = list_rfs_flows(pin_dir);
++
++		if (err) {
++			fprintf(stderr, "map operation failed: %s\n",
++				strerror(-err));
++			return 1;
++		}
++		return 0;
++	}
++
++	if (!ifindex || (!do_detach && !nr_cpus)) {
++		usage(basename(argv[0]));
++		return 1;
++	}
++
++	if (!(xdp_flags & (XDP_FLAGS_SKB_MODE | XDP_FLAGS_DRV_MODE)))
++		xdp_flags |= XDP_FLAGS_DRV_MODE;
++
++	if (do_detach)
++		return detach() ? 1 : 0;
++
++	if (bump_memlock_rlimit())
++		fprintf(stderr, "warning: failed to raise memlock rlimit: %s\n",
++			strerror(errno));
++
++	snprintf(filename, sizeof(filename), "%s_kern.o", argv[0]);
++	obj = bpf_object__open_file(filename, NULL);
++	if (libbpf_get_error(obj)) {
++		fprintf(stderr, "failed to open %s\n", filename);
++		return 1;
++	}
++
++	prog = bpf_object__find_program_by_name(obj, "xdp_rps_rfs_prog");
++	if (!prog) {
++		fprintf(stderr, "program xdp_rps_rfs_prog not found\n");
++		return 1;
++	}
++	bpf_program__set_type(prog, BPF_PROG_TYPE_XDP);
++
++	err = bpf_object__load(obj);
++	if (err) {
++		fprintf(stderr, "failed to load BPF object: %s\n", strerror(-err));
++		return 1;
++	}
++
++	err = populate_maps(obj, cpus, nr_cpus, qsize, rfs_strategy);
++	if (err) {
++		fprintf(stderr, "failed to populate maps: %s\n", strerror(errno));
++		return 1;
++	}
++
++	if (pin_dir) {
++		err = pin_maps_replace(obj, pin_dir);
++		if (err) {
++			fprintf(stderr, "failed to pin maps: %s\n", strerror(-err));
++			return 1;
++		}
++	}
++
++	prog_fd = bpf_program__fd(prog);
++	err = bpf_xdp_attach(ifindex, prog_fd, xdp_flags, NULL);
++	if (err) {
++		fprintf(stderr, "failed to attach XDP program: %s\n", strerror(errno));
++		return 1;
++	}
++
++	if (cgroup_path) {
++		sockops_link = attach_sockops(obj, cgroup_path);
++		if (!sockops_link) {
++			fprintf(stderr, "failed to attach sockops to %s\n",
++				cgroup_path);
++			detach();
++			return 1;
++		}
++	}
++
++	if (attach_recv) {
++		recvmsg_link = attach_recvmsg(obj);
++		if (!recvmsg_link) {
++			fprintf(stderr, "failed to attach tcp_recvmsg hook\n");
++			bpf_link__destroy(sockops_link);
++			detach();
++			return 1;
++		}
++	}
++
++	printf("attached xdp_rps_rfs to ifindex %d with %u CPUs\n",
++	       ifindex, nr_cpus);
++	if (cgroup_path)
++		printf("sockops RFS updater attached to %s\n", cgroup_path);
++	if (attach_recv)
++		printf("tcp_recvmsg RFS updater attached\n");
++	if (pin_dir)
++		printf("maps pinned at %s\n", pin_dir);
++	printf("press Ctrl-C to detach, or use `%s -d -i %d` later\n",
++	       basename(argv[0]), ifindex);
++
++	signal(SIGINT, int_exit);
++	signal(SIGTERM, int_exit);
++	while (!exiting)
++		pause();
++
++	bpf_link__destroy(sockops_link);
++	bpf_link__destroy(recvmsg_link);
++	return detach() ? 1 : 0;
++}
+-- 
+2.43.0
+

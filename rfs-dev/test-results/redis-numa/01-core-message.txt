@@ -1,0 +1,70 @@
+net: rfs: Add a BPF struct_ops hook for CPU selection
+
+Native RFS derives the desired receive CPU from application CPU hints in
+the socket flow table. There is no policy interface for choosing a
+different CPU, such as another CPU in the same NUMA node.
+
+Add a per-device bpf_rfs_ops policy under CONFIG_BPF_RFS. Invoke
+select_cpu() after the native flow lookup and before the existing
+migration check. Provide read-only scalar context and encode DEFAULT as
+zero and an explicit CPU as CPU + 1. Validate explicit results and fall
+back to the native hint when the requested CPU is invalid or offline.
+
+Keep the native application hint, active CPU, queue progress and aRFS
+state on their existing paths. Both policy proposals and fallback
+decisions pass through the native migration check. Use a static key when
+no policy is attached and a compile-time stub when the option is
+disabled.
+
+Require link-based attachment and CAP_NET_ADMIN in the target network
+namespace. Serialize registration and replacement with RTNL, publish
+policies with RCU, and wait for readers before returning from update or
+unregister. Deactivate bindings on NETDEV_UNREGISTER without retaining
+the device or entering the struct_ops update mutex from the notifier. An
+inactive link remains inspectable until released and rejects further
+updates.
+
+Tested with an x86_64 kernel build and boot using KASAN, lockdep and RCU
+checking. Building net/core/dev.o with CONFIG_BPF_RFS disabled also
+passes, with no bpf_rfs references in the object. The accompanying
+selftests cover receive CPU selection and link lifecycle behavior.
+
+Preliminary full-series Redis benchmark (three runs per mode): use
+test-kernel with QEMU/KVM, eight vCPUs, two virtual NUMA nodes and one
+virtio-net queue over TAP/vhost-net. Pin RX/TX IRQs to CPU0/node0 and
+Redis CPU/memory to CPU4/node1. Native RFS follows CPU4; RPS and the
+NUMA sample with candidate CPU5 use CPU5/node1. Enable RFS tables of
+32768 global/4096 per queue for the two RFS modes. RPS uses mask 0x20
+with RFS disabled. Disable KASAN/lockdep and enable IRQ time accounting.
+
+Redis 7.2.5, one I/O thread, libc allocator, no persistence, 64-byte GET:
+redis-benchmark --threads 3 -c 384 -P 8 -n 20000000, after 500000 warmup
+requests. Rotate mode order and keep the load generator on separate host
+cores. QPS and per-CPU busy percentages below are medians of three runs:
+
+  Mode                  QPS   CPU0   CPU4   CPU5
+  No RPS/RFS        1354738   28.4   99.9    0.0
+  Native RFS        1088732   19.4   99.7    0.1
+  RPS CPU5          1441234   23.6   99.5   18.8
+  BPF NUMA CPU5     1438332   24.8   99.6   18.5
+
+QPS min/max across the three runs:
+  baseline   1354646-1354922
+  rfs        1051469-1089384
+  rps        1354463-1442377
+  bpf-numa   1331558-1442897
+
+BPF NUMA changes QPS by +32.1% versus native RFS and -0.2% versus
+static RPS. CPU4 is 99.4-99.9% busy in every timed run, using the central
+half of per-second samples. Separate TCP receive probes put at least
+99.88% of skbs on the intended CPUs and are detached before timing;
+RX/TX IRQ deltas remain on CPU0. There are no GET misses or error replies.
+
+The AMD Ryzen 7 9700X host runs WSL2 and has one physical NUMA node.
+These virtual-topology measurements do not establish physical NUMA
+locality gains or isolated callback cost. Static RPS is a control for
+the same fixed CPU mapping; small differences need more samples.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+

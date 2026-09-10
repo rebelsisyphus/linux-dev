@@ -1,0 +1,15 @@
+Rebasing (1/4)[detached HEAD e37739322a0c] net: rfs: Add a BPF struct_ops hook for CPU selection
+ Date: Mon Sep 7 14:26:31 2026 +0800
+ 6 files changed, 371 insertions(+), 1 deletion(-)
+ create mode 100644 include/net/bpf_rfs.h
+ create mode 100644 net/core/bpf_rfs.c
+Rebasing (2/4)[detached HEAD ba5347a259ea] samples/bpf: Add topology-aware RFS CPU policies
+ Date: Mon Sep 7 14:26:32 2026 +0800
+ 6 files changed, 873 insertions(+)
+ create mode 100644 samples/bpf/Makefile.rfs
+ create mode 100644 samples/bpf/rfs_policy.bpf.c
+ create mode 100644 samples/bpf/rfs_policy.c
+ create mode 100644 samples/bpf/rfs_policy.h
+ create mode 100644 samples/bpf/rfs_policy_loader.c
+ create mode 100644 samples/bpf/rfs_policy_topology.c
+Rebasing (3/4)Rebasing (4/4)[KSuccessfully rebased and updated refs/heads/rfs_select_cpu.

@@ -1,0 +1,15 @@
+{
+  "mode": "baseline",
+  "tcp_rx_skb_counts": [
+    866487,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "expected_cpu": 0,
+  "on_expected_percent": 100.0
+}

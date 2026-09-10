@@ -1,0 +1,15 @@
+{
+  "mode": "rfs",
+  "tcp_rx_skb_counts": [
+    523,
+    0,
+    0,
+    0,
+    667193,
+    0,
+    0,
+    0
+  ],
+  "expected_cpu": 4,
+  "on_expected_percent": 99.92167328624744
+}

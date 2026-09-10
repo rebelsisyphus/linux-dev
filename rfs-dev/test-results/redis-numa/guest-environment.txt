@@ -1,0 +1,198 @@
+Linux sisyphus 7.2.0-rfs-perf+ #3 SMP PREEMPT_DYNAMIC Mon Sep  7 17:55:43 CST 2026 x86_64 x86_64 x86_64 GNU/Linux
+available: 2 nodes (0-1)
+node 0 cpus: 0 1 2 3
+node 0 size: 1950 MB
+node 0 free: 1024 MB
+node 1 cpus: 4 5 6 7
+node 1 size: 1973 MB
+node 1 free: 1887 MB
+node distances:
+node   0   1 
+  0:  10  20 
+  1:  20  10 
+driver: virtio_net
+version: 1.0.0
+firmware-version: 
+expansion-rom-version: 
+bus-info: 0000:00:04.0
+supports-statistics: yes
+supports-test: no
+supports-eeprom-access: no
+supports-register-dump: no
+supports-priv-flags: no
+Features for enp0s4:
+rx-checksumming: on [fixed]
+tx-checksumming: on
+	tx-checksum-ipv4: off [fixed]
+	tx-checksum-ip-generic: on
+	tx-checksum-ipv6: off [fixed]
+	tx-checksum-fcoe-crc: off [fixed]
+	tx-checksum-sctp: off [fixed]
+scatter-gather: on
+	tx-scatter-gather: on
+	tx-scatter-gather-fraglist: off [fixed]
+tcp-segmentation-offload: on
+	tx-tcp-segmentation: on
+	tx-tcp-ecn-segmentation: on
+	tx-tcp-mangleid-segmentation: off
+	tx-tcp6-segmentation: on
+	tx-tcp-accecn-segmentation: off [fixed]
+generic-segmentation-offload: on
+generic-receive-offload: on
+large-receive-offload: off [fixed]
+rx-vlan-offload: off [fixed]
+tx-vlan-offload: off [fixed]
+ntuple-filters: off [fixed]
+receive-hashing: off [fixed]
+highdma: on [fixed]
+rx-vlan-filter: on [fixed]
+vlan-challenged: off [fixed]
+tx-gso-robust: on [fixed]
+tx-fcoe-segmentation: off [fixed]
+tx-gre-segmentation: off [fixed]
+tx-gre-csum-segmentation: off [fixed]
+tx-ipxip4-segmentation: off [fixed]
+tx-ipxip6-segmentation: off [fixed]
+tx-udp_tnl-segmentation: off [fixed]
+tx-udp_tnl-csum-segmentation: off [fixed]
+tx-gso-partial: off [fixed]
+tx-tunnel-remcsum-segmentation: off [fixed]
+tx-sctp-segmentation: off [fixed]
+tx-esp-segmentation: off [fixed]
+tx-udp-segmentation: on
+tx-gso-list: off [fixed]
+tx-nocache-copy: off
+loopback: off [fixed]
+rx-fcs: off [fixed]
+rx-all: off [fixed]
+tx-vlan-stag-hw-insert: off [fixed]
+rx-vlan-stag-hw-parse: off [fixed]
+rx-vlan-stag-filter: off [fixed]
+l2-fwd-offload: off [fixed]
+hw-tc-offload: off [fixed]
+esp-hw-offload: off [fixed]
+esp-tx-csum-hw-offload: off [fixed]
+rx-udp_tunnel-port-offload: off [fixed]
+tls-hw-tx-offload: off [fixed]
+tls-hw-rx-offload: off [fixed]
+rx-gro-hw: on
+rx-gro-list: off
+macsec-hw-offload: off [fixed]
+rx-udp-gro-forwarding: off
+hsr-tag-ins-offload: off [fixed]
+hsr-tag-rm-offload: off [fixed]
+hsr-fwd-offload: off [fixed]
+hsr-dup-offload: off [fixed]
+Channel parameters for enp0s4:
+Pre-set maximums:
+RX:		n/a
+TX:		n/a
+Other:		n/a
+Combined:	1
+Current hardware settings:
+RX:		n/a
+TX:		n/a
+Other:		n/a
+Combined:	1
+console=ttyS0 root=/dev/sda rw
+            CPU0       CPU1       CPU2       CPU3       CPU4       CPU5       CPU6       CPU7       
+   0:         58          0          0          0          0          0          0          0  IO-APIC                  2-edge      timer
+   1:          0         13          0          0          0          0          0          0  IO-APIC                  1-edge      i8042
+   4:        356          0          0          0          0          0          0          0  IO-APIC                  4-edge      ttyS0
+   8:          0          0          1          0          0          0          0          0  IO-APIC                  8-edge      rtc0
+   9:          0          0          0          0          0          0          0          0  IO-APIC                  9-fasteoi   acpi
+  12:        125          0          0          0          0          0          0          0  IO-APIC                 12-edge      i8042
+  16:          0          0          0          0          0          0          0          0  IO-APIC                 16-fasteoi   i801_smbus
+  23:          0          0          0          0       3532          0          0          0  IO-APIC                 23-fasteoi   enp0s3
+  24:          0          0       1324          0          0       2535          0          0  PCI-MSI-0000:00:1f.2     0-edge      ahci[0000:00:1f.2]
+  25:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:04.0    0-edge      virtio1-config
+  26:    3938155          0          0          0          2          0          0          0  PCI-MSIX-0000:00:04.0    1-edge      virtio1-input.0
+  27:    1866502          0          0          0          0          2          0          0  PCI-MSIX-0000:00:04.0    2-edge      virtio1-output.0
+  28:          0          0          0          0          0          0          0          0  PCI-MSIX-0000:00:02.0    0-edge      virtio0-config
+  29:          0          0          0      12194          0          0          0          0  PCI-MSIX-0000:00:02.0    1-edge      virtio0-requests
+ NMI:          0          0          0          0          0          0          0          0  Non-maskable interrupts
+ LOC:      20990      13006      19367      14715     447924      22741      12241      10496  Local timer interrupts
+ PMI:          0          0          0          0          0          0          0          0  Performance monitoring interrupts
+ IWI:         92         63         59        101         35         55         56         47  IRQ work interrupts
+ RES:        703        446        542        424        501        420        332        297  Rescheduling interrupts
+ CAL:     540014       9761      13396       7403    1083835    1133962       6596       6012  Function call interrupts
+ TLB:        503        349        394        324        304        410        323        296  TLB shootdowns
+ TRM:          0          0          0          0          0          0          0          0  Thermal event interrupts
+ THR:          0          0          0          0          0          0          0          0  Threshold APIC interrupts
+ DFR:          0          0          0          0          0          0          0          0  Deferred Error APIC interrupts
+ MCE:          0          0          0          0          0          0          0          0  Machine check exceptions
+ MCP:          2          2          3          2          2          2          2          2  Machine check polls
+ HYP:          1          1          2          1          1          1          1          1  Hypervisor callback interrupts
+MemTotal:        4017672 kB
+MemFree:         2979832 kB
+MemAvailable:    3883204 kB
+Buffers:            8012 kB
+Cached:           926072 kB
+SwapCached:            0 kB
+Active:            38964 kB
+Inactive:         923372 kB
+Active(anon):        312 kB
+Inactive(anon):    28560 kB
+Active(file):      38652 kB
+Inactive(file):   894812 kB
+Unevictable:           0 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:               344 kB
+Writeback:             0 kB
+AnonPages:         28304 kB
+Mapped:            30092 kB
+Shmem:               572 kB
+KReclaimable:      11860 kB
+Slab:              36960 kB
+SReclaimable:      11860 kB
+SUnreclaim:        25100 kB
+KernelStack:        2492 kB
+PageTables:         1672 kB
+SecPageTables:         0 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     2008836 kB
+Committed_AS:      95132 kB
+VmallocTotal:   34359738367 kB
+VmallocUsed:       18256 kB
+VmallocChunk:          0 kB
+Percpu:             2496 kB
+Balloon:               0 kB
+GPUActive:             0 kB
+GPUReclaim:            0 kB
+HugePages_Total:       0
+HugePages_Free:        0
+HugePages_Rsvd:        0
+HugePages_Surp:        0
+Hugepagesize:       2048 kB
+Hugetlb:               0 kB
+DirectMap4k:       26492 kB
+DirectMap2M:     3119104 kB
+DirectMap1G:     3145728 kB
+net.core.netdev_max_backlog = 1000
+net.core.netdev_budget = 300
+net.core.netdev_budget_usecs = 2000
+[{"id":3,"type":"cgroup_device","name":"sd_devices","tag":"82196b549e57674c","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":504,"jited":true,"bytes_jited":322,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":4,"type":"cgroup_skb","name":"sd_fw_egress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":5,"type":"cgroup_skb","name":"sd_fw_ingress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":6,"type":"cgroup_skb","name":"sd_fw_egress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":7,"type":"cgroup_skb","name":"sd_fw_ingress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":8,"type":"cgroup_device","name":"sd_devices","tag":"82196b549e57674c","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":504,"jited":true,"bytes_jited":322,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":9,"type":"cgroup_device","name":"sd_devices","tag":"0a8d49a555fffbcb","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":464,"jited":true,"bytes_jited":301,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":10,"type":"cgroup_device","name":"sd_devices","tag":"a97c143260cd9940","gpl_compatible":true,"loaded_at":1788774973,"uid":0,"orphaned":false,"bytes_xlated":416,"jited":true,"bytes_jited":271,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":11,"type":"cgroup_device","name":"sd_devices","tag":"38fc37f4cbf841b6","gpl_compatible":true,"loaded_at":1788774974,"uid":0,"orphaned":false,"bytes_xlated":696,"jited":true,"bytes_jited":430,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":12,"type":"cgroup_skb","name":"sd_fw_egress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774974,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]},{"id":13,"type":"cgroup_skb","name":"sd_fw_ingress","tag":"772db7720b2728e9","gpl_compatible":true,"loaded_at":1788774974,"uid":0,"orphaned":false,"bytes_xlated":64,"jited":true,"bytes_jited":67,"bytes_memlock":4096,"pids":[{"pid":1,"comm":"systemd"}]}]
+00400000 bind:1 file=/mnt/shared/bin/redis-server
+00401000 bind:1 file=/mnt/shared/bin/redis-server mapped=294 active=0 N1=294 kernelpagesize_kB=4
+00678000 bind:1 file=/mnt/shared/bin/redis-server mapped=54 active=0 N1=54 kernelpagesize_kB=4
+00755000 bind:1 file=/mnt/shared/bin/redis-server anon=2 dirty=2 mapped=6 active=0 N1=6 kernelpagesize_kB=4
+0075b000 bind:1 file=/mnt/shared/bin/redis-server anon=35 dirty=35 mapped=55 active=0 N1=55 kernelpagesize_kB=4
+0079f000 bind:1 anon=33 dirty=33 active=0 N1=33 kernelpagesize_kB=4
+2f7bc000 bind:1 heap anon=67 dirty=67 active=0 N1=67 kernelpagesize_kB=4
+2f7ff000 bind:1 heap anon=1841 dirty=1841 active=0 N1=1841 kernelpagesize_kB=4
+7f578704b000 bind:1
+7f578704c000 bind:1 anon=2 dirty=2 active=0 N1=2 kernelpagesize_kB=4
+7f578784c000 bind:1
+7f578784d000 bind:1 anon=2 dirty=2 active=0 N1=2 kernelpagesize_kB=4
+7f578804d000 bind:1
+7f578804e000 bind:1 anon=82 dirty=82 active=0 N1=82 kernelpagesize_kB=4
+7f578889e000 bind:1 file=/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache mapped=7 mapmax=5 N1=7 kernelpagesize_kB=4
+7f57888a5000 bind:1 file=/usr/lib/locale/C.utf8/LC_COLLATE mapped=1 mapmax=4 N1=1 kernelpagesize_kB=4
+7f57888a6000 bind:1 mapped=1 mapmax=17 active=0 N0=1 kernelpagesize_kB=4
+7f57888aa000 bind:1
+7f57888ac000 bind:1
+7ffed4545000 bind:1 stack anon=3 dirty=3 active=1 N1=3 kernelpagesize_kB=4

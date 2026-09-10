@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/home/sisyphus/code/linux/rfs-dev/perf/analyze.py", line 46, in <module>
+    assert cpu['cpu4']['busy'] >= 98, (label, cpu['cpu4'])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('run1-baseline', {'busy': 95.16500383729854, 'user': 30.314658480429777, 'system': 63.00844205679202, 'irq': 0.5372217958557176, 'softirq': 1.3046815042210285, 'steal': 0.07674597083653108})

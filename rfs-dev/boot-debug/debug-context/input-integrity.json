@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/tmp/rfs-kernel-vm.Ef62oG/serial.log",
+    "size": 35516,
+    "sha256": "9f827d5a35f39ad3aa625fae5382cd4212a1bc37cbbc09a667891c013b658353"
+  },
+  {
+    "path": "/tmp/rfs-kernel-vm.Ef62oG/qemu.log",
+    "size": 381,
+    "sha256": "3ae802af82b767114172791e79a373cea99f95bb98bf8331c881d7d2144fb7c7"
+  },
+  {
+    "path": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-context/serial.log",
+    "size": 35516,
+    "sha256": "9f827d5a35f39ad3aa625fae5382cd4212a1bc37cbbc09a667891c013b658353"
+  },
+  {
+    "path": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-context/qemu.log",
+    "size": 381,
+    "sha256": "3ae802af82b767114172791e79a373cea99f95bb98bf8331c881d7d2144fb7c7"
+  }
+]

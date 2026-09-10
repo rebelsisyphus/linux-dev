@@ -1,0 +1,76 @@
+make: Entering directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'
+make -f /home/sisyphus/code/linux/samples/bpf/Makefile.rfs OUTPUT=/tmp/rfs-review-build/sample \
+	VMLINUX=/home/sisyphus/code/linux/vmlinux BPFTOOL=/home/sisyphus/code/test/bpf_test/bpftool CLANG=clang-18
+mkdir -p /tmp/rfs-review-build/sample
+/home/sisyphus/code/test/bpf_test/bpftool btf dump file /home/sisyphus/code/linux/vmlinux format c > /tmp/rfs-review-build/sample/vmlinux.h.tmp
+mv /tmp/rfs-review-build/sample/vmlinux.h.tmp /tmp/rfs-review-build/sample/vmlinux.h
+mkdir -p /tmp/rfs-review-build/sample/libbpf
+make -C /home/sisyphus/code/linux/tools/lib/bpf OUTPUT=/tmp/rfs-review-build/sample/libbpf/ BUILD_STATIC_ONLY=1
+  GEN     /tmp/rfs-review-build/sample/libbpf/bpf_helper_defs.h
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/libbpf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/bpf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/nlattr.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/btf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/libbpf_utils.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/netlink.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/bpf_prog_linfo.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/libbpf_probes.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/hashmap.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/btf_dump.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/ringbuf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/strset.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/linker.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/gen_loader.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/relo_core.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/usdt.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/zip.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/elf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/features.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/btf_iter.o
+  CC      /tmp/rfs-review-build/sample/libbpf/staticobjs/btf_relocate.o
+  LD      /tmp/rfs-review-build/sample/libbpf/staticobjs/libbpf-in.o
+  LINK    /tmp/rfs-review-build/sample/libbpf/libbpf.a
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/libbpf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/bpf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/nlattr.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/btf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/libbpf_utils.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/netlink.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/bpf_prog_linfo.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/libbpf_probes.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/hashmap.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/btf_dump.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/ringbuf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/strset.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/linker.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/gen_loader.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/relo_core.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/usdt.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/zip.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/elf.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/features.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/btf_iter.o
+  CC      /tmp/rfs-review-build/sample/libbpf/sharedobjs/btf_relocate.o
+  LD      /tmp/rfs-review-build/sample/libbpf/sharedobjs/libbpf-in.o
+  LINK    /tmp/rfs-review-build/sample/libbpf/libbpf.so.1.8.0
+  GEN     /tmp/rfs-review-build/sample/libbpf/libbpf.pc
+clang-18 -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
+	-I/tmp/rfs-review-build/sample -I/tmp/rfs-review-build/sample/libbpf -I/home/sisyphus/code/linux/tools/lib -c /home/sisyphus/code/linux/samples/bpf/rfs_policy.bpf.c -o /tmp/rfs-review-build/sample/rfs_policy.bpf.o
+/home/sisyphus/code/test/bpf_test/bpftool gen skeleton /tmp/rfs-review-build/sample/rfs_policy.bpf.o name rfs_policy > /tmp/rfs-review-build/sample/rfs_policy.skel.h.tmp
+mv /tmp/rfs-review-build/sample/rfs_policy.skel.h.tmp /tmp/rfs-review-build/sample/rfs_policy.skel.h
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-review-build/sample -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy.c -o /tmp/rfs-review-build/sample/rfs_policy.o
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-review-build/sample -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy_loader.c -o /tmp/rfs-review-build/sample/rfs_policy_loader.o
+cc -O2 -g -Wall -Wextra -Werror -I/tmp/rfs-review-build/sample -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi -c /home/sisyphus/code/linux/samples/bpf/rfs_policy_topology.c -o /tmp/rfs-review-build/sample/rfs_policy_topology.o
+cc /tmp/rfs-review-build/sample/rfs_policy.o /tmp/rfs-review-build/sample/rfs_policy_loader.o /tmp/rfs-review-build/sample/rfs_policy_topology.o /tmp/rfs-review-build/sample/libbpf/libbpf.a -lelf -lz -o /tmp/rfs-review-build/sample/rfs_policy
+clang-18 -target bpf -O2 -g -Wall -Werror -Wno-missing-declarations \
+	-I/tmp/rfs-review-build/sample -I/tmp/rfs-review-build/sample/libbpf -I/home/sisyphus/code/linux/samples/bpf \
+	-I/home/sisyphus/code/linux/tools/lib -c test_rfs.bpf.c -o /tmp/rfs-review-build/test_rfs.bpf.o
+/home/sisyphus/code/test/bpf_test/bpftool gen skeleton /tmp/rfs-review-build/test_rfs.bpf.o name test_rfs > /tmp/rfs-review-build/test_rfs.skel.h.tmp
+mv /tmp/rfs-review-build/test_rfs.skel.h.tmp /tmp/rfs-review-build/test_rfs.skel.h
+gcc -O2 -g -Wall -I/tmp/rfs-review-build/sample -I/tmp/rfs-review-build -I/home/sisyphus/code/linux/samples/bpf -I/home/sisyphus/code/linux/tools/lib -I/home/sisyphus/code/linux/tools/include/uapi test_rfs.c /tmp/rfs-review-build/sample/rfs_policy_loader.o \
+	/tmp/rfs-review-build/sample/rfs_policy_topology.o /tmp/rfs-review-build/sample/libbpf/libbpf.a \
+	-lelf -lz -o /tmp/rfs-review-build/test_rfs
+cp /tmp/rfs-review-build/sample/rfs_policy /tmp/rfs-review-build/rfs_policy
+mkdir -p /tmp/rfs-review-build/lib/sh
+cp ../../net/lib/sh/defer.sh /tmp/rfs-review-build/lib/sh/
+make: Leaving directory '/home/sisyphus/code/linux/tools/testing/selftests/bpf/rfs'

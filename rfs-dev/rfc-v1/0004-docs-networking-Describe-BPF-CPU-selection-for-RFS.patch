@@ -1,0 +1,184 @@
+From 9f3cd6a8fd249686dd175723ee7412dfb81160c6 Mon Sep 17 00:00:00 2001
+Message-ID: <9f3cd6a8fd249686dd175723ee7412dfb81160c6.1788775763.git.superdcc97@163.com>
+In-Reply-To: <cover.1788775763.git.superdcc97@163.com>
+References: <cover.1788775763.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 7 Sep 2026 14:26:35 +0800
+Subject: [RFC net-next 4/4] docs: networking: Describe BPF CPU selection for
+ RFS
+
+The RFS policy interface separates the desired CPU from the CPU selected
+by the native migration check. Document that distinction together with
+the return encoding, verifier restrictions and device attachment
+lifetime.
+
+Describe the sample build, native RFS prerequisites, topology fallback
+rules and pinned-link management. Explain the sysfs remount performed by
+ip netns exec and how to keep a bpffs pin accessible across commands.
+
+Document selftest requirements and the limits of hash-based application
+hints, candidate pools, CPU hotplug and TCP-based ordering checks. State
+that hardware aRFS and performance require separate validation.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ Documentation/networking/bpf_rfs.rst | 133 +++++++++++++++++++++++++++
+ Documentation/networking/index.rst   |   1 +
+ 2 files changed, 134 insertions(+)
+ create mode 100644 Documentation/networking/bpf_rfs.rst
+
+diff --git a/Documentation/networking/bpf_rfs.rst b/Documentation/networking/bpf_rfs.rst
+new file mode 100644
+index 000000000000..b12976b70f2a
+--- /dev/null
++++ b/Documentation/networking/bpf_rfs.rst
+@@ -0,0 +1,133 @@
++.. SPDX-License-Identifier: GPL-2.0
++
++BPF CPU selection for RFS
++=========================
++
++``CONFIG_BPF_RFS`` adds a ``bpf_rfs_ops`` struct_ops policy to native Receive
++Flow Steering. The policy selects a desired CPU after a native RFS lookup
++has matched, before the existing migration check in ``get_rps_cpu()``.
++RFS continues to own the active CPU, queue tail and backlog accounting.
++
++Interface
++---------
++
++The BTF interface is declared in ``include/net/bpf_rfs.h``. A policy contains
++an interface index, a name, reserved zero flags and one non-sleepable
++``select_cpu(const struct bpf_rfs_ctx *)`` callback. The callback receives
++read-only snapshots of the native flow hash, receive device/queue/CPU,
++application CPU hint, active RFS slot CPU and CPU ID limit. Context flags
++indicate recorded RX queue information and whether the CPU hints were online.
++An unset active CPU is represented as -1.
++
++Return zero to keep the native desired CPU, or CPU + 1 to propose another
++CPU. In particular, CPU 0 is encoded as 1. Out-of-range, impossible, offline
++or unrepresentable results fall back to the native desired CPU. Both this
++fallback and successful proposals still pass through the native migration
++check. Returning the native CPU does not immediately move outstanding packets.
++
++No callback runs on an RFS miss or when the native tables are absent. The
++global socket flow table keeps the original application CPU hint. These are
++hash-based hints, not exact socket, process or namespace ownership records.
++Device binding does not change this property of native RFS.
++
++Attachment lifetime
++-------------------
++
++Only link-based struct_ops attachments are supported. The initial interface
++index is resolved in the attaching task's network namespace; the caller
++needs CAP_NET_ADMIN there in addition to BPF loading privileges. Each
++device and each struct_ops instance supports one attachment.
++
++Link update can replace the policy on that same device. It cannot move the
++attachment to a different device. Old callbacks finish under RCU before
++the old map can be released. Updating or detaching does not clear native
++RFS flow tables or bypass migration checks.
++
++NETDEV_UNREGISTER, including a device move across namespaces, deactivates
++the device binding. Subsequent updates on that link return ENODEV. The link
++and its map remain inspectable until released; the link's map ID alone is
++not proof of an active device binding. Neither the link nor its inactive
++binding retains a device reference. Reuse of an interface index does not
++reattach the old policy.
++
++Sample
++------
++
++``samples/bpf/Makefile.rfs`` builds a standalone CO-RE sample and its loader::
++
++  make -f samples/bpf/Makefile.rfs OUTPUT=/tmp/rfs-sample \
++       CLANG=clang BPFTOOL=bpftool VMLINUX=./vmlinux
++
++This requires a BPF-capable Clang, bpftool, libelf development files and zlib.
++The Makefile builds the in-tree static libbpf. Build a kernel with RPS,
++BPF_SYSCALL, BPF_JIT, DEBUG_INFO_BTF and BPF_RFS enabled, on an architecture
++supporting BPF trampolines.
++
++Configure native RFS tables before attaching. For example, with an existing
++``eth0`` and its RX queue 0::
++
++  sysctl -w net.core.rps_sock_flow_entries=32768
++  echo 4096 > /sys/class/net/eth0/queues/rx-0/rps_flow_cnt
++  mount -t bpf bpf /sys/fs/bpf  # if not already mounted
++  /tmp/rfs-sample/rfs_policy attach -i eth0 -s numa \
++       -c 0-15 --exclude-smt -p /sys/fs/bpf/eth0_rfs
++
++Enable the per-queue table on every RX queue to which the policy should
++apply. ``rps_cpus`` retains its original role in RPS miss fallback.
++
++Available sample modes are ``process`` (native desired CPU), ``cluster``
++(another candidate in the application's cluster), and ``numa`` (another
++candidate in its NUMA node). The cluster policy falls back through NUMA,
++the application CPU if eligible, the global candidate pool, and native RFS.
++The NUMA policy uses the same chain starting at NUMA. Missing cluster
++topology is reported; a package is not silently treated as a cluster.
++
++``--exclude-smt`` excludes the application's entire physical core while
++choosing a topology-local alternative. Fallback can still choose the
++application CPU. Candidate pools express policy preferences, not hard CPU
++isolation. Empty candidate pools return the native policy.
++
++The loader parses full CPU lists, including sparse IDs and IDs above 63.
++Shared topology groups avoid per-CPU copies of a complete candidate list.
++Topology maps are program-read-only and frozen after initialization. A
++hotplug or configuration refresh is published as a new complete policy::
++
++  /tmp/rfs-sample/rfs_policy update -i eth0 -s cluster \
++       -c 0-15 -p /sys/fs/bpf/eth0_rfs
++  /tmp/rfs-sample/rfs_policy show -p /sys/fs/bpf/eth0_rfs
++  /tmp/rfs-sample/rfs_policy detach -p /sys/fs/bpf/eth0_rfs
++
++Update uses expected-old-map protection and preserves the existing link
++and pins on failure. Normal loader exit closes its FDs; the pinned link
++keeps the policy attached. Run attach/update in the target netns, for
++example through ``ip netns exec``. Topology refresh is explicit; the sample
++does not include a hotplug-monitoring daemon.
++
++``ip netns exec`` remounts sysfs, hiding an existing bpffs mount under
++``/sys/fs/bpf``. Mount bpffs at a path outside sysfs when multiple commands
++or namespaces need to access the same pinned link.
++
++Validation and limits
++---------------------
++
++Build and install the dedicated tests before running them on the new kernel::
++
++  make -C tools/testing/selftests/bpf/rfs OUTPUT=/tmp/rfs-tests \
++       BPFTOOL=bpftool CLANG=clang
++  make -C tools/testing/selftests/bpf/rfs OUTPUT=/tmp/rfs-tests \
++       INSTALL_PATH=/tmp/rfs-installed install
++  /tmp/rfs-installed/test_rfs.sh
++
++Tests require root, iproute2, network namespaces and online CPUs 0, 1 and 2.
++The NUMA migration test additionally uses CPUs 0/1 in node 0 and CPUs 4/5
++in node 1. Run in a disposable VM: tests temporarily configure the global
++RFS table and exercise CPU hotplug. The harness checks actual TCP receive
++CPUs with SO_INCOMING_CPU, verifier restrictions, policy updates and
++device deletion. TCP application data checks do not prove absence of
++pre-reassembly packet reordering.
++
++The policy runs on each eligible RFS lookup. Measure its cost and locality
++benefits on the intended workload. Native RFS ordering assumptions and
++limitations, including hash collisions, table resets, CPU hotplug and
++hardware queue reconfiguration, continue to apply. Hardware aRFS remains
++on its existing path and requires separate NIC validation.
+diff --git a/Documentation/networking/index.rst b/Documentation/networking/index.rst
+index 44a422ad3b05..3c7ae26d6c35 100644
+--- a/Documentation/networking/index.rst
++++ b/Documentation/networking/index.rst
+@@ -35,6 +35,7 @@ Contents:
+    checksum-offloads
+    segmentation-offloads
+    scaling
++   bpf_rfs
+    tls
+    tls-offload
+    tls-handshake
+-- 
+2.43.0
+

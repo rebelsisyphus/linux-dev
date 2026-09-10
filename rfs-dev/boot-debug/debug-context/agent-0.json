@@ -1,0 +1,52 @@
+{
+  "agent_id": "agent-0",
+  "agent_type": "code",
+  "theory_id": "T1",
+  "task_description": "Confirm or eliminate missing bpf_rfs struct_ops .init callback as cause of first QEMU boot panic. Also assess T2 (wrong descriptor / BTF registration mismatch) only as false-positive alternative.",
+  "instructions": [
+    "Read /home/sisyphus/code/review-prompts/kernel/agent/debug-code.md and follow workflow including false-positive verification.",
+    "Do not modify source, run VMs, or build. Write only debug-context/agent-0-result.json and agent-0-status.txt.",
+    "Use source and exact built vmlinux to map bpf_struct_ops_desc_init+0x6cc/0x870 to the failed indirect call; parent may shortly rebuild so capture binary evidence early.",
+    "Send confirmed cause and minimal fix recommendation to orchestrator immediately, then finish detailed result.",
+    "No standalone reproducer supplied; use preserved serial/qemu logs unchanged."
+  ],
+  "functions_to_load": [
+    "bpf_struct_ops_desc_init",
+    "__register_bpf_struct_ops",
+    "bpf_rfs_init"
+  ],
+  "types_to_load": [
+    "bpf_struct_ops",
+    "bpf_rfs_ops"
+  ],
+  "subsystem_guides_to_load": [
+    "bpf.md",
+    "build.md"
+  ],
+  "context_from_bug": {
+    "crash_function": "NULL target with bpf_struct_ops_desc_init+0x6cc/0x870 return point",
+    "crash_file": null,
+    "call_trace_summary": [
+      "bpf_struct_ops_desc_init",
+      "__register_bpf_struct_ops",
+      "bpf_rfs_init",
+      "do_one_initcall",
+      "kernel_init_freeable",
+      "kernel_init"
+    ],
+    "reproducer_summary": "Boot kernel 7.2.0-rfs-bpf+ #295; no standalone reproducer."
+  },
+  "context_from_prior_agents": [],
+  "questions_to_answer": [
+    "Is st_ops->init unconditionally invoked at the exact crashing callsite?",
+    "Does compiled bpf_rfs descriptor leave .init NULL?",
+    "Can a BTF lookup or another callback explain this crash instead?",
+    "What is the narrow correct fix in bpf_rfs integration?"
+  ],
+  "paths": {
+    "workspace": "/home/sisyphus/code/linux",
+    "debug_context": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-context",
+    "vmlinux": "/home/sisyphus/code/linux/vmlinux",
+    "prompt_directory": "/home/sisyphus/code/review-prompts/kernel"
+  }
+}

@@ -1,0 +1,4 @@
+total: 0 errors, 1 warnings, 0 checks, 414 lines checked
+total: 0 errors, 3 warnings, 2 checks, 873 lines checked
+total: 0 errors, 2 warnings, 0 checks, 618 lines checked
+total: 0 errors, 2 warnings, 0 checks, 140 lines checked

@@ -1,0 +1,176 @@
+{
+  "version": "1.0",
+  "total_dispatches": 2,
+  "context_loaded": {
+    "functions": [
+      {
+        "name": "bpf_struct_ops_desc_init",
+        "file": "kernel/bpf/bpf_struct_ops.c",
+        "loaded_by": "agent-0",
+        "summary": "Obtains st_ops directly from descriptor. Checks BTF identity, wrapper type and member prototypes before calling st_ops->init(btf) without a NULL check at line 496. Error cleanup is after callback execution and cannot catch instruction fetch at zero."
+      },
+      {
+        "name": "__register_bpf_struct_ops",
+        "file": "kernel/bpf/btf.c",
+        "loaded_by": "agent-0",
+        "summary": "Gets valid BTF and log, then calls btf_add_struct_ops with the same supplied st_ops. Does not fill any missing .init callback."
+      },
+      {
+        "name": "btf_add_struct_ops",
+        "file": "kernel/bpf/btf.c",
+        "loaded_by": "agent-0",
+        "summary": "Writes supplied st_ops into table slot at line 9921. Immediately passes that slot to bpf_struct_ops_desc_init at line 9923. Table count increments only after successful initialization."
+      },
+      {
+        "name": "bpf_rfs_init",
+        "file": "net/core/bpf_rfs.c",
+        "loaded_by": "agent-0",
+        "summary": "late_initcall registers netdevice notifier, then registers &bpf_rfs_struct_ops. Boot failure occurs on registration before this function returns. Existing initcall function has incompatible signature for the .init callback and would recursively register if reused."
+      },
+      {
+        "name": "bpf_struct_ops_supported",
+        "file": "kernel/bpf/bpf_struct_ops.c",
+        "loaded_by": "agent-0",
+        "summary": "Checks CFI stub presence for individual operations; not an initializer default."
+      },
+      {
+        "name": "bpf_rfs_init_member",
+        "file": "net/core/bpf_rfs.c",
+        "loaded_by": "agent-0",
+        "summary": "Initializes ifindex/name in each userspace map value. Does not initialize the subsystem descriptor .init field."
+      },
+      {
+        "name": "bpf_rfs_validate",
+        "file": "net/core/bpf_rfs.c",
+        "loaded_by": "agent-0",
+        "summary": "Validates runtime policy select_cpu presence; unrelated to descriptor bootstrap callback."
+      },
+      {
+        "name": "bpf_rfs_default",
+        "file": "net/core/bpf_rfs.c",
+        "loaded_by": "agent-0",
+        "summary": "CFI stub for select_cpu returns BPF_RFS_DEFAULT. Has different purpose and signature from struct_ops .init."
+      },
+      {
+        "name": "do_one_initcall",
+        "file": "init/main.c",
+        "loaded_by": "agent-0",
+        "summary": "Directly invokes fn() at line 1357; no wrapper initializes descriptor callbacks. The crash trace confirms bpf_rfs_init was not blacklisted."
+      },
+      {
+        "name": "bpf_dummy_init",
+        "file": "net/bpf/bpf_dummy_struct_ops.c",
+        "loaded_by": "agent-0",
+        "summary": "Comparable subsystem supplies correctly typed init callback and returns 0; descriptor .init assignment exists at line 309."
+      },
+      {
+        "name": "hid_bpf_ops_init",
+        "file": "drivers/hid/bpf/hid_bpf_struct_ops.c",
+        "loaded_by": "agent-0",
+        "summary": "Comparable device-bound struct_ops supplies correctly typed init callback and returns 0; descriptor .init assignment exists at line 300."
+      }
+    ],
+    "types": [
+      {
+        "name": "bpf_struct_ops",
+        "file": "include/linux/bpf.h",
+        "loaded_by": "agent-0"
+      },
+      {
+        "name": "bpf_struct_ops_desc",
+        "file": "include/linux/bpf.h",
+        "loaded_by": "agent-0"
+      },
+      {
+        "name": "bpf_rfs_ops",
+        "file": "include/net/bpf_rfs.h",
+        "loaded_by": "agent-0"
+      },
+      {
+        "name": "bpf_rfs_ctx",
+        "file": "include/net/bpf_rfs.h",
+        "loaded_by": "agent-0"
+      }
+    ],
+    "subsystem_guides": [
+      "technical-patterns.md",
+      "subsystem/subsystem.md",
+      "subsystem/bpf.md",
+      "subsystem/build.md",
+      "subsystem/networking-core.md",
+      "subsystem/locking.md",
+      "subsystem/rcu.md",
+      "subsystem/mm-alloc.md",
+      "subsystem/hid.md",
+      "agent/debug-code.md",
+      "debugging.md"
+    ],
+    "commits_examined": []
+  },
+  "theories": [
+    {
+      "id": "T1",
+      "status": "confirmed",
+      "priority": "high",
+      "title": "Missing struct_ops init callback in newly registered bpf_rfs descriptor",
+      "description": "The new bpf_rfs descriptor could leave .init NULL while the generic registration path calls it unconditionally; this explains RIP 0 and bpf_struct_ops_desc_init return address. This is a parent-supplied hypothesis pending source and binary verification.",
+      "evidence_for": [
+        "NULL instruction fetch with caller bpf_struct_ops_desc_init+0x6cc and bpf_rfs_init on stack.",
+        "Mandatory callback is invoked without a presence check at the exact faulting source line.",
+        "The source descriptor omits .init; static storage zero-initializes the omitted pointer. Its compiled .data bytes independently confirm NULL.",
+        "Binary evidence identifies both actual descriptor and callback, not just a plausible source bug. The exact +0x6cc return point follows the .init load/call. The relocated descriptor address equals crash R12, and its zero .init explains crash RAX=0 and RIP=0."
+      ],
+      "evidence_against": [],
+      "elimination_reason": null,
+      "investigated_by": [
+        "agent-0"
+      ],
+      "related_functions": [
+        "bpf_struct_ops_desc_init",
+        "__register_bpf_struct_ops",
+        "bpf_rfs_init"
+      ],
+      "related_commits": [],
+      "suggested_next_steps": [
+        "Add correctly typed no-op .init callback to bpf_rfs descriptor, rebuild and resume requested QEMU tests."
+      ]
+    },
+    {
+      "id": "T2",
+      "status": "eliminated",
+      "priority": "low",
+      "title": "Registration resolves an incorrect or partially initialized RFS struct_ops descriptor",
+      "description": "A BTF registration/type mismatch might have selected a descriptor whose callback pointer is NULL despite a valid RFS initializer. Verify actual descriptor argument and callback field match the new bpf_rfs descriptor.",
+      "evidence_for": [
+        "Failure occurs during BTF-based struct_ops registration before policy use."
+      ],
+      "evidence_against": [
+        "T2 is eliminated as an explanation of this panic. bpf_rfs_init passes the intended descriptor; btf_add_struct_ops stores that exact pointer. Runtime R12 matches it after KASLR. Missing BTF type/wrapper or invalid member prototypes return before line 496, whereas the observed return address proves execution reached the .init call. Other policy callbacks (.reg, .init_member, select_cpu) are not the target of the offset-8 load."
+      ],
+      "elimination_reason": "Compiled callsite and relocated descriptor identify the exact bpf_rfs .init field; BTF failure exits earlier.",
+      "investigated_by": [
+        "agent-0"
+      ],
+      "related_functions": [
+        "bpf_struct_ops_desc_init",
+        "__register_bpf_struct_ops",
+        "bpf_rfs_init"
+      ],
+      "related_commits": [],
+      "suggested_next_steps": []
+    }
+  ],
+  "confirmed_bug": {
+    "theory_id": "T1",
+    "summary": "The first 7.2.0-rfs-bpf+ #295 boot panic is caused by bpf_rfs_struct_ops omitting its mandatory .init callback. At the exact reported bpf_struct_ops_desc_init+0x6cc return point, the original vmlinux calls the pointer at descriptor offset 8, which is struct bpf_struct_ops.init. The compiled descriptor contains eight zero bytes there, and its address plus the reported KASLR offset equals crash R12. RAX and RIP are both zero. This identifies the missing callback directly, rather than merely inferring it from the trace. The BTF lookups and member validation were already completed; neither wrong descriptor identity nor another callback explains this callsite. Add a separate int callback taking struct btf * and returning 0, and assign it to .init. Source excerpts and binary evidence below were captured before the root agent's fix/rebuild.",
+    "category": "null_deref",
+    "suspect_commit": null
+  },
+  "investigative_dispatches": 1,
+  "report_dispatches": 1,
+  "report": {
+    "status": "complete",
+    "path": "/home/sisyphus/code/linux/rfs-dev/boot-debug/debug-report.txt",
+    "validation": "Plain text; no Markdown; all prose lines at most 78 columns."
+  }
+}

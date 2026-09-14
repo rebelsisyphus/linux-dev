@@ -1,0 +1,121 @@
+{
+  "version": "1.0",
+  "source": "syzkaller report supplied by user",
+  "crash": {
+    "type": "warning",
+    "kernel_version": "syzkaller #0; exact revision not supplied",
+    "machine": "Google Compute Engine, x86_64",
+    "raw_text": "WARNING: CPU: 0 PID: 8 at net/netfilter/nft_set_pipapo.c:2389 nft_pipapo_destroy+0x84b/0x8b0 net/netfilter/nft_set_pipapo.c:2389\nModules linked in:\nCPU: 0 PID: 8 Comm: kworker/0:0 Not tainted syzkaller #0\nHardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/24/2026\nWorkqueue: events nf_tables_trans_destroy_work\nRIP: 0010:nft_pipapo_destroy+0x84b/0x8b0 net/netfilter/nft_set_pipapo.c:2389\nCode: 00 00 48 83 c4 50 5b 41 5c 41 5d 41 5e 41 5f 5d c3 e8 89 b4 ab f8 e9 d3 f9 ff ff e8 7f b4 ab f8 e9 6c fe ff ff e8 75 b4 ab f8 <0f> 0b e9 16 f8 ff ff 44 89 f1 80 e1 07 80 c1 03 38 c1 0f 8c e3 f9\nRSP: 0018:ffffc900000d79d8 EFLAGS: 00010293\nRAX: ffffffff88dbbdab RBX: ffff88807dea5cf0 RCX: ffff88801b655a00\nRDX: 0000000000000000 RSI: ffff88807dea5c00 RDI: ffff88804f518628\nRBP: ffffc900000d7bb0 R08: ffff88801b655a00 R09: 000000000000000f\nR10: 0000000000000020 R11: 0000000000000000 R12: ffff88807dea5cc0\nR13: dffffc0000000000 R14: ffff88807dea5d10 R15: dffffc0000000000\nFS: 0000000000000000(0000) GS:ffff8880b8e00000(0000) knlGS:0000000000000000\nCS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033\nCR2: 0000200000001200 CR3: 000000002c432000 CR4: 00000000003506f0\nCall Trace:\n<TASK>\nnft_set_destroy+0x489/0xa20 net/netfilter/nf_tables_api.c:5363\nnft_commit_release net/netfilter/nf_tables_api.c:9544 [inline]\nnf_tables_trans_destroy_work+0xb2d/0x11b0 net/netfilter/nf_tables_api.c:9587\nprocess_one_work kernel/workqueue.c:2657 [inline]\nprocess_scheduled_works+0xa60/0x1600 kernel/workqueue.c:2734\nworker_thread+0xa5e/0xfe0 kernel/workqueue.c:2815\nkthread+0x2fa/0x390 kernel/kthread.c:388\nret_from_fork+0x48/0x80 arch/x86/kernel/process.c:152\nret_from_fork_asm+0x11/0x20 arch/x86/entry/entry_64.S:293\n",
+    "error_message": "WARNING: CPU: 0 PID: 8 at net/netfilter/nft_set_pipapo.c:2389 nft_pipapo_destroy+0x84b/0x8b0 net/netfilter/nft_set_pipapo.c:2389",
+    "rip": "nft_pipapo_destroy+0x84b/0x8b0",
+    "call_trace": [
+      {
+        "function": "nft_set_destroy",
+        "file": "net/netfilter/nf_tables_api.c",
+        "line": 5363,
+        "inline": false
+      },
+      {
+        "function": "nft_commit_release",
+        "file": "net/netfilter/nf_tables_api.c",
+        "line": 9544,
+        "inline": true
+      },
+      {
+        "function": "nf_tables_trans_destroy_work",
+        "file": "net/netfilter/nf_tables_api.c",
+        "line": 9587,
+        "inline": false
+      },
+      {
+        "function": "process_one_work",
+        "file": "kernel/workqueue.c",
+        "line": 2657,
+        "inline": true
+      },
+      {
+        "function": "process_scheduled_works",
+        "file": "kernel/workqueue.c",
+        "line": 2734,
+        "inline": false
+      },
+      {
+        "function": "worker_thread",
+        "file": "kernel/workqueue.c",
+        "line": 2815,
+        "inline": false
+      },
+      {
+        "function": "kthread",
+        "file": "kernel/kthread.c",
+        "line": 388,
+        "inline": false
+      },
+      {
+        "function": "ret_from_fork",
+        "file": "arch/x86/kernel/process.c",
+        "line": 152,
+        "inline": false
+      },
+      {
+        "function": "ret_from_fork_asm",
+        "file": "arch/x86/entry/entry_64.S",
+        "line": 293,
+        "inline": false
+      }
+    ],
+    "registers": {
+      "CPU": "0",
+      "PID": "8",
+      "RIP": "0010",
+      "RSP": "0018",
+      "EFLAGS": "00010293",
+      "RAX": "ffffffff88dbbdab",
+      "RBX": "ffff88807dea5cf0",
+      "RCX": "ffff88801b655a00",
+      "RDX": "0000000000000000",
+      "RSI": "ffff88807dea5c00",
+      "RDI": "ffff88804f518628",
+      "RBP": "ffffc900000d7bb0",
+      "R08": "ffff88801b655a00",
+      "R09": "000000000000000f",
+      "R10": "0000000000000020",
+      "R11": "0000000000000000",
+      "R12": "ffff88807dea5cc0",
+      "R13": "dffffc0000000000",
+      "R14": "ffff88807dea5d10",
+      "R15": "dffffc0000000000",
+      "FS": "0000000000000000",
+      "CS": "0010",
+      "DS": "0000",
+      "ES": "0000",
+      "CR0": "0000000080050033",
+      "CR2": "0000200000001200",
+      "CR3": "000000002c432000",
+      "CR4": "00000000003506f0"
+    },
+    "crash_function": "nft_pipapo_destroy",
+    "crash_file": "net/netfilter/nft_set_pipapo.c:2389"
+  },
+  "data_structures": [],
+  "error_codes": [],
+  "key_addresses": {},
+  "reproducer": {
+    "available": false,
+    "language": null,
+    "source": null,
+    "syzbot_url": "https://syzkaller.appspot.com/bug?extid=b338ce808595248a409a",
+    "key_operations": []
+  },
+  "additional_messages": [
+    "怀疑补丁集：\n047e813324eac2ac60cddfb58bcdbd0144eadb09 netfilter: nft_set_pipapo: don't leak bad clone into future transaction\n744dc9a47a8458ed49becd6123a092c7dae82b8b netfilter: nft_set_pipapo: move cloning of match info to insert/removal path\nfad1685df350faed5927c33e991df8c9d948ae20 netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone\n840daa6bc4d12a57533d9bbcf348469bc15aa0b4 netfilter: nft_set_pipapo: merge deactivate helper into caller\n8e264996d95f9b897e95c92ba0d71ff0e3246482 netfilter: nft_set_pipapo: prepare walk function for on-demand clone\n7583b0d84ca272dc2e183f83b5395f5061444efa netfilter: nft_set_pipapo: make pipapo_clone helper return NULL\ndde6b54848a5169baac365ef6ac1166899ac2396 netfilter: nft_set_pipapo: move prove_locking helper around\n385e2a9360cc6edf9562cf8abcc4a0f18c199890 netfilter: nft_set_pipapo: use GFP_KERNEL for insertions\n\n问题信息：\n社区LTS分支6.1 5.15 6.6均出现此问题，但6.11和主线没出现\n参考社区syzkaller：https://syzkaller.appspot.com/bug?extid=b338ce808595248a409a\n\n本地仓库分支：\n6.6：linux-6.6.y\n主线: master\n"
+  ],
+  "constraints": [
+    "仅静态代码、Git 历史与公开报告分析；禁止复现、编译运行测试或执行 reproducer。",
+    "全部新产物限 nft_warn/；保留 stack 和 analyse.md 原样。"
+  ],
+  "repository": {
+    "head": "8b73de7da85fde281a385e0b26eda9bffd3ca477",
+    "version": "6.6.156"
+  }
+}

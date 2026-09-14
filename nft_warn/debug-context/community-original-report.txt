@@ -1,0 +1,30 @@
+usb 4-1: ath9k_htc: USB layer deinitialized
+------------[ cut here ]------------
+WARNING: CPU: 0 PID: 8 at net/netfilter/nft_set_pipapo.c:2389 nft_pipapo_destroy+0x84b/0x8b0 net/netfilter/nft_set_pipapo.c:2389
+Modules linked in:
+CPU: 0 PID: 8 Comm: kworker/0:0 Not tainted syzkaller #0
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 07/24/2026
+Workqueue: events nf_tables_trans_destroy_work
+RIP: 0010:nft_pipapo_destroy+0x84b/0x8b0 net/netfilter/nft_set_pipapo.c:2389
+Code: 00 00 48 83 c4 50 5b 41 5c 41 5d 41 5e 41 5f 5d c3 e8 89 b4 ab f8 e9 d3 f9 ff ff e8 7f b4 ab f8 e9 6c fe ff ff e8 75 b4 ab f8 <0f> 0b e9 16 f8 ff ff 44 89 f1 80 e1 07 80 c1 03 38 c1 0f 8c e3 f9
+RSP: 0018:ffffc900000d79d8 EFLAGS: 00010293
+RAX: ffffffff88dbbdab RBX: ffff88807dea5cf0 RCX: ffff88801b655a00
+RDX: 0000000000000000 RSI: ffff88807dea5c00 RDI: ffff88804f518628
+RBP: ffffc900000d7bb0 R08: ffff88801b655a00 R09: 000000000000000f
+R10: 0000000000000020 R11: 0000000000000000 R12: ffff88807dea5cc0
+R13: dffffc0000000000 R14: ffff88807dea5d10 R15: dffffc0000000000
+FS:  0000000000000000(0000) GS:ffff8880b8e00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 0000200000001200 CR3: 000000002c432000 CR4: 00000000003506f0
+Call Trace:
+ <TASK>
+ nft_set_destroy+0x489/0xa20 net/netfilter/nf_tables_api.c:5363
+ nft_commit_release net/netfilter/nf_tables_api.c:9544 [inline]
+ nf_tables_trans_destroy_work+0xb2d/0x11b0 net/netfilter/nf_tables_api.c:9587
+ process_one_work kernel/workqueue.c:2657 [inline]
+ process_scheduled_works+0xa60/0x1600 kernel/workqueue.c:2734
+ worker_thread+0xa5e/0xfe0 kernel/workqueue.c:2815
+ kthread+0x2fa/0x390 kernel/kthread.c:388
+ ret_from_fork+0x48/0x80 arch/x86/kernel/process.c:152
+ ret_from_fork_asm+0x11/0x20 arch/x86/entry/entry_64.S:293
+ </TASK>

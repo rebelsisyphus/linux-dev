@@ -1,0 +1,1 @@
+[agent-0] DONE: T1/T2 eliminated as primary attribution; T4 GC ownership defect confirmed. Result written.

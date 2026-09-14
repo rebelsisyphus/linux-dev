@@ -1,0 +1,46 @@
+{
+  "agent_id": "agent-0",
+  "agent_type": "code",
+  "theory_id": "T1",
+  "task_description": "Analyze T1 and T2 in local linux-6.6.y and compare mainline code as needed; prove the exact warning mechanism and complete call/data flow.",
+  "functions_to_load": [
+    "nft_pipapo_destroy",
+    "nft_pipapo_abort",
+    "nft_pipapo_commit",
+    "nft_pipapo_insert",
+    "nft_pipapo_remove",
+    "nft_set_destroy",
+    "nft_commit_release",
+    "nf_tables_trans_destroy_work"
+  ],
+  "questions_to_answer": [
+    "What exact invariant does the supplied WARN check?",
+    "Which concrete accepted request / abort / deletion path violates it, and what is ruled out?",
+    "Can the supplied stack identify a unique cause without a reproducer or exact kernel revision?",
+    "Does current HEAD remain affected? What are precise source line references and impacts?"
+  ],
+  "instructions": [
+    "仅静态代码、Git 历史与公开报告分析；禁止复现、编译运行测试或执行 reproducer。",
+    "全部新产物限 nft_warn/；保留 stack 和 analyse.md 原样。",
+    "Read your /home/sisyphus/code/review-prompts/kernel/agent/debug-code.md and relevant mandatory kernel skill/context.",
+    "Do not spawn further agents. Write agent-N-result.json and progress agent-N-status.txt under nft_warn/debug-context/.",
+    "Treat report notes as hypotheses, not verified facts. Supply source line and commit evidence, scope limits, and false-positive verification."
+  ],
+  "context_from_bug": {
+    "crash_function": "nft_pipapo_destroy",
+    "crash_file": "net/netfilter/nft_set_pipapo.c:2389",
+    "call_trace_summary": [
+      "nft_set_destroy",
+      "nft_commit_release",
+      "nf_tables_trans_destroy_work",
+      "process_one_work",
+      "process_scheduled_works",
+      "worker_thread",
+      "kthread",
+      "ret_from_fork",
+      "ret_from_fork_asm"
+    ],
+    "reproducer_summary": "No local reproducer; user forbids reproduction."
+  },
+  "context_from_prior_agents": []
+}

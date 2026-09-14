@@ -1,0 +1,52 @@
+{
+  "agent_id": "agent-1",
+  "agent_type": "commits",
+  "theory_id": "T3",
+  "task_description": "Investigate all eight hashes verbatim in bug additional_messages, plus other directly relevant upstream fixes; verify mainline ancestry, stable integration and dependencies. Coordinate code findings with agent-0.",
+  "commit_search_criteria": {
+    "symbol_patterns": [
+      "nft_pipapo_destroy",
+      "pipapo_clone"
+    ],
+    "subject_patterns": [
+      "pipapo",
+      "clone",
+      "dirty"
+    ],
+    "path_patterns": [
+      "net/netfilter/nft_set_pipapo.c",
+      "net/netfilter/nf_tables_api.c"
+    ],
+    "direction": "both"
+  },
+  "questions_to_answer": [
+    "Which is the direct fix for this warning? Which are preparation/refactors/secondary fixes?",
+    "Are the provided hashes upstream commits and present in master and current linux-6.6.y?",
+    "What exact mechanisms, dependencies and ordering apply if considering a backport, without applying it?",
+    "Can version differences claimed in analyse.md be verified rather than assumed?"
+  ],
+  "instructions": [
+    "仅静态代码、Git 历史与公开报告分析；禁止复现、编译运行测试或执行 reproducer。",
+    "全部新产物限 nft_warn/；保留 stack 和 analyse.md 原样。",
+    "Read your /home/sisyphus/code/review-prompts/kernel/agent/debug-commits.md and relevant mandatory kernel skill/context.",
+    "Do not spawn further agents. Write agent-N-result.json and progress agent-N-status.txt under nft_warn/debug-context/.",
+    "Treat report notes as hypotheses, not verified facts. Supply source line and commit evidence, scope limits, and false-positive verification."
+  ],
+  "context_from_bug": {
+    "crash_function": "nft_pipapo_destroy",
+    "crash_file": "net/netfilter/nft_set_pipapo.c:2389",
+    "call_trace_summary": [
+      "nft_set_destroy",
+      "nft_commit_release",
+      "nf_tables_trans_destroy_work",
+      "process_one_work",
+      "process_scheduled_works",
+      "worker_thread",
+      "kthread",
+      "ret_from_fork",
+      "ret_from_fork_asm"
+    ],
+    "reproducer_summary": "No local reproducer; user forbids reproduction."
+  },
+  "context_from_prior_agents": []
+}

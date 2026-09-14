@@ -1,0 +1,47 @@
+{
+  "retrieved_at": "2026-09-14; web index snapshots can be older than retrieval date",
+  "scope": "Read-only public reports; no tests requested or run",
+  "sources": [
+    {
+      "url": "https://syzkaller.appspot.com/bug?extid=b338ce808595248a409a",
+      "facts": [
+        "linux-6.6.y warning in nft_pipapo_destroy with nf_tables_trans_destroy_work stack",
+        "Original report linked to 2026-08-10; no 6.6 reproducer listed in retrieved snapshot"
+      ]
+    },
+    {
+      "url": "https://groups.google.com/g/syzkaller-lts-bugs/c/THgivXwy8iU/m/5LdDQynRDAAJ",
+      "facts": [
+        "Original mail identifies d27334b2888c Linux 6.6.151 and clang 22.1.8",
+        "Original stack matches supplied CPU, PID, registers and instruction bytes",
+        "Thread includes linux-5.15.y aabd761612db Linux 5.15.215 and linux-6.1.y e4f7d8be268e Linux 6.1.182 reports"
+      ]
+    },
+    {
+      "url": "https://syzkaller.appspot.com/bug?extid=fb0e154ca75b0e246d73",
+      "facts": [
+        "Related 6.1 report, origin:lts-only label",
+        "Existing community 2026-08-27 comparison: linux-6.1.y 05208478041c warns; upstream 73e3f0710014 did not crash",
+        "This single existing community test is not proof all mainline scenarios are unaffected"
+      ]
+    },
+    {
+      "url": "https://syzkaller.appspot.com/bug?extid=68ef5e861ea09f54325f",
+      "facts": [
+        "Related 5.15 report"
+      ]
+    },
+    {
+      "url": "https://kernel.googlesource.com/pub/scm/linux/security/vulns/+/999ba78cd51962f21bcabc54b2093c12759db34d/cve/published/2026/CVE-2026-72252.mbox",
+      "facts": [
+        "Official advisory maps bad-clone fix upstream 47e65eff5069 to 6.6 stable 047e813324ea, first fixed version 6.6.148.",
+        "This advisory concerns invalid clone state, and alone does not identify the supplied later gc_head warning."
+      ]
+    }
+  ],
+  "original_report_verification": {
+    "url": "https://syzkaller.appspot.com/text?tag=CrashReport&x=1575e2c6580000",
+    "local_stack_verbatim_substring": false,
+    "local_stack_whitespace_normalized_substring": true
+  }
+}

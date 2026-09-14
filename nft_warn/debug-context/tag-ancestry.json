@@ -1,0 +1,68 @@
+[
+  {
+    "command": "git merge-base --is-ancestor 532aec7e878b527fcee8877350ab5c5341789626 v6.9",
+    "exit_code": 1,
+    "meaning": "not ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 532aec7e878b527fcee8877350ab5c5341789626 v6.10-rc1",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 532aec7e878b527fcee8877350ab5c5341789626 v6.11",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 532aec7e878b527fcee8877350ab5c5341789626 master",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 532aec7e878b527fcee8877350ab5c5341789626 HEAD",
+    "exit_code": 1,
+    "meaning": "not ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 8b8a2417558c632f249abebde97adf8c46540de2 master",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 8b8a2417558c632f249abebde97adf8c46540de2 HEAD",
+    "exit_code": 1,
+    "meaning": "not ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 047e813324eac2ac60cddfb58bcdbd0144eadb09 v6.6.147",
+    "exit_code": 1,
+    "meaning": "not ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 047e813324eac2ac60cddfb58bcdbd0144eadb09 v6.6.148",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 7864c667aed01a58b87ca518a631322cd0ac34c0 v6.6.129",
+    "exit_code": 1,
+    "meaning": "not ancestor",
+    "stderr": ""
+  },
+  {
+    "command": "git merge-base --is-ancestor 7864c667aed01a58b87ca518a631322cd0ac34c0 v6.6.130",
+    "exit_code": 0,
+    "meaning": "ancestor",
+    "stderr": ""
+  }
+]

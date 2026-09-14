@@ -1,0 +1,130 @@
+[
+  {
+    "provided": "385e2a9360cc6edf9562cf8abcc4a0f18c199890",
+    "upstream": "5b651783d80b97167ecd27dc6a4408c694873902",
+    "subject": "netfilter: nft_set_pipapo: use GFP_KERNEL for insertions",
+    "upstream_meta": "5b651783d80b97167ecd27dc6a4408c694873902 2024-02-15 2024-02-21 netfilter: nft_set_pipapo: use GFP_KERNEL for insertions",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "dde6b54848a5169baac365ef6ac1166899ac2396",
+    "upstream": "a590f4760922acaa2d2b55a88004a38eecdd6412",
+    "subject": "netfilter: nft_set_pipapo: move prove_locking helper around",
+    "upstream_meta": "a590f4760922acaa2d2b55a88004a38eecdd6412 2024-04-25 2024-05-06 netfilter: nft_set_pipapo: move prove_locking helper around",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "7583b0d84ca272dc2e183f83b5395f5061444efa",
+    "upstream": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+    "subject": "netfilter: nft_set_pipapo: make pipapo_clone helper return NULL",
+    "upstream_meta": "80efd2997fb9343a0283cf3cac5524a4595c8ff4 2024-04-25 2024-05-06 netfilter: nft_set_pipapo: make pipapo_clone helper return NULL",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "8e264996d95f9b897e95c92ba0d71ff0e3246482",
+    "upstream": "6c108d9bee448a850b03e682836bfe91fca645cb",
+    "subject": "netfilter: nft_set_pipapo: prepare walk function for on-demand clone",
+    "upstream_meta": "6c108d9bee448a850b03e682836bfe91fca645cb 2024-04-25 2024-05-06 netfilter: nft_set_pipapo: prepare walk function for on-demand clone",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "840daa6bc4d12a57533d9bbcf348469bc15aa0b4",
+    "upstream": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+    "subject": "netfilter: nft_set_pipapo: merge deactivate helper into caller",
+    "upstream_meta": "c5444786d0ea2417a5e2cee7bd67137fc8bad687 2024-04-25 2024-05-06 netfilter: nft_set_pipapo: merge deactivate helper into caller",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "fad1685df350faed5927c33e991df8c9d948ae20",
+    "upstream": "a238106703ab4ae1090b86eba128815b8626d8f1",
+    "subject": "netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone",
+    "upstream_meta": "a238106703ab4ae1090b86eba128815b8626d8f1 2024-04-25 2024-05-10 netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "744dc9a47a8458ed49becd6123a092c7dae82b8b",
+    "upstream": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+    "subject": "netfilter: nft_set_pipapo: move cloning of match info to insert/removal path",
+    "upstream_meta": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc 2024-04-25 2024-05-10 netfilter: nft_set_pipapo: move cloning of match info to insert/removal path",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  },
+  {
+    "provided": "047e813324eac2ac60cddfb58bcdbd0144eadb09",
+    "upstream": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+    "subject": "netfilter: nft_set_pipapo: don't leak bad clone into future transaction",
+    "upstream_meta": "47e65eff50691f0a5b79d325e28d83ec1da43bcf 2026-06-16 2026-06-30 netfilter: nft_set_pipapo: don't leak bad clone into future transaction",
+    "ancestry": {
+      "HEAD": {
+        "provided": true,
+        "upstream": false
+      },
+      "master": {
+        "provided": false,
+        "upstream": true
+      }
+    }
+  }
+]

@@ -1,0 +1,834 @@
+{
+  "version": "1.0",
+  "bug_confirmed": true,
+  "confirmation_scope": "Confirmed static control-flow and ownership defect matching the observed assertion; exact original operation sequence not identified and no runtime validation performed.",
+  "bug_summary": "原 T1 将告警归因于 dirty clone 的假设不匹配实际源码：6.6.151 d27334b2888c 与当前 6.6.156 HEAD 8b73de7da85fde281a385e0b26eda9bffd3ca477 在 nft_set_pipapo.c 和 nf_tables_api.c 上无差异，2389 行检查的是 gc_head 非空。静态代码确认真正的队列生命周期缺陷：pipapo_gc_scan 先无条件分配并挂接 GC 对象，即使未发现过期元素也保留空对象；nft_pipapo_commit 随后可因 dirty==false 提前返回，跳过唯一的 pipapo_gc_queue 清理。GC 对象持有 set 和 net 引用，集合销毁发现队列非空并告警，且未释放这些引用。当前本地代码仍有该缺陷。现有原始输入不能唯一识别用户态操作或证明某一具体请求实际发生。",
+  "root_cause": {
+    "description": "pipapo_gc_scan links a newly allocated GC transaction before finding expired elements. When no element sets dirty, nft_pipapo_commit returns before the sole pipapo_gc_queue drain. Set teardown later warns about gc_head and leaves GC/set/net references unreleased. Stable GC split 7864 was applied to dirty-gated lifecycle, unlike its upstream prerequisite state.",
+    "category": "logic",
+    "affected_subsystem": "net/netfilter/nft_set_pipapo.c",
+    "interacting_subsystem": "net/netfilter/nf_tables_api.c"
+  },
+  "race_timeline": [],
+  "is_race": false,
+  "affected_functions": [
+    {
+      "name": "pipapo_maybe_clone",
+      "location": "net/netfilter/nft_set_pipapo.c:1243",
+      "key_observations": [
+        "Existing clone is returned as-is; otherwise copies match under transaction mutex."
+      ]
+    },
+    {
+      "name": "nft_pipapo_insert",
+      "location": "net/netfilter/nft_set_pipapo.c:1267",
+      "key_observations": [
+        "Rejects missing or ERR clone. Sets dirty before table mutation; successful insertion sets MOD. NEW failure directly aborts; MOD failure sets ERR for transaction rollback."
+      ]
+    },
+    {
+      "name": "pipapo_clone",
+      "location": "net/netfilter/nft_set_pipapo.c:1414",
+      "key_observations": [
+        "Successful clone state is NEW; failures unwind allocations and return NULL."
+      ]
+    },
+    {
+      "name": "pipapo_rules_same_key",
+      "location": "net/netfilter/nft_set_pipapo.c:1531",
+      "key_observations": [
+        "Empty table f->rules==0 returns zero without element access."
+      ]
+    },
+    {
+      "name": "pipapo_drop",
+      "location": "net/netfilter/nft_set_pipapo.c:1639",
+      "key_observations": [
+        "Removes lookup/mapping references before GC element reclaim is queued."
+      ]
+    },
+    {
+      "name": "pipapo_gc_scan",
+      "location": "net/netfilter/nft_set_pipapo.c:1695",
+      "key_observations": [
+        "Allocates and links first GC object before scanning. Marks dirty only when expired element found. Can return with linked count-zero object and dirty false."
+      ]
+    },
+    {
+      "name": "pipapo_gc_queue",
+      "location": "net/netfilter/nft_set_pipapo.c:1766",
+      "key_observations": [
+        "Only purge of priv->gc_head: list_del followed by nft_trans_gc_queue_sync_done. Catchall allocation failure does not skip this purge."
+      ]
+    },
+    {
+      "name": "pipapo_free_match",
+      "location": "net/netfilter/nft_set_pipapo.c:1801",
+      "key_observations": [
+        "Frees scratch and per-field tables; does not drain set GC list or destroy element objects."
+      ]
+    },
+    {
+      "name": "pipapo_reclaim_match",
+      "location": "net/netfilter/nft_set_pipapo.c:1818",
+      "key_observations": [
+        "RCU callback frees old table storage after replacement; no GC-list ownership."
+      ]
+    },
+    {
+      "name": "nft_pipapo_commit",
+      "location": "net/netfilter/nft_set_pipapo.c:1841",
+      "key_observations": [
+        "Scan occurs before !dirty early return. Actual publication clears clone and dirty, then always purges GC list."
+      ]
+    },
+    {
+      "name": "nft_pipapo_abort",
+      "location": "net/netfilter/nft_set_pipapo.c:1866",
+      "key_observations": [
+        "No GC scan or GC queue cleanup; dirty-false clone remains; dirty-true clone is freed."
+      ]
+    },
+    {
+      "name": "nft_pipapo_deactivate",
+      "location": "net/netfilter/nft_set_pipapo.c:1908",
+      "key_observations": [
+        "Ensures clone exists and is not ERR before finding element; changes generation activity."
+      ]
+    },
+    {
+      "name": "nft_pipapo_remove",
+      "location": "net/netfilter/nft_set_pipapo.c:2086",
+      "key_observations": [
+        "Removes from clone and sets dirty true only when mapped element found; no GC list creation."
+      ]
+    },
+    {
+      "name": "nft_pipapo_walk",
+      "location": "net/netfilter/nft_set_pipapo.c:2195",
+      "key_observations": [
+        "UPDATE_CLONE ensures clone; UPDATE may select clone or committed match; READ uses RCU."
+      ]
+    },
+    {
+      "name": "nft_pipapo_init",
+      "location": "net/netfilter/nft_set_pipapo.c:2282",
+      "key_observations": [
+        "Initial clone allocated, dirty false, gc_head initialized before success. Thus clone presence does not imply dirty."
+      ]
+    },
+    {
+      "name": "nft_set_pipapo_match_destroy",
+      "location": "net/netfilter/nft_set_pipapo.c:2355",
+      "key_observations": [
+        "Destroys distinct element references from last mapping field."
+      ]
+    },
+    {
+      "name": "nft_pipapo_destroy",
+      "location": "net/netfilter/nft_set_pipapo.c:2382",
+      "key_observations": [
+        "Warns on nonempty gc_head; frees match metadata first; destroys elements only through clone when clone exists; no GC purge."
+      ]
+    },
+    {
+      "name": "nft_setelem_parse_flags",
+      "location": "net/netfilter/nf_tables_api.c:6048",
+      "key_observations": [
+        "Catchall flag accepted subject to interval-end incompatibility; not generally prohibited for pipapo-compatible sets."
+      ]
+    },
+    {
+      "name": "nft_setelem_insert",
+      "location": "net/netfilter/nf_tables_api.c:6580",
+      "key_observations": [
+        "Catchall uses generic list insertion, bypassing set->ops->insert and pipapo dirty update."
+      ]
+    },
+    {
+      "name": "nft_add_set_elem",
+      "location": "net/netfilter/nf_tables_api.c:6741",
+      "key_observations": [
+        "Successful insertion appends NEWSETELEM transaction regardless of catchall or backend insertion."
+      ]
+    },
+    {
+      "name": "nf_tables_newsetelem",
+      "location": "net/netfilter/nf_tables_api.c:7122",
+      "key_observations": [
+        "Looks up active table/set and invokes nft_add_set_elem; rejects bound constant or anonymous sets."
+      ]
+    },
+    {
+      "name": "nft_set_commit_update",
+      "location": "net/netfilter/nf_tables_api.c:10143",
+      "key_observations": [
+        "Invokes commit for pending non-dead set; dead sets intentionally skipped."
+      ]
+    },
+    {
+      "name": "nft_set_abort_update",
+      "location": "net/netfilter/nf_tables_api.c:10535",
+      "key_observations": [
+        "Invokes abort for sets collected from element transaction records; no GC queue cleanup."
+      ]
+    },
+    {
+      "name": "nf_tables_commit",
+      "location": "net/netfilter/nf_tables_api.c:10173",
+      "key_observations": [
+        "NEWSETELEM and DELSETELEM enqueue set update even for catchall; DELSET marks dead and removes RCU list link before deferred destruction."
+      ]
+    },
+    {
+      "name": "__nf_tables_abort",
+      "location": "net/netfilter/nf_tables_api.c:10549",
+      "key_observations": [
+        "Reverses element operations, runs set abort update, then waits RCU before freeing aborted objects. No pipapo GC scan."
+      ]
+    },
+    {
+      "name": "nf_tables_valid_genid",
+      "location": "net/netfilter/nf_tables_api.c:10787",
+      "key_observations": [
+        "Takes commit_mutex and retains it until commit/abort completion."
+      ]
+    },
+    {
+      "name": "nft_delset",
+      "location": "net/netfilter/nf_tables_api.c:677",
+      "key_observations": [
+        "Creates DELSET transaction and deactivates next-generation visibility."
+      ]
+    },
+    {
+      "name": "nf_tables_delset",
+      "location": "net/netfilter/nf_tables_api.c:5368",
+      "key_observations": [
+        "Checks set use and nonrecursive restriction; accepted deletion invokes nft_delset."
+      ]
+    },
+    {
+      "name": "nf_tables_commit_release",
+      "location": "net/netfilter/nf_tables_api.c:10012",
+      "key_observations": [
+        "Moves pending transaction list to destruction list, schedules worker, releases transaction mutex."
+      ]
+    },
+    {
+      "name": "nf_tables_trans_destroy_work",
+      "location": "net/netfilter/nf_tables_api.c:9571",
+      "key_observations": [
+        "Splices global destruction list under spinlock, waits synchronize_rcu, invokes nft_commit_release."
+      ]
+    },
+    {
+      "name": "nft_commit_release",
+      "location": "net/netfilter/nf_tables_api.c:9520",
+      "key_observations": [
+        "DELSET/DESTROYSET directly invoke nft_set_destroy."
+      ]
+    },
+    {
+      "name": "nft_set_destroy",
+      "location": "net/netfilter/nf_tables_api.c:5353",
+      "key_observations": [
+        "Checks use count, calls backend destroy, destroys catchalls, drops base set reference."
+      ]
+    },
+    {
+      "name": "nft_trans_gc_alloc",
+      "location": "net/netfilter/nf_tables_api.c:9852",
+      "key_observations": [
+        "Zero allocation means count zero; maybe_get_net and refcount_inc(set->refs) establish ownership."
+      ]
+    },
+    {
+      "name": "nft_trans_gc_queue_sync_done",
+      "location": "net/netfilter/nf_tables_api.c:9929",
+      "key_observations": [
+        "Empty GC object destroyed synchronously; populated object freed after RCU. Requires commit lock."
+      ]
+    },
+    {
+      "name": "nft_trans_gc_destroy",
+      "location": "net/netfilter/nf_tables_api.c:9777",
+      "key_observations": [
+        "Drops set and net references, then frees GC transaction."
+      ]
+    },
+    {
+      "name": "nft_set_put",
+      "location": "net/netfilter/nf_tables_api.c:5345",
+      "key_observations": [
+        "Frees name and set only once refcount reaches zero."
+      ]
+    },
+    {
+      "name": "nfnetlink_rcv_batch",
+      "location": "net/netfilter/nfnetlink.c:371",
+      "key_observations": [
+        "Routes batch commands through registered callbacks, calls subsystem commit for completed successful batch or abort on failure."
+      ]
+    }
+  ],
+  "suspect_commit": {
+    "sha": "7864c667aed01a58b87ca518a631322cd0ac34c0",
+    "subject": "netfilter: nft_set_pipapo: split gc into unlink and reclaim phase",
+    "author": "Florian Westphal <fw@strlen.de>",
+    "description": "此6.6回移在保留dirty gate和commit末尾克隆的旧架构上引入gc_head，静态可达空GC泄漏路径自此出现；首次包含v6.6.130。",
+    "confidence": "high",
+    "link_tags": [
+      "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=7864c667aed01a58b87ca518a631322cd0ac34c0"
+    ]
+  },
+  "related_commits": [
+    {
+      "sha": "5b651783d80b97167ecd27dc6a4408c694873902",
+      "stable_sha": "385e2a9360cc6edf9562cf8abcc4a0f18c199890",
+      "subject": "netfilter: nft_set_pipapo: use GFP_KERNEL for insertions",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：pipapo_get接受gfp_t，事务插入/删除用GFP_KERNEL，RCU GET仍GFP_ATOMIC；不处理GC排空。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/01-5b651783d80b.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=5b651783d80b97167ecd27dc6a4408c694873902"
+    },
+    {
+      "sha": "a590f4760922acaa2d2b55a88004a38eecdd6412",
+      "stable_sha": "dde6b54848a5169baac365ef6ac1166899ac2396",
+      "subject": "netfilter: nft_set_pipapo: move prove_locking helper around",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：前移nft_pipapo_transaction_mutex_held定义，为maybe_clone使用；无行为修复。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/02-a590f4760922.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a590f4760922acaa2d2b55a88004a38eecdd6412"
+    },
+    {
+      "sha": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+      "stable_sha": "7583b0d84ca272dc2e183f83b5395f5061444efa",
+      "subject": "netfilter: nft_set_pipapo: make pipapo_clone helper return NULL",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：pipapo_clone失败返回NULL并调整所有调用者；不处理GC队列。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/03-80efd2997fb9.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=80efd2997fb9343a0283cf3cac5524a4595c8ff4"
+    },
+    {
+      "sha": "6c108d9bee448a850b03e682836bfe91fca645cb",
+      "stable_sha": "8e264996d95f9b897e95c92ba0d71ff0e3246482",
+      "subject": "netfilter: nft_set_pipapo: prepare walk function for on-demand clone",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：walk拆分READ/UPDATE锁域，使UPDATE后续能GFP_KERNEL克隆；不处理GC队列。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/04-6c108d9bee44.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=6c108d9bee448a850b03e682836bfe91fca645cb"
+    },
+    {
+      "sha": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+      "stable_sha": "840daa6bc4d12a57533d9bbcf348469bc15aa0b4",
+      "subject": "netfilter: nft_set_pipapo: merge deactivate helper into caller",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：合并deactivate helper；stable因旧void *元素API有上下文适配。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/05-c5444786d0ea.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c5444786d0ea2417a5e2cee7bd67137fc8bad687"
+    },
+    {
+      "sha": "a238106703ab4ae1090b86eba128815b8626d8f1",
+      "stable_sha": "fad1685df350faed5927c33e991df8c9d948ae20",
+      "subject": "netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "准备：pipapo_get显式接受match，GET用RCU live match，insert/deactivate用clone；stable另合入flush直接改active的适配。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/06-a238106703ab.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a238106703ab4ae1090b86eba128815b8626d8f1"
+    },
+    {
+      "sha": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+      "stable_sha": "744dc9a47a8458ed49becd6123a092c7dae82b8b",
+      "subject": "netfilter: nft_set_pipapo: move cloning of match info to insert/removal path",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "结构修复：将commit/abort时可能失败的克隆前置到可失败的insert/deactivate/walk；消除旧OOM遗留GC路径，但仍保留!dirty提前返回，未修复本报告空GC路径。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/07-3f1d886cc7c3.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc"
+    },
+    {
+      "sha": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+      "stable_sha": "047e813324eac2ac60cddfb58bcdbd0144eadb09",
+      "subject": "netfilter: nft_set_pipapo: don't leak bad clone into future transaction",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "另一个内存分配失败修复：NEW/MOD/ERR阻止不完整clone被继续使用或跨事务复用。不是本报告gc_head非空告警的直接修复，且已合入。",
+      "confidence": "high",
+      "ancestry": {
+        "HEAD": {
+          "provided": true,
+          "upstream": false
+        },
+        "master": {
+          "provided": false,
+          "upstream": true
+        }
+      },
+      "raw_patch": "nft_warn/upstream-patches/08-47e65eff5069.patch",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=47e65eff50691f0a5b79d325e28d83ec1da43bcf"
+    },
+    {
+      "sha": "7864c667aed01a58b87ca518a631322cd0ac34c0",
+      "subject": "netfilter: nft_set_pipapo: split gc into unlink and reclaim phase",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "此6.6回移在保留dirty gate和commit末尾克隆的旧架构上引入gc_head，静态可达空GC泄漏路径自此出现；首次包含v6.6.130。",
+      "confidence": "high",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=7864c667aed01a58b87ca518a631322cd0ac34c0"
+    },
+    {
+      "sha": "9df95785d3d8302f7c066050117b04cd3c2048c2",
+      "subject": "netfilter: nft_set_pipapo: split gc into unlink and reclaim phase",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "7864的主线来源，主线早已包含532/3f1；修复元素仍暴露给新读者时即调用RCU释放的问题。其主线语义前提未全部回移，不能把此补丁一概撤销。",
+      "confidence": "high",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=9df95785d3d8302f7c066050117b04cd3c2048c2"
+    },
+    {
+      "sha": "532aec7e878b527fcee8877350ab5c5341789626",
+      "subject": "netfilter: nft_set_pipapo: remove dirty flag",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "当前缺失且与本告警直接相关：删除commit的!dirty提前返回；非NULL clone经扫描后必发布match并排空GC；同时移除init预建clone、abort dirty gate及dirty字段。首次包含v6.10-rc1，v6.9不含；HEAD缺失。",
+      "confidence": "high",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=532aec7e878b527fcee8877350ab5c5341789626"
+    },
+    {
+      "sha": "8b8a2417558c632f249abebde97adf8c46540de2",
+      "subject": "netfilter: nft_set_pipapo: prepare destroy function for on-demand clone",
+      "author": "Florian Westphal <fw@strlen.de>",
+      "relevance": "配套生命周期前置补丁，clone==NULL时从match销毁元素，避免按需clone后的元素泄漏。不能单独修复本gc_head告警。HEAD缺失。",
+      "confidence": "high",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=8b8a2417558c632f249abebde97adf8c46540de2"
+    },
+    {
+      "sha": "fb7fb4016300ac622c964069e286dc83166a5d52",
+      "subject": "netfilter: nf_tables: clone set on flush only",
+      "author": "Pablo Neira Ayuso <pablo@netfilter.org>",
+      "relevance": "已回移为e38f054f0af98224003e600545726fbd96379cfb，新增UPDATE_CLONE避免删除/卸载等路径在不可失败阶段分配；修复另一个nft_map_deactivate WARN，未移除dirty gate。",
+      "confidence": "high",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=fb7fb4016300ac622c964069e286dc83166a5d52"
+    }
+  ],
+  "evidence": [
+    {
+      "type": "invariant",
+      "description": "实际 WARN 表达式检查私有待处理 GC 列表为空，不检查 dirty、clone NULL、OOM 或元素内存有效性。函数名相同不能推定为历史 dirty 告警。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 2389,
+          "code": "WARN_ON_ONCE(!list_empty(&priv->gc_head));"
+        }
+      ]
+    },
+    {
+      "type": "confirmed_bug",
+      "theory_id": "T4",
+      "description": "扫描入口建立 GC 所有权之后，commit 的 !dirty 早退允许绕过唯一出队路径。队列的非空与实际待回收元素数不同：count==0 的 GC 对象也占用链表节点及引用。扫描无过期元素时不会设置 dirty，且初始化/仅控制平面 catchall 管理使 clone 非空、dirty 为假在结构上成立。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1704,
+          "code": "gc = nft_trans_gc_alloc(set, 0, GFP_KERNEL);\nif (!gc)\n\treturn;\n\nlist_add(&gc->list, &priv->gc_head);"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1736,
+          "code": "if (__nft_set_elem_expired(&e->ext, tstamp)) {\n\tpriv->dirty = true;"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1846,
+          "code": "if (!priv->clone)\n\treturn;\n\nif (time_after_eq(jiffies, priv->last_gc + nft_set_gc_interval(set)))\n\tpipapo_gc_scan(set, priv->clone);\n\nif (!priv->dirty)\n\treturn;"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1780,
+          "code": "list_for_each_entry_safe(gc, next, &priv->gc_head, list) {\n\tlist_del(&gc->list);\n\tnft_trans_gc_queue_sync_done(gc);\n}"
+        }
+      ]
+    },
+    {
+      "type": "call_flow",
+      "description": "控制平面存在已接受的操作类别在不设置 PIPAPO dirty 时仍登记 set commit：nf_tables_newsetelem -> nft_add_set_elem -> nft_setelem_insert 的 catchall 分支；成功通用 NEWSETELEM 记录使 nf_tables_commit -> nft_set_commit_update -> nft_pipapo_commit 被调用。此处仅说明现有函数关系和状态条件，不提供消息构造或操作步骤，也不宣称原报告执行了该类别。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 6587,
+          "code": "if (flags & NFT_SET_ELEM_CATCHALL)\n\tret = nft_setelem_catchall_insert(net, set, elem, ext);\nelse\n\tret = set->ops->insert(net, set, elem, ext);"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 7098,
+          "code": "nft_trans_elem(trans) = elem;\nnft_trans_commit_list_add_tail(ctx->net, trans);"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 10383,
+          "code": "if (te->set->ops->commit &&\n    list_empty(&te->set->pending_update)) {\n\tlist_add_tail(&te->set->pending_update,\n\t\t      &set_update_list);\n}"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 2328,
+          "code": "priv->clone = pipapo_clone(m);"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 2334,
+          "code": "priv->dirty = false;\n\nINIT_LIST_HEAD(&priv->gc_head);"
+        }
+      ]
+    },
+    {
+      "type": "ownership",
+      "description": "已确认的空 GC 对象会泄漏自身及 set/net 引用。告警后 backend destroy 没有遍历或回收 gc_head；nft_set_destroy 仅 nft_set_put 一次，无法抵消额外 GC 引用，故 set/name 分配及 net 引用仍被保留。对该已证明的空队列对象不应额外宣称元素 UAF、任意写或越界。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9862,
+          "code": "trans->net = maybe_get_net(net);"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9868,
+          "code": "refcount_inc(&set->refs);\ntrans->set = set;"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9779,
+          "code": "nft_set_put(trans->set);\nput_net(trans->net);\nkfree(trans);"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9933,
+          "code": "if (trans->count == 0) {\n\tnft_trans_gc_destroy(trans);\n\treturn;\n}"
+        }
+      ]
+    },
+    {
+      "type": "teardown",
+      "description": "现有堆栈对应集合删除提交后的延迟回收：nf_tables_commit 删除 set 的 RCU 可见链接 -> nf_tables_commit_release 调度 trans_destroy_work -> nf_tables_trans_destroy_work 在 synchronize_rcu 后 nft_commit_release -> nft_set_destroy -> nft_pipapo_destroy。等待 RCU 不能回收从未提交到 RCU 的私有 GC 对象。set->dead 导致不再调用 set commit 是现有销毁策略；它不会自行创建 GC 对象，故应定位较早的扫描/提交清理不一致。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 10370,
+          "code": "nft_trans_set(trans)->dead = 1;\nlist_del_rcu(&nft_trans_set(trans)->list);"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9583,
+          "code": "synchronize_rcu();"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 9542,
+          "code": "case NFT_MSG_DELSET:\ncase NFT_MSG_DESTROYSET:\n\tnft_set_destroy(&trans->ctx, nft_trans_set(trans));\n\tbreak;"
+        },
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 10150,
+          "code": "if (!set->ops->commit || set->dead)\n\tcontinue;"
+        }
+      ]
+    },
+    {
+      "type": "abort_and_error",
+      "description": "NEW/MOD/ERR 是 clone 错误隔离机制，不是 gc_head 清理机制。普通插入错误的 NEW 分支直接释放 clone，MOD 分支标记 ERR，后续事务 abort 撤销；这些函数本身不调用 pipapo_gc_scan，不会建立此 GC 节点。abort 无论 dirty 早退还是释放 clone，都不排空已遗留的 gc_head。因此它可保留既有问题，但不能据其存在把本 WARN 归因为历史坏 clone 缺陷。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1400,
+          "code": "if (m->state == NFT_PIPAPO_CLONE_NEW)\n\tnft_pipapo_abort(set); /* releases m */\nelse\n\tm->state = NFT_PIPAPO_CLONE_ERR;"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1870,
+          "code": "if (!priv->dirty)\n\treturn;\n\nif (!priv->clone)\n\treturn;\npriv->dirty = false;\npipapo_free_match(priv->clone);\npriv->clone = NULL;"
+        }
+      ]
+    },
+    {
+      "type": "mainline_comparison",
+      "description": "本地主线 master 的 commit 在 clone 非空时扫描后必定发布并调用 pipapo_gc_queue，没有 dirty 早退；无 clone 时在扫描前返回，不新增 GC。主线 init 不预建 clone，abort 只按 clone 存在判断。提交代理将这些语义对应到 532aec7e878b527fcee8877350ab5c5341789626 (remove dirty flag)；它修复的是此不一致所需的状态模型，而非单纯删 WARN。",
+      "code_snippets": [
+        {
+          "file": "master:net/netfilter/nft_set_pipapo.c",
+          "line": 1859,
+          "code": "if (!priv->clone)\n\treturn;\n\nif (time_after_eq(jiffies, priv->last_gc + nft_set_gc_interval(set)))\n\tpipapo_gc_scan(set, priv->clone);\n\nold = rcu_replace_pointer(priv->match, priv->clone,\n\t\t\t  nft_pipapo_transaction_mutex_held(set));\npriv->clone = NULL;\n\nif (old)\n\tcall_rcu(&old->rcu, pipapo_reclaim_match);\n\npipapo_gc_queue(set);"
+        }
+      ]
+    },
+    {
+      "type": "related_lifecycle_gap",
+      "description": "主线 8b8a2417558c632f249abebde97adf8c46540de2 的 destroy 语义需要配套：clone 存在则销毁 clone 中元素，否则销毁 match 中元素。当前分支缺少后者，已实现 on-demand commit 将 clone 置 NULL，销毁仅释放 match 表而未释放元素。单独补 remove dirty 不足以恢复全部主线所有权契约；该 destroy 缺口与 gc_head WARN 是不同问题，应作为相关依赖单独标注。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 2391,
+          "code": "m = rcu_dereference_protected(priv->match, true);\nif (m) {\n\trcu_barrier();\n\n\tfor_each_possible_cpu(cpu)\n\t\tpipapo_free_scratch(m, cpu);\n\tfree_percpu(m->scratch);\n\tpipapo_free_fields(m);\n\tkfree(m);\n\tpriv->match = NULL;\n}"
+        },
+        {
+          "file": "master:net/netfilter/nft_set_pipapo.c",
+          "line": 2391,
+          "code": "if (priv->clone) {\n\tnft_set_pipapo_match_destroy(ctx, set, priv->clone);\n\tpipapo_free_match(priv->clone);\n\tpriv->clone = NULL;\n} else {\n\tnft_set_pipapo_match_destroy(ctx, set, m);\n}"
+        }
+      ]
+    },
+    {
+      "type": "verification",
+      "description": "可达性反证检查通过：set->ops->commit 并不保证 dirty=true，因为 catchall 管理由通用 API 完成；init 保留 clone，故 clone 非空也不保证 dirty。GC 对象只有在发现过期元素时才触发 dirty，因此空扫描并不强制清理。commit_mutex 串行化状态操作，缺陷不依赖竞争窗口；析构 RCU 等待不能替代未执行的 GC 出队/put。检查所有 gc_head 的引用：init 一处初始化，scan 两处 list_add，queue 一处遍历 list_del，destroy 一处 WARN；无额外清理线程能遍历该私有队列。初始 GC 分配失败不新增节点；后续扩容失败发生在 dirty=true 之后，commit 会继续排队回收。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nf_tables_api.c",
+          "line": 10792,
+          "code": "mutex_lock(&nft_net->commit_mutex);"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1736,
+          "code": "if (__nft_set_elem_expired(&e->ext, tstamp)) {\n\tpriv->dirty = true;\n\n\tif (!nft_trans_gc_space(gc)) {"
+        }
+      ]
+    },
+    {
+      "type": "verification",
+      "description": "作者立场最强反驳：正常元素修改设置 dirty，GC 发现过期项也设置 dirty，故 commit 的早退似乎无害；回收还受 RCU 保护。审阅反证：通用 catchall 事务可登记 commit 却绕过 backend 插入；gc_scan 在发现过期项之前已经持有引用并入队。无过期项时 dirty 不变且提前返回；RCU 回调没有获得该 GC 对象。因此此生命周期缺陷保持 confirmed；但原始 stack 不提供实际请求类别、GC count、dirty 值或完整时间线，不把类别推断当作原始事故确证。",
+      "code_snippets": [
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1708,
+          "code": "list_add(&gc->list, &priv->gc_head);"
+        },
+        {
+          "file": "net/netfilter/nft_set_pipapo.c",
+          "line": 1852,
+          "code": "if (!priv->dirty)\n\treturn;"
+        }
+      ]
+    },
+    {
+      "type": "evidence_for",
+      "description": "当前net/netfilter/nft_set_pipapo.c:1704-1708无条件分配并挂入一个GC批次，1736-1737仅遇过期普通元素才置dirty；1852-1853在dirty=false时跳过1863的pipapo_gc_queue；销毁2389检查gc_head。这是队列生命周期遗漏。"
+    },
+    {
+      "type": "evidence_for",
+      "description": "对introducer 7864c667本身读取代码：nf_tables_api.c:6636 catchall插入绕开set->ops->insert；成功NEWSETELEM在7147加入transaction，10440仍列入set_update_list，10202执行commit；nft_set_pipapo.c:2257-2260初始化clone且dirty=false，1634挂GC，1776附近!dirty return。故引入边界是7864，非744后才产生。"
+    },
+    {
+      "type": "evidence_for",
+      "description": "7864旧代码还有pipapo_clone失败跳过GC队列的独立分支；744前置克隆消除了该分支，但并未删除!dirty gate，所以八候选全部存在仍可触发本警告。"
+    },
+    {
+      "type": "evidence_against",
+      "description": "八个stable补丁是连续父子提交，所有给定SHA均为HEAD祖先、均非master祖先；其Upstream commit原始SHA则全部是master祖先、非HEAD祖先。不能仅以主线SHA不在HEAD断言修复未合入。详见commit-mapping.json。"
+    },
+    {
+      "type": "evidence_for",
+      "description": "主线532aec7删除dirty的全部读写及init初始clone，而不是只删除WARN。结合9df后，commit在clone存在时完成scan -> RCU发布 -> 排空GC。主线8b8 destroy在clone NULL时从live match销毁实际元素，是nullable clone完整生命周期配套。"
+    },
+    {
+      "type": "observation",
+      "description": "v6.11已含532、3f1、8b8，无dirty字段，但当时尚未引入9df的gc_head及当前这条WARN。当前master有gc_head但不存在dirty早退，两者未出现同一告警的源码原因不同。不能据此宣称v6.11/主线所有pipapo问题均不受影响。"
+    },
+    {
+      "type": "observation",
+      "description": "git log --all -G gc_head|pipapo_gc_queue|priv->dirty以及主题检索未发现比532更直接且已入当前master的单独empty-GC修复。网络lore精确关键词检索无结果；此结论仅限本地refs与已执行检索范围。"
+    }
+  ],
+  "independent_cross_check": {
+    "functions": "已直接核对当前pipapo_gc_scan、pipapo_gc_queue、nft_pipapo_commit、nft_pipapo_init、nft_pipapo_destroy以及7864版本nft_setelem_catchall_insert、nft_setelem_insert、nft_add_set_elem、nf_tables_commit中NEWSETELEM分支、nft_set_commit_update。",
+    "control_flow": "catchall成功添加 -> nft_add_set_elem登记NEWSETELEM -> nf_tables_commit列入set_update_list -> nft_set_commit_update -> nft_pipapo_commit -> pipapo_gc_scan挂GC -> !dirty return -> 后续销毁命中gc_head检查。此为代码路径描述，没有构造或执行Netlink消息。",
+    "ownership": "GC批次分配成功后由priv->gc_head持有；当前唯一正常排空点pipapo_gc_queue逐个list_del并交nft_trans_gc_queue_sync_done。没有元素过期时已分配的空批次仍需走此清理，!dirty不能充当gc_head为空的证明。更底层set/net引用计数由代码代理核对，此代理未单独作新的引用计数调查。",
+    "false_positive_checks": "已经检查catchall分支确实绕开会置dirty的后端insert，同时仍可进入后端commit；初始clone确实存在且dirty=false；GC分配成功路径无需OOM，无过期普通元素不会置dirty；引入提交自身已具备这些条件，不仅从WARN blame倒推。"
+  },
+  "fix_suggestion": "For existing 6.6.156, adapt missing upstream 8b8a2417558c destroy fallback then 532aec7e878b full dirty removal. Preserve GC scan -> match publication -> GC reclaim ordering and assertion. Existing eight candidates are already integrated. Raw patches are references, not adapted/applicable build-tested patches.",
+  "theories_investigated": [
+    {
+      "id": "T1",
+      "title": "PIPAPO dirty clone survives an abort/error path and reaches nft_pipapo_destroy",
+      "status": "eliminated",
+      "reason": "作为原 stack 的直接归因不成立：实际 WARN 检查 gc_head，已给定版本包含 NEW/MOD/ERR 与 on-demand clone；不声称所有历史 dirty bug 均不存在。"
+    },
+    {
+      "id": "T2",
+      "title": "Set removal or transaction destruction omits the set commit/abort callback",
+      "status": "eliminated",
+      "reason": "作为初始缺陷不成立：set commit 事实上可以已被调用，但其内部提前返回；删除阶段跳过 dead set commit 仅暴露先前遗留状态。"
+    },
+    {
+      "id": "T3",
+      "title": "The supplied eight-commit on-demand clone series fixes the warning and explains stable/mainline divergence",
+      "status": "eliminated",
+      "reason": "Eight candidates already included from v6.6.148 and insufficient for this WARN; omitted mainline semantic dependencies are identified separately."
+    },
+    {
+      "id": "T4",
+      "title": "Empty GC scan leaves gc_head queued while !dirty commit fast path skips pipapo_gc_queue",
+      "status": "confirmed",
+      "reason": "Source and commit evidence in agent result files."
+    },
+    {
+      "id": "T5",
+      "title": "On-demand clone lifecycle lacks destroy fallback to match when clone NULL",
+      "status": "confirmed",
+      "reason": "Source and commit evidence in agent result files."
+    }
+  ],
+  "versions": {
+    "reported": "Linux 6.6.151 d27334b2888c",
+    "HEAD": "Linux 6.6.156 8b73de7da85fde281a385e0b26eda9bffd3ca477",
+    "master": "704340f1cd0dcef829eb62f5b48ae95a2ce17bdf",
+    "first_6_6_static_defect": "v6.6.130 / 7864c667aed01a58b87ca518a631322cd0ac34c0",
+    "candidate_series_present": "v6.6.148",
+    "mainline_dirty_removal_first": "v6.10-rc1",
+    "v6_11_difference": "Already lacks dirty, but not yet gc_head or this assertion.",
+    "current_master_difference": "Has gc_head but no dirty early return."
+  },
+  "backport_notes": [
+    "仅提出回移范围，未进行git apply --check、cherry-pick、编译或运行时验证。raw patch是原始主线diff，不是可直接合入6.6的适配产物。",
+    "8b8适配需要保留6.6现有2389的gc_head不变量检查，保留当前void *元素API和已回移GC生命周期；不能套用历史函数整体替换删除WARN。",
+    "532适配需在pipapo_gc_scan而非旧pipapo_gc中删除dirty写入，保留pipapo_gc_queue调用和GC初始化，删除init克隆分配及相应错误标签需与现有6.6上下文核对。",
+    "不要把GC排队简单前移到RCU发布之前：9df正是修复尚暴露元素被提前回收；不要仅压制WARN或清空链表而遗漏GC对象及set引用。"
+  ],
+  "unanswered_questions": [
+    "原始报告未提供实际 Netlink 请求、运行时 dirty/clone/gc count 状态，故不能唯一确定告警前操作及具体队列项内容。",
+    "未运行任何测试或复现；修复建议属于静态语义验证，未宣称动态验证通过。",
+    "提交存在性、正式 stable 回移哈希与引入版本边界由 commits agent 负责最终核实；本文引用其消息并核对本地主线当前语义。",
+    "没有复现或抓取内核运行态，因此本静态可达路径未宣称是原始syzkaller程序的唯一触发路径。",
+    "未对5.15和6.1全部版本逐一检查源码；相关报告由父任务核对，版本差异不能无界推广。"
+  ],
+  "public_sources": {
+    "retrieved_at": "2026-09-14; web index snapshots can be older than retrieval date",
+    "scope": "Read-only public reports; no tests requested or run",
+    "sources": [
+      {
+        "url": "https://syzkaller.appspot.com/bug?extid=b338ce808595248a409a",
+        "facts": [
+          "linux-6.6.y warning in nft_pipapo_destroy with nf_tables_trans_destroy_work stack",
+          "Original report linked to 2026-08-10; no 6.6 reproducer listed in retrieved snapshot"
+        ]
+      },
+      {
+        "url": "https://groups.google.com/g/syzkaller-lts-bugs/c/THgivXwy8iU/m/5LdDQynRDAAJ",
+        "facts": [
+          "Original mail identifies d27334b2888c Linux 6.6.151 and clang 22.1.8",
+          "Original stack matches supplied CPU, PID, registers and instruction bytes",
+          "Thread includes linux-5.15.y aabd761612db Linux 5.15.215 and linux-6.1.y e4f7d8be268e Linux 6.1.182 reports"
+        ]
+      },
+      {
+        "url": "https://syzkaller.appspot.com/bug?extid=fb0e154ca75b0e246d73",
+        "facts": [
+          "Related 6.1 report, origin:lts-only label",
+          "Existing community 2026-08-27 comparison: linux-6.1.y 05208478041c warns; upstream 73e3f0710014 did not crash",
+          "This single existing community test is not proof all mainline scenarios are unaffected"
+        ]
+      },
+      {
+        "url": "https://syzkaller.appspot.com/bug?extid=68ef5e861ea09f54325f",
+        "facts": [
+          "Related 5.15 report"
+        ]
+      },
+      {
+        "url": "https://kernel.googlesource.com/pub/scm/linux/security/vulns/+/999ba78cd51962f21bcabc54b2093c12759db34d/cve/published/2026/CVE-2026-72252.mbox",
+        "facts": [
+          "Official advisory maps bad-clone fix upstream 47e65eff5069 to 6.6 stable 047e813324ea, first fixed version 6.6.148.",
+          "This advisory concerns invalid clone state, and alone does not identify the supplied later gc_head warning."
+        ]
+      }
+    ],
+    "original_report_verification": {
+      "url": "https://syzkaller.appspot.com/text?tag=CrashReport&x=1575e2c6580000",
+      "local_stack_verbatim_substring": false,
+      "local_stack_whitespace_normalized_substring": true
+    }
+  },
+  "report_requirements": [
+    "Write Chinese user-facing analysis to nft_warn/analysis-report.md and plain-text companion nft_warn/debug-report.txt.",
+    "Preserve nft_warn/stack and nft_warn/analyse.md unchanged.",
+    "No reproduction, tests, kernel source modifications, patch application, or external messages.",
+    "Lead with exact gc_head assertion and conclusion; do not label as old bad-clone CVE.",
+    "Include original stable/upstream mapping for all eight candidates, missing two mainline commits, GC split introduction, timeline and current HEAD status.",
+    "Include verified source path:line references in Markdown; plaintext follows debug-report skill style.",
+    "Only explain existing source control/data flow, invariants, ownership and corrective patch semantics; omit message construction, PoC, reproduction procedures or runtime validation claims.",
+    "Clearly distinguish confirmed static mechanism from unknown original operation sequence and distinguish GC warning from separate destroy ownership leak.",
+    "Cite public reports concisely with retrieved snapshot limitation; primarily derive technical detail from local verified code/patch evidence.",
+    "Raw upstream patch archive is reference-only; no backport was prepared/applied."
+  ]
+}

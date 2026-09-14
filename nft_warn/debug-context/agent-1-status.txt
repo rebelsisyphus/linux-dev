@@ -1,0 +1,1 @@
+[agent-1] DONE: All eight candidates and omitted dependencies verified; introducing boundary v6.6.130; result and raw upstream diffs written.

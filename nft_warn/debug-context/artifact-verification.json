@@ -1,0 +1,92 @@
+{
+  "method": "Read-only artifact consistency checks, not kernel tests",
+  "input_stack_unchanged": true,
+  "input_analyse_md_unchanged": true,
+  "tracked_source_diff_empty": true,
+  "all_context_json_parse": true,
+  "reference_patches": [
+    {
+      "path": "nft_warn/upstream-patches/01-5b651783d80b.patch",
+      "commit": "5b651783d80b97167ecd27dc6a4408c694873902",
+      "sha256": "4a63df575458891966aae87715dc657c1aaf6d29365d850ac13d86cfd32126e2",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/02-a590f4760922.patch",
+      "commit": "a590f4760922acaa2d2b55a88004a38eecdd6412",
+      "sha256": "d8dd9599d2999766694b9519bbdf27b69d2c25e8ef50a449cc930a62f318141a",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/03-80efd2997fb9.patch",
+      "commit": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+      "sha256": "6baedbda0fb5e51a84031e317f5e4037aa6b127e97e34dcb303738244086921a",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/04-6c108d9bee44.patch",
+      "commit": "6c108d9bee448a850b03e682836bfe91fca645cb",
+      "sha256": "7d1e43a98e573772dbefa2430f99cbe5e5fb12437d40798befbe99a4152b75de",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/05-c5444786d0ea.patch",
+      "commit": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+      "sha256": "49a2a3757cecd648c686eb23d50f27f79217c319a379ea662728ed488f3e7acf",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/06-a238106703ab.patch",
+      "commit": "a238106703ab4ae1090b86eba128815b8626d8f1",
+      "sha256": "50077b0047880845ff58acffdb8fcb73306288ff735414082c71ae57f2902810",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/07-3f1d886cc7c3.patch",
+      "commit": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+      "sha256": "83a3db1f02ad02ae9c1513b32449c0aee59403564b223ad2b3179a61b619fd75",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/08-47e65eff5069.patch",
+      "commit": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+      "sha256": "c583acd514fee2667fa073e5ce5c7106d7d906bffd9a7eeb01ae8fc2a24019c7",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/09-532aec7e878b.patch",
+      "commit": "532aec7e878b527fcee8877350ab5c5341789626",
+      "sha256": "9014497a6d7038ef1249553fe235ba18c8aad594473ec70a0309fc9c97096a02",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/10-8b8a2417558c.patch",
+      "commit": "8b8a2417558c632f249abebde97adf8c46540de2",
+      "sha256": "3ec39990585e2d066cdbfc9e7aa1c9ac3fae432899ecd8093040db8a19b6b095",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/11-9df95785d3d8.patch",
+      "commit": "9df95785d3d8302f7c066050117b04cd3c2048c2",
+      "sha256": "57a8f5db70dcee2634ee988ff0dc60de313c73b3e744bd656ae1f34f8897f933",
+      "matches_git_show_format_email": true
+    },
+    {
+      "path": "nft_warn/upstream-patches/12-fb7fb4016300.patch",
+      "commit": "fb7fb4016300ac622c964069e286dc83166a5d52",
+      "sha256": "d7d0861f1cde13c5d57a2ef9d968b6520b56823ba6526fc3432bfb616cc18a8e",
+      "matches_git_show_format_email": true
+    }
+  ],
+  "runtime_tests_run": false,
+  "reproduction_performed": false,
+  "patches_applied": false,
+  "report_checks": {
+    "local_links_verified": 18,
+    "plain_text_format_valid": true,
+    "prose_line_limit": 78,
+    "reports_nonempty": true,
+    "literal_diff_blocks_verified": 3,
+    "literal_diff_whitespace": "Preserved original unified diff context markers and tabs; expected exceptions to prose whitespace lint."
+  }
+}

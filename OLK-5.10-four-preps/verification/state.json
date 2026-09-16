@@ -1,0 +1,24 @@
+{
+  "root": "/tmp/cve-72252-four-preps-6a8fhcsc",
+  "repo": "/home/sisyphus/code/kernel",
+  "upstream": "/home/sisyphus/code/linux",
+  "original_branch": "OLK-5.10",
+  "start_head": "7c030816a7c58940b14ed821cd91e2c2cf2706f0",
+  "series_base": "b8095978261c8f5739d74a5b1ef5e117b863420f",
+  "old_series_head": "ebc046f15358fe83951a9c7279239449066484ca",
+  "target_branch": "backport/CVE-2026-72252-OLK-5.10-four-preps",
+  "upstream_head": "9b87fdc9af2fbfcdb5c24a64139685ef80f6573f",
+  "requested": [
+    "9dad402b89e8",
+    "a2a0ffb08468",
+    "f04df573faf9",
+    "b9f052dc68f6"
+  ],
+  "standalone_head": "3618a1a7f94d4f2690ae4aef0095ce49229f20e6",
+  "nft_kabi_required": false,
+  "integration_head": "ed7491a7c5f0cc7d551c240654140f40763a4a1d",
+  "integration_tree": "2c73db0e777bc757c4416d2d9d0724c2a11e3ad7",
+  "compiled_head": "70842a4d1c0c0df37f12af5917eed074a448d93f",
+  "standalone_branch": "backport/CVE-2026-72252-OLK-5.10-four-preps-series",
+  "artifact_dir": "/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-four-preps"
+}

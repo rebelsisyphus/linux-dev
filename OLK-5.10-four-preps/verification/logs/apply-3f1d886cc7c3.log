@@ -1,0 +1,83 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+error: while searching for:
+#endif
+}
+
+/**
+ * nft_pipapo_insert() - Validate and insert ranged elements
+ * @net:	Network namespace
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1259
+error: while searching for:
+	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+	union nft_pipapo_map_bucket rulemap[NFT_PIPAPO_MAX_FIELDS];
+	const u8 *start = (const u8 *)elem->key.val.data, *end;
+	struct nft_pipapo *priv = nft_set_priv(set);
+	struct nft_pipapo_match *m = priv->clone;
+	u8 genmask = nft_genmask_next(net);
+	struct nft_pipapo_elem *e, *dup;
+	u64 tstamp = nft_net_tstamp(net);
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1275
+Hunk #3 succeeded at 1220 (offset -87 lines).
+error: while searching for:
+static void nft_pipapo_commit(struct nft_set *set)
+{
+	struct nft_pipapo *priv = nft_set_priv(set);
+	struct nft_pipapo_match *new_clone, *old;
+
+	if (time_after_eq(jiffies, priv->last_gc + nft_set_gc_interval(set)))
+		pipapo_gc(set, priv->clone);
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1789
+error: while searching for:
+	if (!priv->dirty)
+		return;
+
+	new_clone = pipapo_clone(priv->clone);
+	if (!new_clone)
+		return;
+
+	priv->dirty = false;
+
+	old = rcu_access_pointer(priv->match);
+	rcu_assign_pointer(priv->match, priv->clone);
+	if (old)
+		call_rcu(&old->rcu, pipapo_reclaim_match);
+
+	priv->clone = new_clone;
+}
+
+static void nft_pipapo_abort(const struct nft_set *set)
+{
+	struct nft_pipapo *priv = nft_set_priv(set);
+	struct nft_pipapo_match *new_clone, *m;
+
+	if (!priv->dirty)
+		return;
+
+	m = rcu_dereference_protected(priv->match, nft_pipapo_transaction_mutex_held(set));
+
+	new_clone = pipapo_clone(m);
+	if (!new_clone)
+		return;
+
+	priv->dirty = false;
+
+	pipapo_free_match(priv->clone);
+	priv->clone = new_clone;
+}
+
+/**
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1797
+Hunk #6 succeeded at 1834 (offset -47 lines).
+Hunk #7 succeeded at 2126 (offset -42 lines).
+Applying patch net/netfilter/nft_set_pipapo.c with 4 rejects...
+Rejected hunk #1.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Rejected hunk #4.
+Rejected hunk #5.
+Hunk #6 applied cleanly.
+Hunk #7 applied cleanly.

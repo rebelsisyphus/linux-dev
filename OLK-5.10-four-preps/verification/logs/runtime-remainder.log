@@ -1,0 +1,14 @@
+Warning: Permanently added '[127.0.0.1]:22853' (ED25519) to the list of known hosts.
+PASS: deleting committed map requires no clone; chain references balance
+PASS: deleting table with verdict map requires no clone
+PASS: abort reactivates committed map without clone and preserves references
+PASS: flush clone ENOMEM rolls back; next flush succeeds and releases references
+PASS: map deletion after insertion reuses existing clone
+PASS: anonymous interval verdict-map removal requires no clone
+PASS: namespace teardown deactivates live map without clone
+PASS: legacy hash/rbtree/bitmap flush remains functional
+COUNTERS {"arm": 0, "clones": 11, "failures": 1, "flushes": 2, "reads": 5, "updates": 11}
+PASS: 8 NEW-clone failures after field insertion; query, packet lookup, delete, flush recover
+PASS: 4 MOD-clone failures with prior transaction records; rollback and next transaction recover
+PASS: timeout expiry and subsequent GC/flush
+PASS: targeted injection hits=68 failures=12

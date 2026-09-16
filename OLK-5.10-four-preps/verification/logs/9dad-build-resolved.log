@@ -1,0 +1,18 @@
+make: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'
+make[1]: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-distro'
+  GEN     Makefile
+  DESCEND  objtool
+  CALL    /tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/atomic/check-atomics.sh
+  CALL    /tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/checksyscalls.sh
+  CC [M]  net/netfilter/nft_dynset.o
+  CC [M]  net/netfilter/nft_set_bitmap.o
+  CC [M]  net/netfilter/nft_set_pipapo_avx2.o
+  CC [M]  net/netfilter/nf_tables_api.o
+  CC [M]  net/netfilter/nft_set_hash.o
+  CC [M]  net/netfilter/nft_set_pipapo.o
+  CC [M]  net/netfilter/nft_set_rbtree.o
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c:1766:13: warning: ‘nft_pipapo_transaction_mutex_held’ defined but not used [-Wunused-function]
+ 1766 | static bool nft_pipapo_transaction_mutex_held(const struct nft_set *set)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+make[1]: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-distro'
+make: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'

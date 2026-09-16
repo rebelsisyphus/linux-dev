@@ -1,0 +1,45 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit fb7fb4016300 ("netfilter: nf_tables: clone set on flush only")'
+#8: 
+commit fb7fb4016300ac622c964069e286dc83166a5d52
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#13: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=fb7fb4016300ac622c964069e286dc83166a5d52
+
+WARNING:REPEATED_WORD: Possible repeated word: 'Google'
+#24: 
+Hardware name: Google Google Compute Engine/Google Compute Engine, BIOS Google 02/12/2026
+
+WARNING:REPEATED_WORD: Possible repeated word: 'cc'
+#26: 
+Code: 8b 05 86 5a 4e 09 48 3b 84 24 a0 00 00 00 75 62 48 8d 65 d8 5b 41 5c 41 5d 41 5e 41 5f 5d c3 cc cc cc cc cc e8 63 6d fa f7 90 <0f> 0b 90 43
+
+WARNING:REPEATED_WORD: Possible repeated word: 'cc'
+#26: 
+Code: 8b 05 86 5a 4e 09 48 3b 84 24 a0 00 00 00 75 62 48 8d 65 d8 5b 41 5c 41 5d 41 5e 41 5f 5d c3 cc cc cc cc cc e8 63 6d fa f7 90 <0f> 0b 90 43
+
+WARNING:REPEATED_WORD: Possible repeated word: 'cc'
+#26: 
+Code: 8b 05 86 5a 4e 09 48 3b 84 24 a0 00 00 00 75 62 48 8d 65 d8 5b 41 5c 41 5d 41 5e 41 5f 5d c3 cc cc cc cc cc e8 63 6d fa f7 90 <0f> 0b 90 43
+
+WARNING:REPEATED_WORD: Possible repeated word: 'cc'
+#26: 
+Code: 8b 05 86 5a 4e 09 48 3b 84 24 a0 00 00 00 75 62 48 8d 65 d8 5b 41 5c 41 5d 41 5e 41 5f 5d c3 cc cc cc cc cc e8 63 6d fa f7 90 <0f> 0b 90 43
+
+WARNING:REPEATED_WORD: Possible repeated word: 'ff'
+#27: 
++80 7c 35 00 00 0f 85 23 fe ff ff e9 26 fe ff ff 89 d9
+
+WARNING:REPEATED_WORD: Possible repeated word: 'ff'
+#27: 
++80 7c 35 00 00 0f 85 23 fe ff ff e9 26 fe ff ff 89 d9
+
+total: 1 errors, 8 warnings, 0 checks, 59 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0016-netfilter-nf_tables-clone-set-on-flush-only.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

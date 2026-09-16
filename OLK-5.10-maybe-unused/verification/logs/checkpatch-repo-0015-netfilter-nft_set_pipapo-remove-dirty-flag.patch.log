@@ -1,0 +1,5 @@
+total: 0 errors, 0 warnings, 0 checks, 91 lines checked
+
+/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused/0015-netfilter-nft_set_pipapo-remove-dirty-flag.patch has no obvious style problems and is ready for submission.
+
+NOTE: Ignored message types: COMMIT_LOG_LONG_LINE GIT_COMMIT_ID

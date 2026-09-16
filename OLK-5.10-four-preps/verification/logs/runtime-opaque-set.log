@@ -1,0 +1,9 @@
+PASS: bitmap insert/get/miss/delete/abort/flush/destroy
+PASS: hashfast insert/get/miss/delete/abort/flush/destroy
+PASS: hash insert/get/miss/delete/abort/flush/destroy
+PASS: rhash insert/get/miss/delete/abort/flush/destroy
+PASS: rbtree insert/get/miss/delete/abort/flush/destroy
+PASS: pipapo insert/get/miss/delete/abort/flush/destroy
+PASS: 96 concurrent GET requests across four PIPAPO sets
+PASS: dynset new and repeated update from packet path
+COVERAGE: bitmap_get,hash_get,rhash_get,rbtree_get,pipapo_get,rhash_update=[4, 8, 5, 4, 100, 32]

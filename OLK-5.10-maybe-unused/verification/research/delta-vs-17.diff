@@ -1,0 +1,45 @@
+diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
+index b7a30a7f6085..29a67cb139cb 100644
+--- a/net/netfilter/nf_tables_api.c
++++ b/net/netfilter/nf_tables_api.c
+@@ -6048,9 +6048,13 @@ static int nft_flush_set(const struct nft_ctx *ctx,
+ 			 const struct nft_set_iter *iter,
+ 			 struct nft_set_elem *elem)
+ {
++	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+ 	struct nft_trans *trans;
+ 	int err;
+ 
++	if (!nft_set_elem_active(ext, iter->genmask))
++		return 0;
++
+ 	trans = nft_trans_alloc_gfp(ctx, NFT_MSG_DELSETELEM,
+ 				    sizeof(struct nft_trans_elem), GFP_ATOMIC);
+ 	if (!trans)
+diff --git a/net/netfilter/nft_lookup.c b/net/netfilter/nft_lookup.c
+index f6ea1b32dae1..47b0037786c3 100644
+--- a/net/netfilter/nft_lookup.c
++++ b/net/netfilter/nft_lookup.c
+@@ -174,6 +174,9 @@ static int nft_lookup_validate_setelem(const struct nft_ctx *ctx,
+ 	const struct nft_data *data;
+ 	int err;
+ 
++	if (!nft_set_elem_active(ext, iter->genmask))
++		return 0;
++
+ 	if (nft_set_ext_exists(ext, NFT_SET_EXT_FLAGS) &&
+ 	    *nft_set_ext_flags(ext) & NFT_SET_ELEM_INTERVAL_END)
+ 		return 0;
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index ebc63629dc95..5287c4eb1031 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1197,7 +1197,7 @@ static int pipapo_realloc_scratch(struct nft_pipapo_match *clone,
+ 	return 0;
+ }
+ 
+-static bool nft_pipapo_transaction_mutex_held(const struct nft_set *set)
++static bool __maybe_unused nft_pipapo_transaction_mutex_held(const struct nft_set *set)
+ {
+ #ifdef CONFIG_PROVE_LOCKING
+ 	const struct net *net = read_pnet(&set->net);

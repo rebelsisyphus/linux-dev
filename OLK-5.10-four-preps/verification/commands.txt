@@ -1,0 +1,53 @@
+Host/guest: x86_64. Upstream snapshot: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f.
+Source checkout used: /tmp/cve-72252-four-preps-6a8fhcsc/source
+Compiled commit: 70842a4d1c0c0df37f12af5917eed074a448d93f
+Delivery commit: ed7491a7c5f0cc7d551c240654140f40763a4a1d
+Both have tree: 2c73db0e777bc757c4416d2d9d0724c2a11e3ad7
+
+For each saved distro.config/minimal.config in an independent build directory:
+  cp verification/distro.config /path/to/build/.config
+  make O=/path/to/build olddefconfig
+  make O=/path/to/build -j3 net/netfilter/nf_tables_api.o \
+    net/netfilter/nf_tables_core.o net/netfilter/nft_set_pipapo.o \
+    net/netfilter/nft_set_pipapo_avx2.o net/netfilter/nft_set_hash.o \
+    net/netfilter/nft_set_rbtree.o net/netfilter/nft_set_bitmap.o \
+    net/netfilter/nft_dynset.o
+
+With saved qemu.config:
+  make O=/path/to/build-qemu olddefconfig
+  make O=/path/to/build-qemu -j12 bzImage modules
+
+Copy verification/tests/* into a disposable shared directory. Build probes:
+  make O=/path/to/build-qemu M=/path/to/share -j4 modules
+  make O=/path/to/build-qemu modules_install INSTALL_MOD_PATH=/path/to/share/modules
+  mkdir -p /path/to/qemu /path/to/qemu-state
+  env QEMU_DIR=/path/to/qemu TEST_DIR=/path/to/share \
+    ROOTFS=/home/sisyphus/code/qemu/rootfs.img SSH_PORT=22853 TEST_TIMEOUT=900 \
+    TEST_KERNEL_STATE_DIR=/path/to/qemu-state TEST_KERNEL_SNAPSHOT=1 \
+    /home/sisyphus/.local/bin/test-kernel /path/to/build-qemu/arch/x86/boot/bzImage
+
+The updated test.sh selects clone_symbol=pipapo_maybe_clone.part.0 for the
+compiler/config used here. Check nm output when changing the compiler/config.
+The first run passed opaque-set-test.py, then failed to load the older clone
+probe because pipapo_clone was inlined. After correcting only the guest probe,
+the remaining tests were resumed in the same VM:
+  insmod /mnt/shared/clone_probe.ko clone_symbol=pipapo_maybe_clone.part.0
+  python3 /mnt/shared/clone-flush-test.py
+  rmmod clone_probe
+  insmod /mnt/shared/pipapo_fail.ko
+  python3 /mnt/shared/pipapo-regression.py
+  rmmod pipapo_fail
+Final diagnostics/taint/ruleset/module checks passed; systemctl poweroff followed.
+See runtime-summary.json and runtime-remainder.log; the initial exit 1 is retained.
+
+Series verification:
+  python3 verification/verify_series.py --repo /home/sisyphus/code/kernel \
+    --base b8095978261c8f5739d74a5b1ef5e117b863420f \
+    --head 3618a1a7f94d4f2690ae4aef0095ce49229f20e6 \
+    --patch-dir /home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-four-preps
+
+Checkpatch ran in the isolated source repository with upstream git objects in
+GIT_ALTERNATE_OBJECT_DIRECTORIES for commit validation. Raw logs are preserved.
+The repository-format pass ignores GIT_COMMIT_ID and COMMIT_LOG_LONG_LINE;
+patch 16 also ignores original upstream stack-trace REPEATED_WORD warnings.
+No code diagnostics are filtered.

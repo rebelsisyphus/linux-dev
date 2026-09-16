@@ -1,0 +1,528 @@
+Checking patch include/net/netfilter/nf_tables.h...
+Hunk #1 succeeded at 247 (offset -27 lines).
+error: while searching for:
+		u32		buf[NFT_DATA_VALUE_MAXLEN / sizeof(u32)];
+		struct nft_data val;
+	} data;
+	void			*priv;
+};
+
+struct nft_set;
+struct nft_set_iter {
+	u8		genmask;
+
+error: patch failed: include/net/netfilter/nf_tables.h:294
+Hunk #3 succeeded at 376 (offset -62 lines).
+error: while searching for:
+	void				(*activate)(const struct net *net,
+						    const struct nft_set *set,
+						    const struct nft_set_elem *elem);
+	void *				(*deactivate)(const struct net *net,
+						      const struct nft_set *set,
+						      const struct nft_set_elem *elem);
+	void				(*flush)(const struct net *net,
+						 const struct nft_set *set,
+						 void *priv);
+	void				(*remove)(const struct net *net,
+						  const struct nft_set *set,
+						  const struct nft_set_elem *elem);
+	void				(*walk)(const struct nft_ctx *ctx,
+						struct nft_set *set,
+						struct nft_set_iter *iter);
+	void *				(*get)(const struct net *net,
+					       const struct nft_set *set,
+					       const struct nft_set_elem *elem,
+					       unsigned int flags);
+
+error: patch failed: include/net/netfilter/nf_tables.h:446
+Hunk #5 succeeded at 725 (offset -80 lines).
+error: while searching for:
+					 const struct nft_set *set,
+					 const struct nlattr *attr);
+
+void *nft_set_elem_init(const struct nft_set *set,
+			const struct nft_set_ext_tmpl *tmpl,
+			const u32 *key, const u32 *key_end, const u32 *data,
+			u64 timeout, u64 expiration, gfp_t gfp);
+int nft_set_elem_expr_clone(const struct nft_ctx *ctx, struct nft_set *set,
+			    struct nft_expr *expr_array[]);
+void nft_set_elem_destroy(const struct nft_set *set, void *elem,
+			  bool destroy_expr);
+void nf_tables_set_elem_destroy(const struct nft_ctx *ctx,
+				const struct nft_set *set, void *elem);
+
+struct nft_expr_ops;
+/**
+
+error: patch failed: include/net/netfilter/nf_tables.h:810
+Checking patch net/netfilter/nf_tables_api.c...
+error: while searching for:
+struct nft_set_elem_catchall {
+	struct list_head	list;
+	struct rcu_head		rcu;
+	void			*elem;
+};
+
+static void nft_map_catchall_deactivate(const struct nft_ctx *ctx,
+
+error: patch failed: net/netfilter/nf_tables_api.c:601
+error: while searching for:
+	return 0;
+}
+
+void *nft_set_elem_init(const struct nft_set *set,
+			const struct nft_set_ext_tmpl *tmpl,
+			const u32 *key, const u32 *key_end,
+			const u32 *data, u64 timeout, u64 expiration, gfp_t gfp)
+{
+	struct nft_set_ext *ext;
+	void *elem;
+
+error: patch failed: net/netfilter/nf_tables_api.c:6218
+Hunk #3 succeeded at 5513 (offset -774 lines).
+error: while searching for:
+		nft_data_release(nft_set_ext_data(ext), set->dtype);
+	if (destroy_expr && nft_set_ext_exists(ext, NFT_SET_EXT_EXPRESSIONS))
+		nft_set_elem_expr_destroy(&ctx, nft_set_ext_expr(ext));
+
+	if (nft_set_ext_exists(ext, NFT_SET_EXT_OBJREF))
+		nft_use_dec(&(*nft_set_ext_obj(ext))->use);
+	kfree(elem);
+}
+EXPORT_SYMBOL_GPL(nft_set_elem_destroy);
+
+
+error: patch failed: net/netfilter/nf_tables_api.c:6300
+error: while searching for:
+ * path via nft_setelem_data_deactivate().
+ */
+void nf_tables_set_elem_destroy(const struct nft_ctx *ctx,
+				const struct nft_set *set, void *elem)
+{
+	struct nft_set_ext *ext = nft_set_elem_ext(set, elem);
+
+	if (nft_set_ext_exists(ext, NFT_SET_EXT_EXPRESSIONS))
+		nft_set_elem_expr_destroy(ctx, nft_set_ext_expr(ext));
+
+	kfree(elem);
+}
+
+int nft_set_elem_expr_clone(const struct nft_ctx *ctx, struct nft_set *set,
+
+error: patch failed: net/netfilter/nf_tables_api.c:6311
+Checking patch net/netfilter/nft_dynset.c...
+error: while searching for:
+	return 0;
+}
+
+static void *nft_dynset_new(struct nft_set *set, const struct nft_expr *expr,
+			    struct nft_regs *regs)
+{
+	const struct nft_dynset *priv = nft_expr_priv(expr);
+	struct nft_set_ext *ext;
+	u64 timeout;
+	void *elem;
+
+	if (!atomic_add_unless(&set->nelems, 1, set->size))
+		return NULL;
+
+	timeout = priv->timeout ? : set->timeout;
+	elem = nft_set_elem_init(set, &priv->tmpl,
+				 &regs->data[priv->sreg_key], NULL,
+				 &regs->data[priv->sreg_data],
+				 timeout, 0, GFP_ATOMIC);
+	if (IS_ERR(elem))
+		goto err1;
+
+	ext = nft_set_elem_ext(set, elem);
+	if (priv->num_exprs && nft_dynset_expr_setup(priv, ext) < 0)
+		goto err2;
+
+	return elem;
+
+err2:
+	nft_set_elem_destroy(set, elem, false);
+err1:
+	if (set->size)
+		atomic_dec(&set->nelems);
+
+error: patch failed: net/netfilter/nft_dynset.c:44
+Checking patch net/netfilter/nft_set_bitmap.c...
+Hunk #2 succeeded at 104 (offset -1 lines).
+Hunk #3 succeeded at 117 (offset -1 lines).
+Hunk #4 succeeded at 126 (offset -1 lines).
+Hunk #5 succeeded at 149 (offset -1 lines).
+Hunk #6 succeeded at 164 (offset -1 lines).
+error: while searching for:
+}
+
+static void nft_bitmap_flush(const struct net *net,
+			     const struct nft_set *set, void *_be)
+{
+	struct nft_bitmap *priv = nft_set_priv(set);
+	u8 genmask = nft_genmask_next(net);
+	struct nft_bitmap_elem *be = _be;
+	u32 idx, off;
+
+	nft_bitmap_location(set, nft_set_ext_key(&be->ext), &idx, &off);
+
+error: patch failed: net/netfilter/nft_set_bitmap.c:175
+error: while searching for:
+	nft_set_elem_change_active(net, set, &be->ext);
+}
+
+static void *nft_bitmap_deactivate(const struct net *net,
+				   const struct nft_set *set,
+				   const struct nft_set_elem *elem)
+{
+	struct nft_bitmap *priv = nft_set_priv(set);
+	struct nft_bitmap_elem *this = elem->priv, *be;
+	u8 genmask = nft_genmask_next(net);
+	u32 idx, off;
+
+
+error: patch failed: net/netfilter/nft_set_bitmap.c:188
+error: while searching for:
+		if (!nft_set_elem_active(&be->ext, iter->genmask))
+			goto cont;
+
+		elem.priv = be;
+
+		iter->err = iter->fn(ctx, set, iter, &elem);
+
+
+error: patch failed: net/netfilter/nft_set_bitmap.c:224
+Hunk #11 succeeded at 264 (offset -2 lines).
+Hunk #12 succeeded at 279 (offset -2 lines).
+Checking patch net/netfilter/nft_set_hash.c...
+Hunk #1 succeeded at 30 (offset 3 lines).
+Hunk #2 succeeded at 100 (offset 4 lines).
+Hunk #3 succeeded at 115 (offset 5 lines).
+Hunk #4 succeeded at 131 (offset 5 lines).
+Hunk #5 succeeded at 143 (offset 6 lines).
+Hunk #6 succeeded at 155 (offset 6 lines).
+Hunk #7 succeeded at 165 (offset 6 lines).
+Hunk #8 succeeded at 175 (offset 6 lines).
+error: while searching for:
+static void nft_rhash_activate(const struct net *net, const struct nft_set *set,
+			       const struct nft_set_elem *elem)
+{
+	struct nft_rhash_elem *he = elem->priv;
+
+	nft_set_elem_change_active(net, set, &he->ext);
+}
+
+static void nft_rhash_flush(const struct net *net,
+			    const struct nft_set *set, void *priv)
+{
+	struct nft_rhash_elem *he = priv;
+
+	nft_set_elem_change_active(net, set, &he->ext);
+}
+
+static void *nft_rhash_deactivate(const struct net *net,
+				  const struct nft_set *set,
+				  const struct nft_set_elem *elem)
+{
+	struct nft_rhash *priv = nft_set_priv(set);
+	struct nft_rhash_elem *he;
+
+error: patch failed: net/netfilter/nft_set_hash.c:187
+Hunk #10 succeeded at 234 (offset 9 lines).
+error: while searching for:
+		if (!nft_set_elem_active(&he->ext, iter->genmask))
+			goto cont;
+
+		elem.priv = he;
+
+		iter->err = iter->fn(ctx, set, iter, &elem);
+		if (iter->err < 0)
+
+error: patch failed: net/netfilter/nft_set_hash.c:278
+Hunk #12 succeeded at 401 (offset -9 lines).
+Hunk #13 succeeded at 425 (offset -9 lines).
+Hunk #14 succeeded at 474 (offset -9 lines).
+Hunk #15 succeeded at 499 (offset -10 lines).
+Hunk #16 succeeded at 513 (offset -10 lines).
+Hunk #17 succeeded at 562 (offset -11 lines).
+error: while searching for:
+static void nft_hash_activate(const struct net *net, const struct nft_set *set,
+			      const struct nft_set_elem *elem)
+{
+	struct nft_hash_elem *he = elem->priv;
+
+	nft_set_elem_change_active(net, set, &he->ext);
+}
+
+static void nft_hash_flush(const struct net *net,
+			   const struct nft_set *set, void *priv)
+{
+	struct nft_hash_elem *he = priv;
+
+	nft_set_elem_change_active(net, set, &he->ext);
+}
+
+static void *nft_hash_deactivate(const struct net *net,
+				 const struct nft_set *set,
+				 const struct nft_set_elem *elem)
+{
+	struct nft_hash *priv = nft_set_priv(set);
+	struct nft_hash_elem *this = elem->priv, *he;
+	u8 genmask = nft_genmask_next(net);
+	u32 hash;
+
+
+error: patch failed: net/netfilter/nft_set_hash.c:583
+Hunk #19 succeeded at 612 (offset -11 lines).
+Hunk #20 succeeded at 622 (offset -11 lines).
+error: while searching for:
+			if (!nft_set_elem_active(&he->ext, iter->genmask))
+				goto cont;
+
+			elem.priv = he;
+
+			iter->err = iter->fn(ctx, set, iter, &elem);
+			if (iter->err < 0)
+
+error: patch failed: net/netfilter/nft_set_hash.c:641
+Hunk #22 succeeded at 681 (offset -13 lines).
+Checking patch net/netfilter/nft_set_pipapo.c...
+error: while searching for:
+ * @elem:	nftables API element representation containing key data
+ * @flags:	Unused
+ */
+static void *nft_pipapo_get(const struct net *net, const struct nft_set *set,
+			    const struct nft_set_elem *elem, unsigned int flags)
+{
+	return pipapo_get(net, set, (const u8 *)elem->key.val.data,
+			 nft_genmask_cur(net));
+}
+
+/**
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:599
+error: while searching for:
+	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+	union nft_pipapo_map_bucket rulemap[NFT_PIPAPO_MAX_FIELDS];
+	const u8 *start = (const u8 *)elem->key.val.data, *end;
+	struct nft_pipapo_elem *e = elem->priv, *dup;
+	struct nft_pipapo *priv = nft_set_priv(set);
+	struct nft_pipapo_match *m = priv->clone;
+	u8 genmask = nft_genmask_next(net);
+	struct nft_pipapo_field *f;
+	const u8 *start_p, *end_p;
+	int i, bsize_max, err = 0;
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1162
+Hunk #3 succeeded at 1302 (offset 32 lines).
+error: while searching for:
+
+{
+	struct nft_set_elem elem = {
+		.priv	= e,
+	};
+
+	nft_setelem_data_deactivate(net, set, &elem);
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1541
+error: while searching for:
+				const struct nft_set *set,
+				const struct nft_set_elem *elem)
+{
+	struct nft_pipapo_elem *e = elem->priv;
+
+	nft_set_elem_change_active(net, set, &e->ext);
+}
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1742
+Hunk #6 succeeded at 1842 (offset 52 lines).
+error: while searching for:
+ * Return: true if element was found and deactivated.
+ */
+static void nft_pipapo_flush(const struct net *net, const struct nft_set *set,
+			     void *elem)
+{
+	struct nft_pipapo_elem *e = elem;
+
+	nft_set_elem_change_active(net, set, &e->ext);
+}
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1810
+Hunk #8 succeeded at 2011 (offset 54 lines).
+Hunk #9 succeeded at 2108 (offset 60 lines).
+Hunk #10 succeeded at 2182 (offset 60 lines).
+Hunk #11 succeeded at 2266 (offset 48 lines).
+Checking patch net/netfilter/nft_set_pipapo.h...
+Hunk #1 succeeded at 180 (offset 10 lines).
+Checking patch net/netfilter/nft_set_rbtree.c...
+Hunk #1 succeeded at 26 (offset 3 lines).
+Hunk #2 succeeded at 200 (offset 3 lines).
+error: while searching for:
+
+	ret = __nft_rbtree_get(net, set, key, &rbe, seq, flags, genmask);
+	if (ret || !read_seqcount_retry(&priv->count, seq))
+		return rbe;
+
+	read_lock_bh(&priv->lock);
+	seq = read_seqcount_begin(&priv->count);
+	ret = __nft_rbtree_get(net, set, key, &rbe, seq, flags, genmask);
+	if (!ret)
+		rbe = ERR_PTR(-ENOENT);
+	read_unlock_bh(&priv->lock);
+
+	return rbe;
+}
+
+static void nft_rbtree_gc_elem_remove(struct net *net, struct nft_set *set,
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:208
+error: while searching for:
+				      struct nft_rbtree_elem *rbe)
+{
+	struct nft_set_elem elem = {
+		.priv	= rbe,
+	};
+
+	lockdep_assert_held_write(&priv->lock);
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:225
+error: while searching for:
+			     const struct nft_set_elem *elem,
+			     struct nft_set_ext **ext)
+{
+	struct nft_rbtree *priv = nft_set_priv(set);
+	struct nft_rbtree_elem *rbe = elem->priv;
+	int err;
+
+	do {
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:487
+error: while searching for:
+			      const struct nft_set *set,
+			      const struct nft_set_elem *elem)
+{
+	struct nft_rbtree *priv = nft_set_priv(set);
+	struct nft_rbtree_elem *rbe = elem->priv;
+
+	nft_rbtree_erase(priv, rbe);
+}
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:520
+error: while searching for:
+				const struct nft_set *set,
+				const struct nft_set_elem *elem)
+{
+	struct nft_rbtree_elem *rbe = elem->priv;
+
+	nft_set_elem_change_active(net, set, &rbe->ext);
+}
+
+static void nft_rbtree_flush(const struct net *net,
+			     const struct nft_set *set, void *priv)
+{
+	struct nft_rbtree_elem *rbe = priv;
+
+	nft_set_elem_change_active(net, set, &rbe->ext);
+}
+
+static void *nft_rbtree_deactivate(const struct net *net,
+				   const struct nft_set *set,
+				   const struct nft_set_elem *elem)
+{
+	const struct nft_rbtree *priv = nft_set_priv(set);
+	const struct rb_node *parent = priv->root.rb_node;
+	struct nft_rbtree_elem *rbe, *this = elem->priv;
+	u8 genmask = nft_genmask_next(net);
+	int d;
+
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:530
+Hunk #8 succeeded at 563 (offset -18 lines).
+error: while searching for:
+		if (!nft_set_elem_active(&rbe->ext, iter->genmask))
+			goto cont;
+
+		elem.priv = rbe;
+
+		iter->err = iter->fn(ctx, set, iter, &elem);
+		if (iter->err < 0) {
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:602
+Hunk #10 succeeded at 691 (offset -15 lines).
+Hunk #11 succeeded at 717 (offset -8 lines).
+Applying patch include/net/netfilter/nf_tables.h with 3 rejects...
+Hunk #1 applied cleanly.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Rejected hunk #4.
+Hunk #5 applied cleanly.
+Rejected hunk #6.
+Applying patch net/netfilter/nf_tables_api.c with 4 rejects...
+Rejected hunk #1.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Rejected hunk #4.
+Rejected hunk #5.
+Applying patch net/netfilter/nft_dynset.c with 1 reject...
+Rejected hunk #1.
+Applying patch net/netfilter/nft_set_bitmap.c with 3 rejects...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Hunk #3 applied cleanly.
+Hunk #4 applied cleanly.
+Hunk #5 applied cleanly.
+Hunk #6 applied cleanly.
+Rejected hunk #7.
+Rejected hunk #8.
+Hunk #9 applied cleanly.
+Rejected hunk #10.
+Hunk #11 applied cleanly.
+Hunk #12 applied cleanly.
+Applying patch net/netfilter/nft_set_hash.c with 4 rejects...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Hunk #3 applied cleanly.
+Hunk #4 applied cleanly.
+Hunk #5 applied cleanly.
+Hunk #6 applied cleanly.
+Hunk #7 applied cleanly.
+Hunk #8 applied cleanly.
+Rejected hunk #9.
+Hunk #10 applied cleanly.
+Rejected hunk #11.
+Hunk #12 applied cleanly.
+Hunk #13 applied cleanly.
+Hunk #14 applied cleanly.
+Hunk #15 applied cleanly.
+Hunk #16 applied cleanly.
+Hunk #17 applied cleanly.
+Rejected hunk #18.
+Hunk #19 applied cleanly.
+Hunk #20 applied cleanly.
+Rejected hunk #21.
+Hunk #22 applied cleanly.
+Applying patch net/netfilter/nft_set_pipapo.c with 5 rejects...
+Rejected hunk #1.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Rejected hunk #4.
+Rejected hunk #5.
+Hunk #6 applied cleanly.
+Rejected hunk #7.
+Hunk #8 applied cleanly.
+Hunk #9 applied cleanly.
+Hunk #10 applied cleanly.
+Hunk #11 applied cleanly.
+Applied patch net/netfilter/nft_set_pipapo.h cleanly.
+Applying patch net/netfilter/nft_set_rbtree.c with 6 rejects...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Rejected hunk #3.
+Rejected hunk #4.
+Rejected hunk #5.
+Rejected hunk #6.
+Rejected hunk #7.
+Hunk #8 applied cleanly.
+Rejected hunk #9.
+Hunk #10 applied cleanly.
+Hunk #11 applied cleanly.

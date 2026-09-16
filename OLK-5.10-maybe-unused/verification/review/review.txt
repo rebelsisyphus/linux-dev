@@ -1,0 +1,105 @@
+1. fa2382737f48 netfilter: nft_set_pipapo: Use struct_size()
+* 2. ac94bc96be3a netfilter: nf_tables: fix false-positive lockdep splat
+3. 9b3a68992fda netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush
+4. 5b6e9d53420a netfilter: nf_tables: expose opaque set element as struct nft_elem_priv
+5. bdbaedf35639 netfilter: nft_set_pipapo: remove static in nft_pipapo_get()
+6. e95bc6179c1a netfilter: nft_set_pipapo: constify lookup fn args where possible
+7. faa3bd3a10cc netfilter: nft_set_pipapo: use GFP_KERNEL for insertions
+* 8. 2106d8d41690 netfilter: nf_tables: restore set elements when delete set fails
+9. 6dfb21b2c4da netfilter: nft_set_pipapo: make pipapo_clone helper return NULL
+10. 60bfc5982a09 netfilter: nft_set_pipapo: prepare destroy function for on-demand clone
+11. 15be991cbfdf netfilter: nft_set_pipapo: prepare walk function for on-demand clone
+12. b7c8fa3dff6f netfilter: nft_set_pipapo: merge deactivate helper into caller
+13. 3f2fa719bcb4 netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone
+* 14. e056a5eb0769 netfilter: nft_set_pipapo: move cloning of match info to insert/removal path
+15. 271cbc4f4b66 netfilter: nft_set_pipapo: remove dirty flag
+16. 873705b013b1 netfilter: nf_tables: do not remove elements if set backend implements .abort
+17. 0b4eb9d9d828 netfilter: nf_tables: clone set on flush only
+18. 8805c7a55dd0 netfilter: nft_set_pipapo: don't leak bad clone into future transaction
+
+审查范围
+
+系列：b8095978261c8f5739d74a5b1ef5e117b863420f..8805c7a55dd02ac8d80822a040e96a08b7857c78
+集成：a8fb09599f4ed39d3c2d2e3cd680b26ae7768741
+主线：9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+
+本轮使用 kernel skill，沿用原 17 个补丁已完成的代码分析，复核收敛
+后的差异。星号标记局部适配或补充的提交。除 helper 注解外，保留项
+逐一与 25 补丁版比较，patch-id 未变；注解归一化后 18 项均一致。
+上下文来自本地 git、rg 和完整函数；semcode 不可用。
+没有复现或运行测试。编译另见 logs/，nft kABI 不在本轮范围内。
+
+REACHABILITY: confirmed
+ENTRY-POINT: none
+Kconfig check: no new symbols or configuration changes
+BUG FIX DETERMINATION: minor build compatibility; retained major flush fix
+Fixes tag check for networking: no additional tag requirement
+
+CHANGE-1: static bool __maybe_unused nft_pipapo_transaction_mutex_held(...)
+CHANGE-2: retain the annotation when the same helper is relocated
+CHANGE-3: remove global RCU/lockdep prerequisites; restore baseline blobs
+CHANGE-4: retain active checks before flush and verdict validation
+
+风险及分析
+
+1. 局部 unused 注解。
+   include/linux/compiler_attributes.h 将 __maybe_unused 展开为
+   __attribute__((__unused__))，不会删除函数体或改变返回值。
+   helper 的函数体保持不变，PROVE_LOCKING=y 时仍调用
+   lockdep_is_held(&nft_pernet(net)->commit_mutex)。
+   kernel/rcu/Kconfig.debug 中 PROVE_RCU 为 def_bool PROVE_LOCKING。
+   关闭配置时 RCU_LOCKDEP_WARN 为 do { } while (0)，编译前丢弃条件；
+   注解消除 helper 没有调用者的告警。开启配置时原宏仍检查条件。
+
+2. 三处最终调用均已枚举。
+   pipapo_maybe_clone() 使用 rcu_dereference_protected()；
+   nft_pipapo_commit() 使用 rcu_replace_pointer()，后者展开至前者；
+   nft_pipapo_walk() 在 NFT_ITER_UPDATE 无 clone 时读取 live match。
+   条件只用于 RCU 锁检查；没有分配、引用计数或其他运行时副作用。
+   nf_tables_valid_genid() 获取 commit_mutex，commit/abort 释放它。
+   未更改锁范围、分配失败处理或数据面读者。
+
+3. 迁移时保留属性。
+   第 14 项删除旧函数位置、插入新位置时均保留 __maybe_unused。
+   从第 2 项到最终项，定义始终唯一且带属性；不会在后续移动时重新
+   引入告警。移除全局修改后，相关 7 个文件逐提交与基线完全相同。
+   本系列没有代码使用被移除的新增 API，原配置可见性保持一致。
+
+4. flush 所有权修复仍在。
+   nf_tables_delsetelem() 将 next-gen 掩码交给 NFT_ITER_UPDATE_CLONE。
+   nft_pipapo_do_walk() 可以再次枚举已停用元素，但 nft_flush_set()
+   在事务分配、flush、ndeact++、data 引用递减之前过滤它。
+   第二次 flush 不会再建立同一元素的删除事务，也不会再次移交释放
+   所有权。原始删除仍经 commit/remove 及 RCU 后的释放流程完成。
+   过滤未放回 walker，nft_mapelem_activate() 的反向恢复仍可访问
+   非活动元素，调用 nft_clear() 并恢复引用。
+
+5. verdict-map 校验修复仍在。
+   nft_lookup_validate() 提供 next-gen 掩码；回调在读取 verdict 和
+   递归 nft_chain_validate() 之前过滤旧的非活动边，不跳过新插入的
+   活动元素。该 hunk 与 flush 检查均来自 e79b47a8615d。
+
+6. RCU 释放和核心 CVE 路径。
+   本轮未改 clone 的 NEW/MOD 生命周期、OOM abort、GC scan/queue。
+   commit 仍先发布 clone，再 call_rcu() 回收旧 match，之后提交 GC
+   回收队列；注解和旧版非调试宏不改变这些步骤。
+   ab0beafd52b9 的 get 临时指针修复、fb7fb4016300 的只在 flush 时
+   克隆，以及最终 47e65eff5069 的坏 clone 隔离均保留。
+
+排除的疑点
+
+- __maybe_unused 不会关闭调试配置的锁检查：属性不修改函数和宏展开。
+- 撤掉宏补丁不需要保留其 6 个依赖：它们只服务于条件被解析后的
+  声明/类型需求；宏及依赖一起恢复基线，没有留下调用或字段依赖。
+- 不将 active 过滤恢复到 walker，避免破坏 abort 的反向恢复。
+
+验证与限制
+
+两套 x86_64 配置各 10 个相关对象编译通过，unused-function 作为
+错误处理，无警告。18 个导出补丁树一致性通过，代码格式检查通过。
+本轮没有发现新增的未解决功能问题。其余保留项沿用已有代码审查，
+不声称重新实施整套运行测试或全内核链接。
+
+FINAL REGRESSIONS FOUND: 0
+FINAL TOKENS USED: unavailable
+Assisted-by: Codex:GPT-6

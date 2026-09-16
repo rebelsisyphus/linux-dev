@@ -1,0 +1,225 @@
+From e056a5eb0769301e88022c6f8acff309feb9b32b Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Thu, 25 Apr 2024 14:06:46 +0200
+Subject: [PATCH 14/18] netfilter: nft_set_pipapo: move cloning of match info
+ to insert/removal path
+
+mainline inclusion
+from mainline-v6.10-rc1
+commit 3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc
+category: bugfix
+bugzilla: https://atomgit.com/src-openeuler/kernel/issues/17278
+CVE: CVE-2026-72252
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc
+
+--------------------------------
+
+This set type keeps two copies of the sets' content,
+   priv->match (live version, used to match from packet path)
+   priv->clone (work-in-progress version of the 'future' priv->match).
+
+All additions and removals are done on priv->clone.  When transaction
+completes, priv->clone becomes priv->match and a new clone is allocated
+for use by next transaction.
+
+Problem is that the cloning requires GFP_KERNEL allocations but we
+cannot fail at either commit or abort time.
+
+This patch defers the clone until we get an insertion or removal
+request.  This allows us to handle OOM situations correctly.
+
+This also allows to remove ->dirty in a followup change:
+
+If ->clone exists, ->dirty is always true
+If ->clone is NULL, ->dirty is always false, no elements were added
+or removed (except catchall elements which are external to the specific
+set backend).
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+Reviewed-by: Stefano Brivio <sbrivio@redhat.com>
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+[Dong Chenchen: retain __maybe_unused when moving the lockdep helper
+for the target's !CONFIG_PROVE_RCU build.]
+
+Conflicts:
+        net/netfilter/nft_set_pipapo.c
+[Dong Chenchen: context conflicts due to:
+a590f4760922: lockdep helper still follows the commit callback.
+9df95785d3d8: preserve GC scan before publish and reclaim after publish.]
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ net/netfilter/nft_set_pipapo.c | 91 ++++++++++++++++++++++------------
+ 1 file changed, 60 insertions(+), 31 deletions(-)
+
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index c1c8003a53fd..7e2fda9d008a 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1195,6 +1195,40 @@ static int pipapo_realloc_scratch(struct nft_pipapo_match *clone,
+ 	return 0;
+ }
+ 
++static bool __maybe_unused nft_pipapo_transaction_mutex_held(const struct nft_set *set)
++{
++#ifdef CONFIG_PROVE_LOCKING
++	const struct net *net = read_pnet(&set->net);
++
++	return lockdep_is_held(&nft_pernet(net)->commit_mutex);
++#else
++	return true;
++#endif
++}
++
++static struct nft_pipapo_match *pipapo_clone(struct nft_pipapo_match *old);
++
++/**
++ * pipapo_maybe_clone() - Build clone for pending data changes, if not existing
++ * @set:	nftables API set representation
++ *
++ * Return: newly created or existing clone, if any. NULL on allocation failure
++ */
++static struct nft_pipapo_match *pipapo_maybe_clone(const struct nft_set *set)
++{
++	struct nft_pipapo *priv = nft_set_priv(set);
++	struct nft_pipapo_match *m;
++
++	if (priv->clone)
++		return priv->clone;
++
++	m = rcu_dereference_protected(priv->match,
++				      nft_pipapo_transaction_mutex_held(set));
++	priv->clone = pipapo_clone(m);
++
++	return priv->clone;
++}
++
+ /**
+  * nft_pipapo_insert() - Validate and insert ranged elements
+  * @net:	Network namespace
+@@ -1211,8 +1245,8 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
+ 	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+ 	union nft_pipapo_map_bucket rulemap[NFT_PIPAPO_MAX_FIELDS];
+ 	const u8 *start = (const u8 *)elem->key.val.data, *end;
++	struct nft_pipapo_match *m = pipapo_maybe_clone(set);
+ 	struct nft_pipapo *priv = nft_set_priv(set);
+-	struct nft_pipapo_match *m = priv->clone;
+ 	u8 genmask = nft_genmask_next(net);
+ 	struct nft_pipapo_elem *e, *dup;
+ 	u64 tstamp = nft_net_tstamp(net);
+@@ -1220,6 +1254,9 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
+ 	const u8 *start_p, *end_p;
+ 	int i, bsize_max, err = 0;
+ 
++	if (!m)
++		return -ENOMEM;
++
+ 	if (nft_set_ext_exists(ext, NFT_SET_EXT_KEY_END))
+ 		end = (const u8 *)nft_set_ext_key_end(ext)->data;
+ 	else
+@@ -1745,7 +1782,10 @@ static void pipapo_reclaim_match(struct rcu_head *rcu)
+ static void nft_pipapo_commit(struct nft_set *set)
+ {
+ 	struct nft_pipapo *priv = nft_set_priv(set);
+-	struct nft_pipapo_match *new_clone, *old;
++	struct nft_pipapo_match *old;
++
++	if (!priv->clone)
++		return;
+ 
+ 	if (time_after_eq(jiffies, priv->last_gc + nft_set_gc_interval(set)))
+ 		pipapo_gc_scan(set, priv->clone);
+@@ -1753,50 +1793,29 @@ static void nft_pipapo_commit(struct nft_set *set)
+ 	if (!priv->dirty)
+ 		return;
+ 
+-	new_clone = pipapo_clone(priv->clone);
+-	if (!new_clone)
+-		return;
+-
++	old = rcu_replace_pointer(priv->match, priv->clone,
++				  nft_pipapo_transaction_mutex_held(set));
++	priv->clone = NULL;
+ 	priv->dirty = false;
+ 
+-	old = rcu_access_pointer(priv->match);
+-	rcu_assign_pointer(priv->match, priv->clone);
+ 	if (old)
+ 		call_rcu(&old->rcu, pipapo_reclaim_match);
+ 
+-	priv->clone = new_clone;
+ 	pipapo_gc_queue(set);
+ }
+ 
+-static bool __maybe_unused nft_pipapo_transaction_mutex_held(const struct nft_set *set)
+-{
+-#ifdef CONFIG_PROVE_LOCKING
+-	const struct net *net = read_pnet(&set->net);
+-
+-	return lockdep_is_held(&nft_pernet(net)->commit_mutex);
+-#else
+-	return true;
+-#endif
+-}
+-
+ static void nft_pipapo_abort(const struct nft_set *set)
+ {
+ 	struct nft_pipapo *priv = nft_set_priv(set);
+-	struct nft_pipapo_match *new_clone, *m;
+ 
+ 	if (!priv->dirty)
+ 		return;
+ 
+-	m = rcu_dereference_protected(priv->match, nft_pipapo_transaction_mutex_held(set));
+-
+-	new_clone = pipapo_clone(m);
+-	if (!new_clone)
++	if (!priv->clone)
+ 		return;
+-
+ 	priv->dirty = false;
+-
+ 	pipapo_free_match(priv->clone);
+-	priv->clone = new_clone;
++	priv->clone = NULL;
+ }
+ 
+ /**
+@@ -1831,10 +1850,15 @@ static struct nft_elem_priv *
+ nft_pipapo_deactivate(const struct net *net, const struct nft_set *set,
+ 		      const struct nft_set_elem *elem)
+ {
+-	const struct nft_pipapo *priv = nft_set_priv(set);
+-	struct nft_pipapo_match *m = priv->clone;
++	struct nft_pipapo_match *m = pipapo_maybe_clone(set);
+ 	struct nft_pipapo_elem *e;
+ 
++	/* removal must occur on priv->clone, if we are low on memory
++	 * we have no choice and must fail the removal request.
++	 */
++	if (!m)
++		return NULL;
++
+ 	e = pipapo_get(net, set, m, (const u8 *)elem->key.val.data,
+ 		       nft_genmask_next(net), nft_net_tstamp(net), GFP_KERNEL);
+ 	if (IS_ERR(e))
+@@ -2118,7 +2142,12 @@ static void nft_pipapo_walk(const struct nft_ctx *ctx, struct nft_set *set,
+ 
+ 	switch (iter->type) {
+ 	case NFT_ITER_UPDATE:
+-		m = priv->clone;
++		m = pipapo_maybe_clone(set);
++		if (!m) {
++			iter->err = -ENOMEM;
++			return;
++		}
++
+ 		nft_pipapo_do_walk(ctx, set, m, iter);
+ 		break;
+ 	case NFT_ITER_READ:
+-- 
+2.43.0
+

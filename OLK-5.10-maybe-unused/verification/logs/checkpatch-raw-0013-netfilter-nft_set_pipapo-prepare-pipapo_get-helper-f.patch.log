@@ -1,0 +1,17 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit a238106703ab ("netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone")'
+#9: 
+commit a238106703ab4ae1090b86eba128815b8626d8f1
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#14: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a238106703ab4ae1090b86eba128815b8626d8f1
+
+total: 1 errors, 1 warnings, 0 checks, 66 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused/0013-netfilter-nft_set_pipapo-prepare-pipapo_get-helper-f.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

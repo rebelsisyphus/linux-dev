@@ -1,0 +1,33 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+Hunk #1 succeeded at 502 (offset -2 lines).
+error: while searching for:
+ */
+static struct nft_pipapo_elem *pipapo_get(const struct net *net,
+					  const struct nft_set *set,
+					  const u8 *data, u8 genmask,
+					  u64 tstamp, gfp_t gfp)
+{
+	struct nft_pipapo_elem *ret = ERR_PTR(-ENOENT);
+	struct nft_pipapo *priv = nft_set_priv(set);
+	unsigned long *res_map, *fill_map = NULL;
+	const struct nft_pipapo_match *m;
+	const struct nft_pipapo_field *f;
+	int i;
+
+	m = priv->clone;
+	if (m->bsize_max == 0)
+		return ret;
+
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:517
+Hunk #3 succeeded at 609 (offset -2 lines).
+Hunk #4 succeeded at 1228 (offset -61 lines).
+Hunk #5 succeeded at 1250 (offset -61 lines).
+Hunk #6 succeeded at 1834 (offset -29 lines).
+Applying patch net/netfilter/nft_set_pipapo.c with 1 reject...
+Hunk #1 applied cleanly.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Hunk #4 applied cleanly.
+Hunk #5 applied cleanly.
+Hunk #6 applied cleanly.

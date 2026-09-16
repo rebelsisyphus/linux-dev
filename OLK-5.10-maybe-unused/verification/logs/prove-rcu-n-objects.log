@@ -1,0 +1,118 @@
+make: Entering directory '/tmp/cve-72252-maybe-unused-9seqhpb5/source'
+make[1]: Entering directory '/tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n'
+  GEN     Makefile
+  SYSTBL  arch/x86/include/generated/asm/syscalls_32.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_32_ia32.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_64_x32.h
+  WRAP    arch/x86/include/generated/uapi/asm/bpf_perf_event.h
+  WRAP    arch/x86/include/generated/uapi/asm/errno.h
+  WRAP    arch/x86/include/generated/uapi/asm/fcntl.h
+  SYSTBL  arch/x86/include/generated/asm/syscalls_64.h
+  WRAP    arch/x86/include/generated/uapi/asm/ioctl.h
+  HYPERCALLS arch/x86/include/generated/asm/xen-hypercalls.h
+  WRAP    arch/x86/include/generated/uapi/asm/ioctls.h
+  WRAP    arch/x86/include/generated/uapi/asm/ipcbuf.h
+  WRAP    arch/x86/include/generated/uapi/asm/param.h
+  WRAP    arch/x86/include/generated/uapi/asm/poll.h
+  WRAP    arch/x86/include/generated/uapi/asm/resource.h
+  WRAP    arch/x86/include/generated/uapi/asm/socket.h
+  WRAP    arch/x86/include/generated/uapi/asm/sockios.h
+  WRAP    arch/x86/include/generated/uapi/asm/termbits.h
+  WRAP    arch/x86/include/generated/uapi/asm/termios.h
+  WRAP    arch/x86/include/generated/uapi/asm/types.h
+  HOSTCC  arch/x86/tools/relocs_32.o
+  HOSTCC  arch/x86/tools/relocs_64.o
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_32.h
+  HOSTCC  arch/x86/tools/relocs_common.o
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_64.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_x32.h
+  HOSTLD  arch/x86/tools/relocs
+  UPD     include/config/kernel.release
+  WRAP    arch/x86/include/generated/asm/early_ioremap.h
+  WRAP    arch/x86/include/generated/asm/export.h
+  WRAP    arch/x86/include/generated/asm/mcs_spinlock.h
+  WRAP    arch/x86/include/generated/asm/irq_regs.h
+  WRAP    arch/x86/include/generated/asm/local64.h
+  WRAP    arch/x86/include/generated/asm/mm-arch-hooks.h
+  WRAP    arch/x86/include/generated/asm/mmiowb.h
+  WRAP    arch/x86/include/generated/asm/module.lds.h
+  WRAP    arch/x86/include/generated/asm/rwonce.h
+  UPD     include/generated/uapi/linux/version.h
+  UPD     include/generated/utsrelease.h
+  HOSTCC  scripts/genksyms/genksyms.o
+  YACC    scripts/genksyms/parse.tab.[ch]
+  LEX     scripts/genksyms/lex.lex.c
+  DESCEND  objtool
+  HOSTCC   /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/fixdep.o
+  HOSTCC  scripts/genksyms/parse.tab.o
+  HOSTCC  scripts/genksyms/lex.lex.o
+  HOSTLD   /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/fixdep-in.o
+  LINK     /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/fixdep
+  HOSTCC  scripts/selinux/genheaders/genheaders
+  MKDIR    /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/special.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/exec-cmd.o
+  MKDIR    /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/lib/
+  GEN      /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/lib/inat-tables.c
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/decode.o
+  HOSTCC  scripts/selinux/mdp/mdp
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/help.o
+  HOSTLD  scripts/genksyms/genksyms
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/pager.o
+  HOSTCC  scripts/bin2c
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/parse-options.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/run-command.o
+  LD       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/arch/x86/objtool-in.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/weak.o
+  HOSTCC  scripts/kallsyms
+  HOSTCC  scripts/recordmcount
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/check.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/sigchain.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/subcmd-config.o
+  HOSTCC  scripts/sorttable
+  LD       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/libsubcmd-in.o
+  AR       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/libsubcmd.a
+  HOSTCC  scripts/asn1_compiler
+  HOSTCC  scripts/sign-file
+  HOSTCC  scripts/extract-cert
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/special.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/orc_gen.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/orc_dump.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/builtin-check.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/builtin-orc.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/elf.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/objtool.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/libstring.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/libctype.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/str_error_r.o
+  CC       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/librbtree.o
+  CC      scripts/mod/empty.o
+  HOSTCC  scripts/mod/mk_elfconfig
+  CC      scripts/mod/devicetable-offsets.s
+  UPD     scripts/mod/devicetable-offsets.h
+  MKELF   scripts/mod/elfconfig.h
+  HOSTCC  scripts/mod/modpost.o
+  HOSTCC  scripts/mod/file2alias.o
+  HOSTCC  scripts/mod/sumversion.o
+  LD       /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/objtool-in.o
+  LINK     /tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n/tools/objtool/objtool
+  HOSTLD  scripts/mod/modpost
+  CC      kernel/bounds.s
+  CALL    /tmp/cve-72252-maybe-unused-9seqhpb5/source/scripts/atomic/check-atomics.sh
+  UPD     include/generated/timeconst.h
+  UPD     include/generated/bounds.h
+  CC      arch/x86/kernel/asm-offsets.s
+  UPD     include/generated/asm-offsets.h
+  CALL    /tmp/cve-72252-maybe-unused-9seqhpb5/source/scripts/checksyscalls.sh
+  CC [M]  net/netfilter/nf_tables_api.o
+  CC [M]  net/netfilter/nf_tables_core.o
+  CC [M]  net/netfilter/nfnetlink.o
+  CC [M]  net/netfilter/nft_dynset.o
+  CC [M]  net/netfilter/nft_lookup.o
+  CC [M]  net/netfilter/nft_set_bitmap.o
+  CC [M]  net/netfilter/nft_set_hash.o
+  CC [M]  net/netfilter/nft_set_pipapo.o
+  CC [M]  net/netfilter/nft_set_pipapo_avx2.o
+  CC [M]  net/netfilter/nft_set_rbtree.o
+make[1]: Leaving directory '/tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-n'
+make: Leaving directory '/tmp/cve-72252-maybe-unused-9seqhpb5/source'

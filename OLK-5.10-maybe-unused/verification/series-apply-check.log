@@ -1,0 +1,23 @@
+Base: b8095978261c8f5739d74a5b1ef5e117b863420f
+Head: 8805c7a55dd02ac8d80822a040e96a08b7857c78
+Patches: 18
+PASS: 0001-netfilter-nft_set_pipapo-Use-struct_size.patch matches fa2382737f48; tree e67604a877d20ccc5ee18a479d1b4210600d78b6.
+PASS: 0002-netfilter-nf_tables-fix-false-positive-lockdep-splat.patch matches ac94bc96be3a; tree b2983d2d4fa8b06f779799fd9c51ff75809afcc3.
+PASS: 0003-netfilter-nft_set_pipapo-no-need-to-call-pipapo_deac.patch matches 9b3a68992fda; tree f1fd20a5a19bd1abf32bea2edb090cf850529391.
+PASS: 0004-netfilter-nf_tables-expose-opaque-set-element-as-str.patch matches 5b6e9d53420a; tree c6c9ed4477690f8c4875eaa5383fe69eb4363437.
+PASS: 0005-netfilter-nft_set_pipapo-remove-static-in-nft_pipapo.patch matches bdbaedf35639; tree af16456f16e6d6f4be436e7a6fbb8dbeb2432bf4.
+PASS: 0006-netfilter-nft_set_pipapo-constify-lookup-fn-args-whe.patch matches e95bc6179c1a; tree aa8f91c84d333c671bc9684afc61d464a3df90fd.
+PASS: 0007-netfilter-nft_set_pipapo-use-GFP_KERNEL-for-insertio.patch matches faa3bd3a10cc; tree 93758152832d8371858620e0fc69cadf24f54617.
+PASS: 0008-netfilter-nf_tables-restore-set-elements-when-delete.patch matches 2106d8d41690; tree 63ff119d97549b85b3e4c27033cfde7f1f20f5fb.
+PASS: 0009-netfilter-nft_set_pipapo-make-pipapo_clone-helper-re.patch matches 6dfb21b2c4da; tree f43464cc929e6972289597c4d5990a67d9abb4f1.
+PASS: 0010-netfilter-nft_set_pipapo-prepare-destroy-function-fo.patch matches 60bfc5982a09; tree dceaa6508bd5dddab525dddd72a63956c8aafac9.
+PASS: 0011-netfilter-nft_set_pipapo-prepare-walk-function-for-o.patch matches 15be991cbfdf; tree 9e6fbc835357d6d981622653f2cb536f10f18042.
+PASS: 0012-netfilter-nft_set_pipapo-merge-deactivate-helper-int.patch matches b7c8fa3dff6f; tree 489d367b6f5c7dc9e540d1b7182a0ff916c751e1.
+PASS: 0013-netfilter-nft_set_pipapo-prepare-pipapo_get-helper-f.patch matches 3f2fa719bcb4; tree a339955f8c1993cf1a9b27e10edc8849860a8832.
+PASS: 0014-netfilter-nft_set_pipapo-move-cloning-of-match-info-.patch matches e056a5eb0769; tree d0bc91784150f35a17c50497fd2db436a89dfe30.
+PASS: 0015-netfilter-nft_set_pipapo-remove-dirty-flag.patch matches 271cbc4f4b66; tree 5b405bdce87d478cfe844e297ff980fc6d427cba.
+PASS: 0016-netfilter-nf_tables-do-not-remove-elements-if-set-ba.patch matches 873705b013b1; tree eeac2aaebf728a8e0839cf01ffb28aec4ed32647.
+PASS: 0017-netfilter-nf_tables-clone-set-on-flush-only.patch matches 0b4eb9d9d828; tree 49a4e02f09bd8b6791608f7972002ab7b0a5f5c7.
+PASS: 0018-netfilter-nft_set_pipapo-don-t-leak-bad-clone-into-f.patch matches 8805c7a55dd0; tree ec2d362a3d38aa13d34e132b8a016ff7bd716722.
+Result tree: ec2d362a3d38aa13d34e132b8a016ff7bd716722
+PASS: each exported patch reproduces its committed tree.

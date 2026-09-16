@@ -1,0 +1,37 @@
+Warning: Permanently added '[127.0.0.1]:22853' (ED25519) to the list of known hosts.
+[   13.594821] systemd-journald[138]: Collecting audit messages is disabled.
+[   13.641679] systemd[1]: modprobe@loop.service: Deactivated successfully.
+[   13.664693] systemd[1]: Finished modprobe@loop.service - Load Kernel Module loop.
+[   13.690739] systemd[1]: Finished systemd-modules-load.service - Load Kernel Modules.
+[   13.723355] systemd[1]: Finished systemd-remount-fs.service - Remount Root and Kernel File Systems.
+[   13.746715] systemd[1]: sys-fs-fuse-connections.mount - FUSE Control File System was skipped because of an unmet condition check (ConditionPathExists=/sys/fs/fuse/connections).
+[   13.751371] systemd[1]: sys-kernel-config.mount - Kernel Configuration File System was skipped because of an unmet condition check (ConditionPathExists=/sys/kernel/config).
+[   13.777267] systemd[1]: systemd-hwdb-update.service - Rebuild Hardware Database was skipped because of an unmet condition check (ConditionNeedsUpdate=/etc).
+[   13.778688] systemd[1]: systemd-pstore.service - Platform Persistent Storage Archival was skipped because of an unmet condition check (ConditionDirectoryNotEmpty=/sys/fs/pstore).
+[   13.807882] systemd[1]: Starting systemd-random-seed.service - Load/Save OS Random Seed...
+[   13.815520] systemd[1]: systemd-repart.service - Repartition Root Disk was skipped because no trigger condition checks were met.
+[   13.876967] systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+[   13.891910] systemd[1]: systemd-tpm2-setup.service - TPM2 SRK Setup was skipped because of an unmet condition check (ConditionSecurity=measured-uki).
+[   13.982330] systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+[   14.011379] systemd[1]: systemd-sysusers.service - Create System Users was skipped because no trigger condition checks were met.
+[   14.078497] systemd[1]: Starting systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev...
+[   14.565205] systemd[1]: Finished keyboard-setup.service - Set the console keyboard layout.
+[   14.591344] systemd[1]: Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[   14.720726] systemd[1]: Finished systemd-sysctl.service - Apply Kernel Variables.
+[   14.862792] systemd[1]: Finished systemd-tmpfiles-setup-dev.service - Create Static Device Nodes in /dev.
+[   14.873674] systemd[1]: Reached target local-fs-pre.target - Preparation for Local File Systems.
+[   14.918730] systemd[1]: Mounting mnt-shared.mount - /mnt/shared...
+[   14.950781] systemd[1]: Starting systemd-udevd.service - Rule-based Manager for Device Events and Files...
+[   15.137787] systemd[1]: Started systemd-journald.service - Journal Service.
+[   15.695857] systemd-journald[138]: Received client request to flush runtime journal.
+[   15.737453] systemd-journald[138]: File /var/log/journal/b08520f55475445db6de717c0cb76229/system.journal corrupted or uncleanly shut down, renaming and replacing.
+[   15.892369] EXT4-fs error (device sda): ext4_validate_block_bitmap:420: comm systemd-journal: bg 0: bad block bitmap checksum
+[   21.492813] e1000 0000:00:03.0 enp0s3: renamed from eth0
+[   24.126280] e1000: enp0s3 NIC Link is Up 1000 Mbps Full Duplex, Flow Control: RX
+[   24.131442] IPv6: ADDRCONF(NETDEV_CHANGE): enp0s3: link becomes ready
+[   30.201514] systemctl (274) used greatest stack depth: 24592 bytes left
+[   55.761945] EXT4-fs error (device sda): ext4_validate_block_bitmap:420: comm dpkg: bg 18: bad block bitmap checksum
+[   58.022678] dpkg (445) used greatest stack depth: 24432 bytes left
+[   60.584292] python3 (347) used greatest stack depth: 24336 bytes left
+[   71.067992] set_probe: loading out-of-tree module taints kernel.
+4096

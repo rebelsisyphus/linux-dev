@@ -1,0 +1,288 @@
+{
+  "series": [
+    {
+      "number": 1,
+      "local": "fa2382737f4827e83f061f71f683ad889398894d",
+      "upstream": "a2a0ffb0846895923991aa87e022dc228d53c125",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 2,
+      "local": "ac94bc96be3ae477a4dccb01cad9c31202a931a8",
+      "upstream": "b9f052dc68f69dac89fe1e24693354c033daa091",
+      "same_patch_id_as_25": false,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 3,
+      "local": "9b3a68992fdaa85c14399a88f5a1d159def95549",
+      "upstream": "26cec9d4144eb23c45cd5c033d5c141f04d61a9c",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 4,
+      "local": "5b6e9d53420a587d52a051810c09385df10d73a2",
+      "upstream": "9dad402b89e81a0516bad5e0ac009b7a0a80898f",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 5,
+      "local": "bdbaedf35639dfc03ed33b79ac756a3f3dc32f07",
+      "upstream": "ab0beafd52b98dfb8b8244b2c6794efbc87478db",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 6,
+      "local": "e95bc6179c1a37d5ff15cd705b35b79ef94b766b",
+      "upstream": "f04df573faf90bb828a2241b650598c02c074323",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 7,
+      "local": "faa3bd3a10ccdf7a85937a01a3275d6bcdccd410",
+      "upstream": "5b651783d80b97167ecd27dc6a4408c694873902",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 8,
+      "local": "2106d8d416904c2d2aeb33f4eee425b1a92d2afb",
+      "upstream": "e79b47a8615d42c68aaeb68971593333667382ed",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 9,
+      "local": "6dfb21b2c4daecbf898b374808be0ec900a5a46d",
+      "upstream": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 10,
+      "local": "60bfc5982a09cd267372e7325ee1f9360f54dcce",
+      "upstream": "8b8a2417558c632f249abebde97adf8c46540de2",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 11,
+      "local": "15be991cbfdf1e7a7ff8a6950296417ee68f4284",
+      "upstream": "6c108d9bee448a850b03e682836bfe91fca645cb",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 12,
+      "local": "b7c8fa3dff6f6888767c445567ec219e44217beb",
+      "upstream": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 13,
+      "local": "3f2fa719bcb4d0faf773fdc247de7fdb56d86d0a",
+      "upstream": "a238106703ab4ae1090b86eba128815b8626d8f1",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 14,
+      "local": "e056a5eb0769301e88022c6f8acff309feb9b32b",
+      "upstream": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+      "same_patch_id_as_25": false,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 15,
+      "local": "271cbc4f4b661c6d7000a90490304c1fc2325671",
+      "upstream": "532aec7e878b527fcee8877350ab5c5341789626",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 16,
+      "local": "873705b013b12be026bb675be651b42c389f12ff",
+      "upstream": "c9526aeb4998393171d85225ff540e28c7d4ab86",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 17,
+      "local": "0b4eb9d9d828e44e8a251ff4693fc65d7e9939ca",
+      "upstream": "fb7fb4016300ac622c964069e286dc83166a5d52",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    },
+    {
+      "number": 18,
+      "local": "8805c7a55dd02ac8d80822a040e96a08b7857c78",
+      "upstream": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+      "same_patch_id_as_25": true,
+      "same_patch_id_after_removing_annotation": true,
+      "authors_and_dates_preserved": true,
+      "global_files_equal_base": true,
+      "other_code_unchanged": true
+    }
+  ],
+  "integration": [
+    {
+      "previous": "c6d534bb92fa8e1d40b750ddca0ebf8bd367762f",
+      "local": "d7c52b63e57313abdbc7ba04eaf93454c9113eaa",
+      "subject": "netfilter: remove nf_conntrack_helper sysctl and modparam toggles",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "3fecead25098db145e55dd55b532619b487e1db2",
+      "local": "5c362c0bddee91c50dcd59121946cf4737d4e4bd",
+      "subject": "netfilter: nf_conntrack_expect: use conntrack GC to reap expectations",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "9672e4f20cbd6945b4ba75cc5ebb3a48f72d7155",
+      "local": "3dea106a3c61b3b42a7d799c3eb075e3f65ae7f4",
+      "subject": "netfilter: nf_conntrack_expect: add and use nf_ct_expect_related_pair()",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "9747fec90a347b7daa8841ff9285436f71e61bab",
+      "local": "87524663cd22df687e1802fa9725caab34fc7793",
+      "subject": "netfilter: nf_conntrack_expect: bail out on insert dead expectations",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "8555569eb180672f97a328cf2e0622b010d4c835",
+      "local": "e3722a4a3737655059f43cb16fa252aaa6b5dfcb",
+      "subject": "netfilter: nf_conntrack_expect: consolidate check for insertion of dead expectation",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "0d900f46d597566549abcdc35dd9dbf13c08bc7a",
+      "local": "45fdb4a4cbf250d17332d49320ca2f9fd3b6fa80",
+      "subject": "netfilter: ctnetlink: do not expose expectation DEAD flag",
+      "patch_id_and_message_preserved": true
+    },
+    {
+      "previous": "8e164084b7c0e212b86c2f1cb78ea46d07afbd6a",
+      "local": "a8fb09599f4ed39d3c2d2e3cd680b26ae7768741",
+      "subject": "netfilter: conntrack: preserve kABI for expectation GC",
+      "patch_id_and_message_preserved": true
+    }
+  ],
+  "removed": [
+    {
+      "upstream": "9f14cb030d987ae5e201e88cd345c6d772bcce51",
+      "tag": "v5.11-rc1",
+      "subject": "sched: Un-hide lockdep_tasklist_lock_is_held() for !LOCKDEP",
+      "purpose": "Keep tasklist lock-state declaration visible for RCU conditions in kernel/pid.c and kernel/exit.c.",
+      "local": "199e20e3cae6a2840b8180c185e3098f112086b3"
+    },
+    {
+      "upstream": "891cd1f99dd94746f0caf5eea0121079178ee9bf",
+      "tag": "v5.11-rc1",
+      "subject": "rcu: Un-hide lockdep maps for !LOCKDEP",
+      "purpose": "Keep RCU and Tasks Trace lock-map declarations visible to parsed conditions when lock allocation debugging is disabled.",
+      "local": "238d7dc5f7d47dec757ef6d45bbe71fb4dd75195"
+    },
+    {
+      "upstream": "d97f3bdf7a1c0346d3a272aa756d16633f0b8b3b",
+      "tag": "v5.11-rc1",
+      "subject": "net: Un-hide lockdep_sock_is_held() for !LOCKDEP",
+      "purpose": "Keep socket lock-state helper visible to destination-cache and TCP RCU conditions.",
+      "local": "7cf00cdfeb08f3de1d832ed4fbb1956ba50df0cb"
+    },
+    {
+      "upstream": "a72e9d5472055ca53faed106dc9a11c6b656e66d",
+      "tag": "v5.11-rc1",
+      "subject": "net: sched: Remove broken definitions and un-hide for !LOCKDEP",
+      "purpose": "Keep traffic-control helpers visible and remove the non-lockdep stub with the wrong chain parameter type.",
+      "local": "1d3bbc063f909e3dc1c088c7deee62a91e1b3754"
+    },
+    {
+      "upstream": "f505d4346f6129d4708338491cf23ca9cf1d8f2a",
+      "tag": "v5.11-rc1",
+      "subject": "srcu: Use a more appropriate lockdep helper",
+      "purpose": "Avoid naming the absent srcu_struct.dep_map field when lock allocation debugging is disabled.",
+      "local": "072a55701b5ff545aa221589f401de9e3cce935e"
+    },
+    {
+      "upstream": "cd539cff9470fe1dacf0bf5ab3f54f37b854d6fc",
+      "tag": "v5.11-rc1",
+      "subject": "lockdep: Provide dummy forward declaration of *_is_held() helpers",
+      "purpose": "Declare lock_is_held and lockdep_is_held for dead-code conditions when CONFIG_LOCKDEP=n.",
+      "local": "809c8b86940067a167c13b3af8399f4c78660d9a"
+    },
+    {
+      "upstream": "65e9eb1ccfe56b41a0d8bfec651ea014968413cb",
+      "tag": "v5.11-rc1",
+      "subject": "rcu: Prevent RCU_LOCKDEP_WARN() from swallowing the condition",
+      "purpose": "Retain RCU condition references without evaluating them when CONFIG_PROVE_RCU=n; prevents the PIPAPO helper warning.",
+      "local": "221756ea0995e3fb4d6a0ee4d28ce4bfffe02f5d"
+    }
+  ],
+  "restored_global_files": [
+    "include/linux/lockdep.h",
+    "include/linux/rcupdate.h",
+    "include/linux/rcupdate_trace.h",
+    "include/linux/sched/task.h",
+    "include/net/sch_generic.h",
+    "include/net/sock.h",
+    "kernel/rcu/srcutree.c"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "status": "PASS",
+  "architecture": "x86_64",
+  "kasan": true,
+  "prove_locking": true,
+  "prove_rcu": true,
+  "opaque_backend_cases": [
+    "bitmap",
+    "hashfast",
+    "hash",
+    "rhash",
+    "rbtree",
+    "pipapo"
+  ],
+  "concurrent_get_requests": 96,
+  "dynset_packets": 32,
+  "get_update_probe_counts": [
+    4,
+    8,
+    5,
+    4,
+    100,
+    32
+  ],
+  "flush_clone_failures": 1,
+  "cve_new_clone_failures": 8,
+  "cve_modified_clone_failures": 4,
+  "scratch_probe_hits": 68,
+  "scratch_probe_failures": 12,
+  "guest_taint": 4096,
+  "nft_ruleset_and_test_modules_clean": true,
+  "new_kernel_diagnostic_matches": 0,
+  "avx2_runtime_forced": false,
+  "initial_harness_exit": 1,
+  "initial_harness_failure": "pipapo_clone was inlined; kprobe name not present",
+  "corrected_probe": "pipapo_maybe_clone.part.0",
+  "corrected_remaining_tests_exit": 0,
+  "kernel_changed_for_test": false,
+  "source_tree": "2c73db0e777bc757c4416d2d9d0724c2a11e3ad7"
+}

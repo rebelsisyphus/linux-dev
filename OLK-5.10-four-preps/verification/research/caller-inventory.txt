@@ -1,0 +1,43 @@
+net/netfilter/nft_set_rbtree.c:722:		nf_tables_set_elem_destroy(ctx, set, &rbe->priv);
+net/netfilter/nft_set_pipapo.c:1247:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nft_set_pipapo.c:2316:		nf_tables_set_elem_destroy(ctx, set, &e->priv);
+net/netfilter/nft_set_bitmap.c:283:		nf_tables_set_elem_destroy(ctx, set, &be->priv);
+net/netfilter/nft_set_hash.c:158:		nft_set_elem_destroy(set, &he->priv, true);
+net/netfilter/nft_set_hash.c:168:	nft_set_elem_destroy(set, &he->priv, true);
+net/netfilter/nft_set_hash.c:431:	nf_tables_set_elem_destroy(&rhash_ctx->ctx, rhash_ctx->set, &he->priv);
+net/netfilter/nft_set_hash.c:686:			nf_tables_set_elem_destroy(ctx, set, &he->priv);
+net/netfilter/nft_dynset.c:43:	elem_priv = nft_set_elem_init(set, &priv->tmpl,
+net/netfilter/nft_dynset.c:50:	ext = nft_set_elem_ext(set, elem_priv);
+net/netfilter/nft_dynset.c:58:	nft_set_elem_destroy(set, elem_priv, false);
+net/netfilter/nft_dynset.c:78:	if (set->ops->update(set, &regs->data[priv->sreg_key], nft_dynset_new,
+net/netfilter/nft_dynset.c:145:	if (set->ops->update == NULL)
+net/netfilter/nf_tables_api.c:479:		if (expr->ops->deactivate)
+net/netfilter/nf_tables_api.c:480:			expr->ops->deactivate(ctx, expr, phase);
+net/netfilter/nf_tables_api.c:588:	struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:4753:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:4768:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:4841:	struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:5011:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:5096:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:5333:	priv = set->ops->get(ctx->net, set, &elem, flags);
+net/netfilter/nf_tables_api.c:5478:struct nft_elem_priv *nft_set_elem_init(const struct nft_set *set,
+net/netfilter/nf_tables_api.c:5491:	ext = nft_set_elem_ext(set, elem);
+net/netfilter/nf_tables_api.c:5522:void nft_set_elem_destroy(const struct nft_set *set,
+net/netfilter/nf_tables_api.c:5526:	struct nft_set_ext *ext = nft_set_elem_ext(set, elem_priv);
+net/netfilter/nf_tables_api.c:5547:void nf_tables_set_elem_destroy(const struct nft_ctx *ctx,
+net/netfilter/nf_tables_api.c:5551:	struct nft_set_ext *ext = nft_set_elem_ext(set, elem_priv);
+net/netfilter/nf_tables_api.c:5775:	elem.priv = nft_set_elem_init(set, &tmpl, elem.key.val.data,
+net/netfilter/nf_tables_api.c:5781:	ext = nft_set_elem_ext(set, elem.priv);
+net/netfilter/nf_tables_api.c:5845:	nf_tables_set_elem_destroy(ctx, set, elem.priv);
+net/netfilter/nf_tables_api.c:5934:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:5944:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:5956:	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+net/netfilter/nf_tables_api.c:6009:	elem.priv = nft_set_elem_init(set, &tmpl, elem.key.val.data,
+net/netfilter/nf_tables_api.c:6015:	ext = nft_set_elem_ext(set, elem.priv);
+net/netfilter/nf_tables_api.c:6023:	priv = set->ops->deactivate(ctx->net, set, &elem);
+net/netfilter/nf_tables_api.c:6059:	if (!set->ops->flush(ctx->net, set, elem->priv)) {
+net/netfilter/nf_tables_api.c:7983:	if (obj->ops->update)
+net/netfilter/nf_tables_api.c:7984:		obj->ops->update(obj, newobj);
+net/netfilter/nf_tables_api.c:8009:		nf_tables_set_elem_destroy(&trans->ctx,
+net/netfilter/nf_tables_api.c:8225:		nf_tables_set_elem_destroy(&ctx, trans->set, elem.priv);
+net/netfilter/nf_tables_api.c:8843:		nft_set_elem_destroy(nft_trans_elem_set(trans),

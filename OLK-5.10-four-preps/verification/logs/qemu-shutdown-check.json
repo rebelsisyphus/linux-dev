@@ -1,0 +1,5 @@
+{
+  "pid": 602866,
+  "process_exited": true,
+  "shutdown": "systemctl poweroff"
+}

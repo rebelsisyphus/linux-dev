@@ -1,0 +1,37 @@
+[
+  {
+    "previous": "c6d534bb92fa8e1d40b750ddca0ebf8bd367762f",
+    "local": "d7c52b63e57313abdbc7ba04eaf93454c9113eaa",
+    "subject": "netfilter: remove nf_conntrack_helper sysctl and modparam toggles"
+  },
+  {
+    "previous": "3fecead25098db145e55dd55b532619b487e1db2",
+    "local": "5c362c0bddee91c50dcd59121946cf4737d4e4bd",
+    "subject": "netfilter: nf_conntrack_expect: use conntrack GC to reap expectations"
+  },
+  {
+    "previous": "9672e4f20cbd6945b4ba75cc5ebb3a48f72d7155",
+    "local": "3dea106a3c61b3b42a7d799c3eb075e3f65ae7f4",
+    "subject": "netfilter: nf_conntrack_expect: add and use nf_ct_expect_related_pair()"
+  },
+  {
+    "previous": "9747fec90a347b7daa8841ff9285436f71e61bab",
+    "local": "87524663cd22df687e1802fa9725caab34fc7793",
+    "subject": "netfilter: nf_conntrack_expect: bail out on insert dead expectations"
+  },
+  {
+    "previous": "8555569eb180672f97a328cf2e0622b010d4c835",
+    "local": "e3722a4a3737655059f43cb16fa252aaa6b5dfcb",
+    "subject": "netfilter: nf_conntrack_expect: consolidate check for insertion of dead expectation"
+  },
+  {
+    "previous": "0d900f46d597566549abcdc35dd9dbf13c08bc7a",
+    "local": "45fdb4a4cbf250d17332d49320ca2f9fd3b6fa80",
+    "subject": "netfilter: ctnetlink: do not expose expectation DEAD flag"
+  },
+  {
+    "previous": "8e164084b7c0e212b86c2f1cb78ea46d07afbd6a",
+    "local": "a8fb09599f4ed39d3c2d2e3cd680b26ae7768741",
+    "subject": "netfilter: conntrack: preserve kABI for expectation GC"
+  }
+]

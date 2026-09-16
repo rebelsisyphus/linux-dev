@@ -1,0 +1,98 @@
+From a68c8c6a2c77a407488faddbfae8bc4412ea3f1d Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Thu, 25 Apr 2024 14:06:44 +0200
+Subject: [PATCH 11/17] netfilter: nft_set_pipapo: merge deactivate helper into
+ caller
+
+mainline inclusion
+from mainline-v6.10-rc1
+commit c5444786d0ea2417a5e2cee7bd67137fc8bad687
+category: bugfix
+bugzilla: https://atomgit.com/src-openeuler/kernel/issues/17278
+CVE: CVE-2026-72252
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c5444786d0ea2417a5e2cee7bd67137fc8bad687
+
+--------------------------------
+
+Its the only remaining call site so there is no need for this to
+be separated anymore.
+
+Signed-off-by: Florian Westphal <fw@strlen.de>
+Reviewed-by: Stefano Brivio <sbrivio@redhat.com>
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/netfilter/nft_set_pipapo.c | 39 ++++++++--------------------------
+ 1 file changed, 9 insertions(+), 30 deletions(-)
+
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index 36e17d28f4e2..a0bee8c734ae 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1820,52 +1820,31 @@ static void nft_pipapo_activate(const struct net *net,
+ }
+ 
+ /**
+- * pipapo_deactivate() - Check that element is in set, mark as inactive
++ * nft_pipapo_deactivate() - Search for element and make it inactive
+  * @net:	Network namespace
+  * @set:	nftables API set representation
+- * @data:	Input key data
+- * @ext:	nftables API extension pointer, used to check for end element
+- *
+- * This is a convenience function that can be called from both
+- * nft_pipapo_deactivate() and nft_pipapo_flush(), as they are in fact the same
+- * operation.
++ * @elem:	nftables API element representation containing key data
+  *
+  * Return: deactivated element if found, NULL otherwise.
+  */
+-static void *pipapo_deactivate(const struct net *net, const struct nft_set *set,
+-			       const u8 *data, const struct nft_set_ext *ext)
++static struct nft_elem_priv *
++nft_pipapo_deactivate(const struct net *net, const struct nft_set *set,
++		      const struct nft_set_elem *elem)
+ {
+ 	struct nft_pipapo_elem *e;
+ 
+-	e = pipapo_get(net, set, data, nft_genmask_next(net),
+-		       nft_net_tstamp(net), GFP_KERNEL);
++	e = pipapo_get(net, set, (const u8 *)elem->key.val.data,
++		       nft_genmask_next(net), nft_net_tstamp(net), GFP_KERNEL);
+ 	if (IS_ERR(e))
+ 		return NULL;
+ 
+ 	nft_set_elem_change_active(net, set, &e->ext);
+ 
+-	return e;
+-}
+-
+-/**
+- * nft_pipapo_deactivate() - Call pipapo_deactivate() to make element inactive
+- * @net:	Network namespace
+- * @set:	nftables API set representation
+- * @elem:	nftables API element representation containing key data
+- *
+- * Return: deactivated element if found, NULL otherwise.
+- */
+-static struct nft_elem_priv *
+-nft_pipapo_deactivate(const struct net *net, const struct nft_set *set,
+-		      const struct nft_set_elem *elem)
+-{
+-	const struct nft_set_ext *ext = nft_set_elem_ext(set, elem->priv);
+-
+-	return pipapo_deactivate(net, set, (const u8 *)elem->key.val.data, ext);
++	return &e->priv;
+ }
+ 
+ /**
+- * nft_pipapo_flush() - Call pipapo_deactivate() to make element inactive
++ * nft_pipapo_flush() - make element inactive
+  * @net:	Network namespace
+  * @set:	nftables API set representation
+  * @elem_priv:	nftables API element representation containing key data
+-- 
+2.43.0
+

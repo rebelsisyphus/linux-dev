@@ -1,0 +1,115 @@
+From 1391bff5c36debe701ce6f84fcdff2cf49aaa789 Mon Sep 17 00:00:00 2001
+From: Florian Westphal <fw@strlen.de>
+Date: Thu, 15 Feb 2024 09:29:30 +0100
+Subject: [PATCH 07/17] netfilter: nft_set_pipapo: use GFP_KERNEL for
+ insertions
+
+mainline inclusion
+from mainline-v6.9-rc1
+commit 5b651783d80b97167ecd27dc6a4408c694873902
+category: bugfix
+bugzilla: https://atomgit.com/src-openeuler/kernel/issues/17278
+CVE: CVE-2026-72252
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=5b651783d80b97167ecd27dc6a4408c694873902
+
+--------------------------------
+
+An earlier attempt changed this to GFP_KERNEL, but the get helper is
+also called for get requests from userspace, which uses rcu.
+
+Let the caller pass in the kmalloc flags to allow insertions
+to schedule if needed.
+
+Suggested-by: Pablo Neira Ayuso <pablo@netfilter.org>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+
+Conflicts:
+        net/netfilter/nft_set_pipapo.c
+[Dong Chenchen: context conflicts due to:
+07ace0bbe03b: target retains zero-sized scratch allocations.]
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/netfilter/nft_set_pipapo.c | 18 +++++++++++-------
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index 177a1f8c2a5c..f1797b89c0e0 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -505,6 +505,7 @@ bool nft_pipapo_lookup(const struct net *net, const struct nft_set *set,
+  * @data:	Key data to be matched against existing elements
+  * @genmask:	If set, check that element is active in given genmask
+  * @tstamp:	timestamp to check for expired elements
++ * @gfp:	the type of memory to allocate (see kmalloc).
+  *
+  * This is essentially the same as the lookup function, except that it matches
+  * key data against the uncommitted copy and doesn't use preallocated maps for
+@@ -515,7 +516,7 @@ bool nft_pipapo_lookup(const struct net *net, const struct nft_set *set,
+ static struct nft_pipapo_elem *pipapo_get(const struct net *net,
+ 					  const struct nft_set *set,
+ 					  const u8 *data, u8 genmask,
+-					  u64 tstamp)
++					  u64 tstamp, gfp_t gfp)
+ {
+ 	struct nft_pipapo_elem *ret = ERR_PTR(-ENOENT);
+ 	struct nft_pipapo *priv = nft_set_priv(set);
+@@ -526,13 +527,13 @@ static struct nft_pipapo_elem *pipapo_get(const struct net *net,
+ 
+ 	m = priv->clone;
+ 
+-	res_map = kmalloc_array(m->bsize_max, sizeof(*res_map), GFP_ATOMIC);
++	res_map = kmalloc_array(m->bsize_max, sizeof(*res_map), gfp);
+ 	if (!res_map) {
+ 		ret = ERR_PTR(-ENOMEM);
+ 		goto out;
+ 	}
+ 
+-	fill_map = kcalloc(m->bsize_max, sizeof(*res_map), GFP_ATOMIC);
++	fill_map = kcalloc(m->bsize_max, sizeof(*res_map), gfp);
+ 	if (!fill_map) {
+ 		ret = ERR_PTR(-ENOMEM);
+ 		goto out;
+@@ -610,7 +611,8 @@ nft_pipapo_get(const struct net *net, const struct nft_set *set,
+ 	struct nft_pipapo_elem *e;
+ 
+ 	e = pipapo_get(net, set, (const u8 *)elem->key.val.data,
+-		       nft_genmask_cur(net), get_jiffies_64());
++		       nft_genmask_cur(net), get_jiffies_64(),
++		       GFP_ATOMIC);
+ 	if (IS_ERR(e))
+ 		return ERR_CAST(e);
+ 
+@@ -1223,7 +1225,7 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
+ 	else
+ 		end = start;
+ 
+-	dup = pipapo_get(net, set, start, genmask, tstamp);
++	dup = pipapo_get(net, set, start, genmask, tstamp, GFP_KERNEL);
+ 	if (!IS_ERR(dup)) {
+ 		/* Check if we already have the same exact entry */
+ 		const struct nft_data *dup_key, *dup_end;
+@@ -1245,7 +1247,8 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
+ 
+ 	if (PTR_ERR(dup) == -ENOENT) {
+ 		/* Look for partially overlapping entries */
+-		dup = pipapo_get(net, set, end, nft_genmask_next(net), tstamp);
++		dup = pipapo_get(net, set, end, nft_genmask_next(net), tstamp,
++				 GFP_KERNEL);
+ 	}
+ 
+ 	if (PTR_ERR(dup) != -ENOENT) {
+@@ -1834,7 +1837,8 @@ static void *pipapo_deactivate(const struct net *net, const struct nft_set *set,
+ {
+ 	struct nft_pipapo_elem *e;
+ 
+-	e = pipapo_get(net, set, data, nft_genmask_next(net), nft_net_tstamp(net));
++	e = pipapo_get(net, set, data, nft_genmask_next(net),
++		       nft_net_tstamp(net), GFP_KERNEL);
+ 	if (IS_ERR(e))
+ 		return NULL;
+ 
+-- 
+2.43.0
+

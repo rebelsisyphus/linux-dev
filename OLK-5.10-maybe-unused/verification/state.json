@@ -1,0 +1,23 @@
+{
+  "repo": "/home/sisyphus/code/kernel",
+  "upstream": "/home/sisyphus/code/linux",
+  "root": "/tmp/cve-72252-maybe-unused-9seqhpb5",
+  "source": "/tmp/cve-72252-maybe-unused-9seqhpb5/source",
+  "artifact_dir": "/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused",
+  "base": "b8095978261c8f5739d74a5b1ef5e117b863420f",
+  "branch": "backport/CVE-2026-72252-OLK-5.10-maybe-unused",
+  "series_branch": "backport/CVE-2026-72252-OLK-5.10-maybe-unused-series",
+  "previous_branch": "backport/CVE-2026-72252-OLK-5.10-review-fixes",
+  "previous_integration_head": "8e164084b7c0e212b86c2f1cb78ea46d07afbd6a",
+  "previous_series_head": "00fc45f16e3c7a16fc4ce82f5600569dea033aa0",
+  "original_series_head": "3618a1a7f94d4f2690ae4aef0095ce49229f20e6",
+  "original_integration_head": "ed7491a7c5f0cc7d551c240654140f40763a4a1d",
+  "nft_kabi_required": false,
+  "runtime_testing": false,
+  "author_name": "Dong Chenchen",
+  "author_email": "dongchenchen2@huawei.com",
+  "series_head": "8805c7a55dd02ac8d80822a040e96a08b7857c78",
+  "integration_head": "a8fb09599f4ed39d3c2d2e3cd680b26ae7768741",
+  "integration_tree": "21b04e652765261d1e10d5321867526a2e59107f",
+  "compiled_equivalent_commit": "855cd8b996ed75a750f8eeea72e87374d25daab6"
+}

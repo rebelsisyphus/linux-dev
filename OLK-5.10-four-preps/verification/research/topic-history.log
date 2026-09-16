@@ -1,0 +1,81 @@
+f04df573faf90bb828a2241b650598c02c074323 2024-02-13 netfilter: nft_set_pipapo: constify lookup fn args where possible
+Those get called from packet path, content must not be modified.
+No functional changes intended.
+
+Reviewed-by: Stefano Brivio <sbrivio@redhat.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+
+ab0beafd52b98dfb8b8244b2c6794efbc87478db 2024-02-02 netfilter: nft_set_pipapo: remove static in nft_pipapo_get()
+This has slipped through when reducing memory footprint for set
+elements, remove it.
+
+Fixes: 9dad402b89e8 ("netfilter: nf_tables: expose opaque set element as struct nft_elem_priv")
+Reported-by: Florian Westphal <fw@strlen.de>
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+078996fcd657e6e0c3a72b7d5806d04c32e74250 2023-10-18 netfilter: nf_tables: set->ops->insert returns opaque set element in case of EEXIST
+Return struct nft_elem_priv instead of struct nft_set_ext for
+consistency with ("netfilter: nf_tables: expose opaque set element as
+struct nft_elem_priv") and to prepare the introduction of element
+timeout updates from control path.
+
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+0e1ea651c9717ddcd8e0648d8468477a31867b0a 2023-10-16 netfilter: nf_tables: shrink memory consumption of set elements
+Instead of copying struct nft_set_elem into struct nft_trans_elem, store
+the pointer to the opaque set element object in the transaction. Adapt
+set backend API (and set backend implementations) to take the pointer to
+opaque set element representation whenever required.
+
+This patch deconstifies .remove() and .activate() set backend API since
+these modify the set element opaque object. And it also constify
+nft_set_elem_ext() this provides access to the nft_set_ext struct
+without updating the object.
+
+According to pahole on x86_64, this patch shrinks struct nft_trans_elem
+size from 216 to 24 bytes.
+
+This patch also reduces stack memory consumption by removing the
+template struct nft_set_elem object, using the opaque set element object
+instead such as from the set iterator API, catchall elements and the get
+element command.
+
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+9dad402b89e81a0516bad5e0ac009b7a0a80898f 2023-10-18 netfilter: nf_tables: expose opaque set element as struct nft_elem_priv
+Add placeholder structure and place it at the beginning of each struct
+nft_*_elem for each existing set backend, instead of exposing elements
+as void type to the frontend which defeats compiler type checks. Use
+this pointer to this new type to replace void *.
+
+This patch updates the following set backend API to use this new struct
+nft_elem_priv placeholder structure:
+
+- update
+- deactivate
+- flush
+- get
+
+as well as the following helper functions:
+
+- nft_set_elem_ext()
+- nft_set_elem_init()
+- nft_set_elem_destroy()
+- nf_tables_set_elem_destroy()
+
+This patch adds nft_elem_priv_cast() to cast struct nft_elem_priv to
+native element representation from the corresponding set backend.
+BUILD_BUG_ON() makes sure this .priv placeholder is always at the top
+of the opaque set element representation.
+
+Suggested-by: Florian Westphal <fw@strlen.de>
+Signed-off-by: Pablo Neira Ayuso <pablo@netfilter.org>
+
+a2a0ffb0846895923991aa87e022dc228d53c125 2023-05-05 netfilter: nft_set_pipapo: Use struct_size()
+Use struct_size() instead of hand writing it.
+This is less verbose and more informative.
+
+Signed-off-by: Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+Reviewed-by: Simon Horman <simon.horman@corigine.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+

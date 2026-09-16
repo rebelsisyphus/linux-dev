@@ -1,0 +1,158 @@
+diff --git a/include/linux/lockdep.h b/include/linux/lockdep.h
+index 99ddfd456c07..3eca9f91b9a5 100644
+--- a/include/linux/lockdep.h
++++ b/include/linux/lockdep.h
+@@ -392,12 +392,6 @@ static inline void lockdep_unregister_key(struct lock_class_key *key)
+ 
+ #define lockdep_depth(tsk)	(0)
+ 
+-/*
+- * Dummy forward declarations, allow users to write less ifdef-y code
+- * and depend on dead code elimination.
+- */
+-extern int lock_is_held(const void *);
+-extern int lockdep_is_held(const void *);
+ #define lockdep_is_held_type(l, r)		(1)
+ 
+ #define lockdep_assert_held(l)			do { (void)(l); } while (0)
+diff --git a/include/linux/rcupdate.h b/include/linux/rcupdate.h
+index 3cf938a7112b..71dcc891c72a 100644
+--- a/include/linux/rcupdate.h
++++ b/include/linux/rcupdate.h
+@@ -254,11 +254,6 @@ bool rcu_lockdep_current_cpu_online(void);
+ static inline bool rcu_lockdep_current_cpu_online(void) { return true; }
+ #endif /* #else #if defined(CONFIG_HOTPLUG_CPU) && defined(CONFIG_PROVE_RCU) */
+ 
+-extern struct lockdep_map rcu_lock_map;
+-extern struct lockdep_map rcu_bh_lock_map;
+-extern struct lockdep_map rcu_sched_lock_map;
+-extern struct lockdep_map rcu_callback_map;
+-
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 
+ static inline void rcu_lock_acquire(struct lockdep_map *map)
+@@ -271,6 +266,10 @@ static inline void rcu_lock_release(struct lockdep_map *map)
+ 	lock_release(map, _THIS_IP_);
+ }
+ 
++extern struct lockdep_map rcu_lock_map;
++extern struct lockdep_map rcu_bh_lock_map;
++extern struct lockdep_map rcu_sched_lock_map;
++extern struct lockdep_map rcu_callback_map;
+ int debug_lockdep_rcu_enabled(void);
+ int rcu_read_lock_held(void);
+ int rcu_read_lock_bh_held(void);
+@@ -348,7 +347,7 @@ static inline void rcu_preempt_sleep_check(void) { }
+ 
+ #else /* #ifdef CONFIG_PROVE_RCU */
+ 
+-#define RCU_LOCKDEP_WARN(c, s) do { } while (0 && (c))
++#define RCU_LOCKDEP_WARN(c, s) do { } while (0)
+ #define rcu_sleep_check() do { } while (0)
+ 
+ #endif /* #else #ifdef CONFIG_PROVE_RCU */
+diff --git a/include/linux/rcupdate_trace.h b/include/linux/rcupdate_trace.h
+index 86c8f6c98412..3e7919fc5f34 100644
+--- a/include/linux/rcupdate_trace.h
++++ b/include/linux/rcupdate_trace.h
+@@ -11,10 +11,10 @@
+ #include <linux/sched.h>
+ #include <linux/rcupdate.h>
+ 
+-extern struct lockdep_map rcu_trace_lock_map;
+-
+ #ifdef CONFIG_DEBUG_LOCK_ALLOC
+ 
++extern struct lockdep_map rcu_trace_lock_map;
++
+ static inline int rcu_read_lock_trace_held(void)
+ {
+ 	return lock_is_held(&rcu_trace_lock_map);
+diff --git a/include/linux/sched/task.h b/include/linux/sched/task.h
+index 51e57eee058e..11c23dd5669a 100644
+--- a/include/linux/sched/task.h
++++ b/include/linux/sched/task.h
+@@ -48,7 +48,9 @@ extern spinlock_t mmlist_lock;
+ extern union thread_union init_thread_union;
+ extern struct task_struct init_task;
+ 
++#ifdef CONFIG_PROVE_RCU
+ extern int lockdep_tasklist_lock_is_held(void);
++#endif /* #ifdef CONFIG_PROVE_RCU */
+ 
+ extern asmlinkage void schedule_tail(struct task_struct *prev);
+ extern void init_idle(struct task_struct *idle, int cpu);
+diff --git a/include/net/sch_generic.h b/include/net/sch_generic.h
+index b945a14155ed..52e553e7d470 100644
+--- a/include/net/sch_generic.h
++++ b/include/net/sch_generic.h
+@@ -476,6 +476,7 @@ struct tcf_block {
+ 	struct mutex proto_destroy_lock; /* Lock for proto_destroy hashtable. */
+ };
+ 
++#ifdef CONFIG_PROVE_LOCKING
+ static inline bool lockdep_tcf_chain_is_locked(struct tcf_chain *chain)
+ {
+ 	return lockdep_is_held(&chain->filter_chain_lock);
+@@ -485,6 +486,17 @@ static inline bool lockdep_tcf_proto_is_locked(struct tcf_proto *tp)
+ {
+ 	return lockdep_is_held(&tp->lock);
+ }
++#else
++static inline bool lockdep_tcf_chain_is_locked(struct tcf_block *chain)
++{
++	return true;
++}
++
++static inline bool lockdep_tcf_proto_is_locked(struct tcf_proto *tp)
++{
++	return true;
++}
++#endif /* #ifdef CONFIG_PROVE_LOCKING */
+ 
+ #define tcf_chain_dereference(p, chain)					\
+ 	rcu_dereference_protected(p, lockdep_tcf_chain_is_locked(chain))
+diff --git a/include/net/sock.h b/include/net/sock.h
+index 8ea9337741dc..b8ee1f32b3d9 100644
+--- a/include/net/sock.h
++++ b/include/net/sock.h
+@@ -1681,11 +1681,13 @@ do {									\
+ 	lockdep_init_map(&(sk)->sk_lock.dep_map, (name), (key), 0);	\
+ } while (0)
+ 
++#ifdef CONFIG_LOCKDEP
+ static inline bool lockdep_sock_is_held(const struct sock *sk)
+ {
+ 	return lockdep_is_held(&sk->sk_lock) ||
+ 	       lockdep_is_held(&sk->sk_lock.slock);
+ }
++#endif
+ 
+ void lock_sock_nested(struct sock *sk, int subclass);
+ 
+diff --git a/kernel/rcu/srcutree.c b/kernel/rcu/srcutree.c
+index 0e9050f60158..579dcc77f28d 100644
+--- a/kernel/rcu/srcutree.c
++++ b/kernel/rcu/srcutree.c
+@@ -951,7 +951,7 @@ static void __synchronize_srcu(struct srcu_struct *ssp, bool do_norm)
+ {
+ 	struct rcu_synchronize rcu;
+ 
+-	RCU_LOCKDEP_WARN(lockdep_is_held(ssp) ||
++	RCU_LOCKDEP_WARN(lock_is_held(&ssp->dep_map) ||
+ 			 lock_is_held(&rcu_bh_lock_map) ||
+ 			 lock_is_held(&rcu_lock_map) ||
+ 			 lock_is_held(&rcu_sched_lock_map),
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index ebc63629dc95..5287c4eb1031 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1197,7 +1197,7 @@ static int pipapo_realloc_scratch(struct nft_pipapo_match *clone,
+ 	return 0;
+ }
+ 
+-static bool nft_pipapo_transaction_mutex_held(const struct nft_set *set)
++static bool __maybe_unused nft_pipapo_transaction_mutex_held(const struct nft_set *set)
+ {
+ #ifdef CONFIG_PROVE_LOCKING
+ 	const struct net *net = read_pnet(&set->net);

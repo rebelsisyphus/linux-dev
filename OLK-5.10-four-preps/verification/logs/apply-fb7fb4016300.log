@@ -1,0 +1,76 @@
+Checking patch include/net/netfilter/nf_tables.h...
+error: while searching for:
+ * @NFT_ITER_UNSPEC: unspecified, to catch errors
+ * @NFT_ITER_READ: read-only iteration over set elements
+ * @NFT_ITER_UPDATE: iteration under mutex to update set element state
+ */
+enum nft_iter_type {
+	NFT_ITER_UNSPEC,
+	NFT_ITER_READ,
+	NFT_ITER_UPDATE,
+};
+
+struct nft_set;
+
+error: patch failed: include/net/netfilter/nf_tables.h:320
+Checking patch net/netfilter/nf_tables_api.c...
+error: while searching for:
+	}
+}
+
+static void nft_map_deactivate(const struct nft_ctx *ctx, struct nft_set *set)
+{
+	struct nft_set_iter iter = {
+
+error: patch failed: net/netfilter/nf_tables_api.c:833
+error: while searching for:
+
+static int nft_set_flush(struct nft_ctx *ctx, struct nft_set *set, u8 genmask)
+{
+	struct nft_set_iter iter = {
+		.genmask	= genmask,
+		.type		= NFT_ITER_UPDATE,
+		.fn		= nft_setelem_flush,
+	};
+
+
+error: patch failed: net/netfilter/nf_tables_api.c:7903
+Checking patch net/netfilter/nft_set_hash.c...
+error: while searching for:
+{
+	switch (iter->type) {
+	case NFT_ITER_UPDATE:
+		/* only relevant for netlink dumps which use READ type */
+		WARN_ON_ONCE(iter->skip != 0);
+
+
+error: patch failed: net/netfilter/nft_set_hash.c:374
+Checking patch net/netfilter/nft_set_pipapo.c...
+Hunk #1 succeeded at 2126 (offset -18 lines).
+Checking patch net/netfilter/nft_set_rbtree.c...
+error: while searching for:
+	struct nft_rbtree *priv = nft_set_priv(set);
+
+	switch (iter->type) {
+	case NFT_ITER_UPDATE:
+		lockdep_assert_held(&nft_pernet(ctx->net)->commit_mutex);
+
+		if (nft_array_may_resize(set) < 0) {
+			iter->err = -ENOMEM;
+			break;
+		}
+		nft_rbtree_do_walk(ctx, set, iter);
+		break;
+	case NFT_ITER_READ:
+
+error: patch failed: net/netfilter/nft_set_rbtree.c:861
+Applying patch include/net/netfilter/nf_tables.h with 1 reject...
+Rejected hunk #1.
+Applying patch net/netfilter/nf_tables_api.c with 2 rejects...
+Rejected hunk #1.
+Rejected hunk #2.
+Applying patch net/netfilter/nft_set_hash.c with 1 reject...
+Rejected hunk #1.
+Applied patch net/netfilter/nft_set_pipapo.c cleanly.
+Applying patch net/netfilter/nft_set_rbtree.c with 1 reject...
+Rejected hunk #1.

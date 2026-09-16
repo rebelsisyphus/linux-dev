@@ -1,0 +1,14 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+error: while searching for:
+	priv->clone = new_clone;
+}
+
+static void nft_pipapo_abort(const struct nft_set *set)
+{
+	struct nft_pipapo *priv = nft_set_priv(set);
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1697
+Hunk #2 succeeded at 1763 (offset 47 lines).
+Applying patch net/netfilter/nft_set_pipapo.c with 1 reject...
+Rejected hunk #1.
+Hunk #2 applied cleanly.

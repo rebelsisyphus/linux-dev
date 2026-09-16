@@ -1,0 +1,55 @@
+From fa2382737f4827e83f061f71f683ad889398894d Mon Sep 17 00:00:00 2001
+From: Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+Date: Fri, 5 May 2023 23:26:34 +0200
+Subject: [PATCH 01/18] netfilter: nft_set_pipapo: Use struct_size()
+
+mainline inclusion
+from mainline-v6.5-rc1
+commit a2a0ffb0846895923991aa87e022dc228d53c125
+category: bugfix
+bugzilla: https://atomgit.com/src-openeuler/kernel/issues/17278
+CVE: CVE-2026-72252
+
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=a2a0ffb0846895923991aa87e022dc228d53c125
+
+--------------------------------
+
+Use struct_size() instead of hand writing it.
+This is less verbose and more informative.
+
+Signed-off-by: Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+Reviewed-by: Simon Horman <simon.horman@corigine.com>
+Signed-off-by: Florian Westphal <fw@strlen.de>
+
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/netfilter/nft_set_pipapo.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index 5ec6205b2167..eff6596c046e 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1321,8 +1321,7 @@ static struct nft_pipapo_match *pipapo_clone(struct nft_pipapo_match *old)
+ 	struct nft_pipapo_match *new;
+ 	int i;
+ 
+-	new = kmalloc(sizeof(*new) + sizeof(*dst) * old->field_count,
+-		      GFP_KERNEL);
++	new = kmalloc(struct_size(new, f, old->field_count), GFP_KERNEL);
+ 	if (!new)
+ 		return ERR_PTR(-ENOMEM);
+ 
+@@ -2174,8 +2173,7 @@ static int nft_pipapo_init(const struct nft_set *set,
+ 	if (field_count > NFT_PIPAPO_MAX_FIELDS)
+ 		return -EINVAL;
+ 
+-	m = kmalloc(sizeof(*priv->match) + sizeof(*f) * field_count,
+-		    GFP_KERNEL);
++	m = kmalloc(struct_size(m, f, field_count), GFP_KERNEL);
+ 	if (!m)
+ 		return -ENOMEM;
+ 
+-- 
+2.43.0
+

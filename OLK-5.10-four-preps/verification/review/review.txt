@@ -1,0 +1,125 @@
+CVE-2026-72252 OLK-5.10: four-prerequisite reroll review
+
+Scope: all 17 exported patches, emphasizing the four new prerequisites,
+ab0beafd52b9 and preservation of existing rollback/GC behavior. The seven
+conntrack commits replayed after this series are unchanged by patch-id and
+commit message. nft kABI work is excluded at the explicit user request.
+
+Commits, in application order:
+1. 7f492c9c32df netfilter: nft_set_pipapo: Use struct_size()
+2. 86475099d1d1 netfilter: nf_tables: fix false-positive lockdep splat
+3. caf9cfa04c51 netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush
+4. 5cbc64424075 netfilter: nf_tables: expose opaque set element as struct nft_elem_priv
+5. d1ebcba612d6 netfilter: nft_set_pipapo: remove static in nft_pipapo_get()
+6. 1cf216dbe57d netfilter: nft_set_pipapo: constify lookup fn args where possible
+7. 1391bff5c36d netfilter: nft_set_pipapo: use GFP_KERNEL for insertions
+8. 7cf0a4ad7938 netfilter: nft_set_pipapo: make pipapo_clone helper return NULL
+9. 2f1efdf84638 netfilter: nft_set_pipapo: prepare destroy function for on-demand clone
+10. 52923552e0e6 netfilter: nft_set_pipapo: prepare walk function for on-demand clone
+11. a68c8c6a2c77 netfilter: nft_set_pipapo: merge deactivate helper into caller
+12. 6b2feef39472 netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone
+13. 1565151a320a netfilter: nft_set_pipapo: move cloning of match info to insert/removal path
+14. 445da5645499 netfilter: nft_set_pipapo: remove dirty flag
+15. b409bfc1aa43 netfilter: nf_tables: do not remove elements if set backend implements .abort
+16. 3d00fb40b2c8 netfilter: nf_tables: clone set on flush only
+17. 3618a1a7f94d netfilter: nft_set_pipapo: don't leak bad clone into future transaction
+
+REACHABILITY: confirmed
+NF_TABLES is enabled in module and built-in compile configurations. QEMU
+kprobes observed all five backend GET callbacks and rhash UPDATE. Tests
+also exercised both fixed-size hash implementations, rollback, flush,
+netns release, and the PIPAPO packet path.
+
+ENTRY-POINT: none; existing backend callback types are updated together.
+
+CHANGE-1: allocation size arithmetic (a2a0ffb08468).
+  pipapo_clone and nft_pipapo_init retain the same field array and GFP
+  context. struct_size accounts for that existing flexible array. No
+  field_count or resource ownership changes are introduced.
+
+CHANGE-2: opaque set element types (9dad402b89e8).
+  Traced allocation -> insert/update -> get/deactivate -> remove ->
+  transaction/GC destruction for bitmap, hash/rhash, rbtree and PIPAPO.
+  Each placeholder is at offset zero, enforced by upstream BUILD_BUG_ON
+  checks. Native-to-opaque conversion retains the allocation base and
+  elemsize/ext addressing. GC void pointers still refer to the same base.
+  All affected callbacks and the dynset new callback compile consistently.
+  The target NULL-on-allocation-failure contract and single-expression
+  setup/cleanup are preserved; ERR_PTR semantics from newer allocation
+  code were not copied into the older caller paths. Flush still returns
+  bool and preserves the existing frontend checks.
+
+CHANGE-3: GET local variable lifetime (ab0beafd52b9).
+  The erroneous static pointer introduced by 9dad402b89e8 is removed in
+  the immediately following patch. Final GET uses a per-call local, checks
+  IS_ERR before obtaining the opaque address, and retains RCU protection.
+  Concurrent GET requests across four sets returned the requested keys.
+  No direct subsequent Fixes for this repair was found in the searched
+  upstream snapshot; the original defect is closed in the delivered set.
+
+CHANGE-4: const qualifiers (f04df573faf9).
+  Checked generic and AVX2 lookup helpers, refill, walk and GC reads. The
+  qualifier does not change scratch-map mutability or table ownership.
+  Existing 791a615b7ad2 map initialization remains in the AVX2 fallback.
+  Both AVX2 and generic objects compile. Runtime did not force AVX2.
+
+CHANGE-5: transaction-lock assertions (b9f052dc68f6).
+  nft_pernet and commit_mutex already exist. Protected dereferences use
+  the same per-net mutex held by transactions, map deactivation and netns
+  release. The final commit uses upstream rcu_replace_pointer semantics.
+  Lockdep/RCU-enabled runtime paths passed. With PROVE_RCU disabled, the
+  target RCU macro removes the assertion expression and GCC warns that
+  the static helper is unused. This is a nonfunctional build warning;
+  no unrelated helper annotation or RCU framework change was added.
+
+CHANGE-6: on-demand cloning and NEW/MOD/ERR rollback.
+  Verified GFP_KERNEL for transaction lookups and GFP_ATOMIC for GET.
+  Insert rejects missing/ERR clones. Partial insertion or scratch failure
+  frees a NEW clone immediately or leaves MOD as ERR for transaction abort.
+  The retained separate GET implementation reads the committed match.
+  The backend abort owns clone disposal; the core does not remove NEW
+  elements individually from backends implementing abort. Allocation fault
+  tests cover NEW, MOD, subsequent requests, and later transactions.
+
+CHANGE-7: flush-only iterator cloning (fb7fb4016300).
+  Only NFT_ITER_UPDATE_CLONE walks allocate a clone. Ordinary UPDATE walks
+  reuse one or read the committed view under the transaction mutex. Hash,
+  bitmap and rbtree walks do not branch on iterator type in this target.
+  Their callback semantics therefore remain valid for the new enum value.
+  Map/table/anonymous-map/netns release and rollback references were tested;
+  forced clone failure during flush rolled back and a later flush passed.
+
+CHANGE-8: existing GC and release ordering.
+  9df95785d3d8 remains effective: unlink expired entries from the clone,
+  publish the new live match, then queue reclamation. Clone and match
+  destruction retain pending-GC checks and the existing element lifetime.
+  Old generation restoration and transaction timestamp fixes are retained.
+  Timeout GC and subsequent flush passed with KASAN/RCU/lock debugging.
+
+Risk assessment:
+  Interface conversion spans all set backends and error paths, so caller
+  compilation and backend runtime coverage were required. No new functional
+  regression was found in the final series. Tests are finite x86_64 QEMU
+  coverage, not a proof against every interleaving or memory-pressure case.
+  Original attack PoCs and long-running stress were not executed.
+
+Validation:
+  17 exported patches reproduce every committed tree; source metadata,
+  ancestor order, 12-digit conflict causes and diff whitespace checked.
+  Module/built-in affected-object builds and full diagnostic kernel passed.
+  All runtime cases passed across the initial backend test and the resumed
+  fault-injection tests. The initial old clone probe name failed because
+  the compiler inlined pipapo_clone. The test-only probe was corrected to
+  pipapo_maybe_clone.part.0 after disassembly verified its first allocation.
+  No kernel change was made for testing. Final ruleset and probes are gone;
+  taint is 4096 (external test modules) with no new diagnostic matches.
+  Prior rootfs EXT4 bitmap checksum errors remain in the raw boot log.
+
+Context sources: local git show/diff/history, full affected definitions and
+caller inventory, original upstream patchset mail, compiler diagnostics,
+vmlinux disassembly, and QEMU tests. No review-bot conclusions were used.
+The compiler/delivery commits have identical source trees.
+
+FINAL REGRESSIONS FOUND: 0
+FINAL TOKENS USED: unavailable (no session token counter provided)
+Assisted-by: Codex:GPT-6

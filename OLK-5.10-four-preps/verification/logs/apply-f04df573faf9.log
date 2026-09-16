@@ -1,0 +1,81 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+error: while searching for:
+
+	while ((rules_f0 = pipapo_rules_same_key(m->f, first_rule))) {
+		union nft_pipapo_map_bucket rulemap[NFT_PIPAPO_MAX_FIELDS];
+		struct nft_pipapo_field *f;
+		int i, start, rules_fx;
+
+		start = first_rule;
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:1597
+error: while searching for:
+{
+	struct nft_pipapo *priv = nft_set_priv(set);
+	struct net *net = read_pnet(&set->net);
+	struct nft_pipapo_match *m;
+	struct nft_pipapo_field *f;
+	int i, r;
+
+	rcu_read_lock();
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:2039
+Checking patch net/netfilter/nft_set_pipapo.h...
+error: while searching for:
+};
+
+int pipapo_refill(unsigned long *map, int len, int rules, unsigned long *dst,
+		  union nft_pipapo_map_bucket *mt, bool match_only);
+
+/**
+ * pipapo_and_field_buckets_4bit() - Intersect 4-bit buckets
+
+error: patch failed: net/netfilter/nft_set_pipapo.h:187
+Hunk #2 succeeded at 199 (offset 4 lines).
+Hunk #3 succeeded at 227 (offset 4 lines).
+Checking patch net/netfilter/nft_set_pipapo_avx2.c...
+Hunk #1 succeeded at 213 (offset 1 line).
+Hunk #2 succeeded at 276 (offset 1 line).
+Hunk #3 succeeded at 353 (offset 1 line).
+Hunk #4 succeeded at 449 (offset 1 line).
+Hunk #5 succeeded at 539 (offset 1 line).
+Hunk #6 succeeded at 675 (offset 1 line).
+Hunk #7 succeeded at 733 (offset 1 line).
+Hunk #8 succeeded at 798 (offset 1 line).
+Hunk #9 succeeded at 874 (offset 1 line).
+Hunk #10 succeeded at 960 (offset 1 line).
+error: while searching for:
+ * word index to be checked next (i.e. first filled word).
+ */
+static int nft_pipapo_avx2_lookup_slow(unsigned long *map, unsigned long *fill,
+					struct nft_pipapo_field *f, int offset,
+					const u8 *pkt, bool first, bool last)
+{
+	unsigned long bsize = f->bsize;
+	int i, ret = -1, b;
+
+error: patch failed: net/netfilter/nft_set_pipapo_avx2.c:1042
+Hunk #12 succeeded at 1134 (offset 4 lines).
+Applying patch net/netfilter/nft_set_pipapo.c with 2 rejects...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Hunk #3 applied cleanly.
+Rejected hunk #4.
+Rejected hunk #5.
+Applying patch net/netfilter/nft_set_pipapo.h with 1 reject...
+Rejected hunk #1.
+Hunk #2 applied cleanly.
+Hunk #3 applied cleanly.
+Applying patch net/netfilter/nft_set_pipapo_avx2.c with 1 reject...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Hunk #3 applied cleanly.
+Hunk #4 applied cleanly.
+Hunk #5 applied cleanly.
+Hunk #6 applied cleanly.
+Hunk #7 applied cleanly.
+Hunk #8 applied cleanly.
+Hunk #9 applied cleanly.
+Hunk #10 applied cleanly.
+Rejected hunk #11.
+Hunk #12 applied cleanly.

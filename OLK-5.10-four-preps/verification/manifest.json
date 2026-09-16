@@ -1,0 +1,104 @@
+[
+  {
+    "upstream": "a2a0ffb0846895923991aa87e022dc228d53c125",
+    "tag": "v6.5-rc1",
+    "subject": "netfilter: nft_set_pipapo: Use struct_size()",
+    "local": "7f492c9c32df30105ed6fe127759705e61eed051"
+  },
+  {
+    "upstream": "b9f052dc68f69dac89fe1e24693354c033daa091",
+    "tag": "v6.5-rc7",
+    "subject": "netfilter: nf_tables: fix false-positive lockdep splat",
+    "local": "86475099d1d15d86a4e67cc866092066c02511e7"
+  },
+  {
+    "upstream": "26cec9d4144eb23c45cd5c033d5c141f04d61a9c",
+    "tag": "v6.7-rc1",
+    "subject": "netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush",
+    "local": "caf9cfa04c519f162f4f9bba50bca6f87bdf8f62"
+  },
+  {
+    "upstream": "9dad402b89e81a0516bad5e0ac009b7a0a80898f",
+    "tag": "v6.7-rc1",
+    "subject": "netfilter: nf_tables: expose opaque set element as struct nft_elem_priv",
+    "local": "5cbc64424075a911fd00f8c897596be79341dfe0"
+  },
+  {
+    "upstream": "ab0beafd52b98dfb8b8244b2c6794efbc87478db",
+    "tag": "v6.8-rc4",
+    "subject": "netfilter: nft_set_pipapo: remove static in nft_pipapo_get()",
+    "local": "d1ebcba612d63aa5e426bad8adbd945e64cdc6a2"
+  },
+  {
+    "upstream": "f04df573faf90bb828a2241b650598c02c074323",
+    "tag": "v6.9-rc1",
+    "subject": "netfilter: nft_set_pipapo: constify lookup fn args where possible",
+    "local": "1cf216dbe57d9acab4e7116a34d49f71569f5f24"
+  },
+  {
+    "upstream": "5b651783d80b97167ecd27dc6a4408c694873902",
+    "tag": "v6.9-rc1",
+    "subject": "netfilter: nft_set_pipapo: use GFP_KERNEL for insertions",
+    "local": "1391bff5c36debe701ce6f84fcdff2cf49aaa789"
+  },
+  {
+    "upstream": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: make pipapo_clone helper return NULL",
+    "local": "7cf0a4ad79381cea539d14fef0505f25d204e6a6"
+  },
+  {
+    "upstream": "8b8a2417558c632f249abebde97adf8c46540de2",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare destroy function for on-demand clone",
+    "local": "2f1efdf84638fa0df507734e811ea38efc35d152"
+  },
+  {
+    "upstream": "6c108d9bee448a850b03e682836bfe91fca645cb",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare walk function for on-demand clone",
+    "local": "52923552e0e654a782e6d0dbb0b5dc1d0d4f27c0"
+  },
+  {
+    "upstream": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: merge deactivate helper into caller",
+    "local": "a68c8c6a2c77a407488faddbfae8bc4412ea3f1d"
+  },
+  {
+    "upstream": "a238106703ab4ae1090b86eba128815b8626d8f1",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone",
+    "local": "6b2feef394728da94c14f42484f1abe23257819c"
+  },
+  {
+    "upstream": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: move cloning of match info to insert/removal path",
+    "local": "1565151a320afc4603948c6132404be315c177c8"
+  },
+  {
+    "upstream": "532aec7e878b527fcee8877350ab5c5341789626",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: remove dirty flag",
+    "local": "445da5645499bd78160afa35610e43113c1cad70"
+  },
+  {
+    "upstream": "c9526aeb4998393171d85225ff540e28c7d4ab86",
+    "tag": "v6.12-rc1",
+    "subject": "netfilter: nf_tables: do not remove elements if set backend implements .abort",
+    "local": "b409bfc1aa4338c7ba8959b0085efd3a5529840b"
+  },
+  {
+    "upstream": "fb7fb4016300ac622c964069e286dc83166a5d52",
+    "tag": "v7.0-rc3",
+    "subject": "netfilter: nf_tables: clone set on flush only",
+    "local": "3d00fb40b2c877b405e65821af404480329df0fb"
+  },
+  {
+    "upstream": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+    "tag": "v7.2-rc2",
+    "subject": "netfilter: nft_set_pipapo: don't leak bad clone into future transaction",
+    "local": "3618a1a7f94d4f2690ae4aef0095ce49229f20e6"
+  }
+]

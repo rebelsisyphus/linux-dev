@@ -1,0 +1,15 @@
+git format-patch --no-cover-letter --numbered --start-number 1 --output-directory /home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused b8095978261c8f5739d74a5b1ef5e117b863420f..8805c7a55dd02ac8d80822a040e96a08b7857c78
+python3 /home/sisyphus/.codex/skills/kernel-cve-backport/scripts/verify_series.py --repo /home/sisyphus/code/kernel --base b8095978261c8f5739d74a5b1ef5e117b863420f --head 8805c7a55dd02ac8d80822a040e96a08b7857c78 --patch-dir /home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused
+python3 /tmp/cve-72252-maybe-unused-9seqhpb5/build_objects.py prove-rcu-n
+python3 /tmp/cve-72252-maybe-unused-9seqhpb5/build_objects.py prove-rcu-y
+
+Actual make commands, configs, compiler output and source tree identity:
+logs/prove-rcu-n-result.json
+logs/prove-rcu-y-result.json
+
+Checkpatch commands and accepted message-only exceptions:
+logs/checkpatch-raw-summary.json
+logs/checkpatch-repo-summary.json
+
+Patch IDs, metadata, all restored global files and preserved integration:
+logs/metadata-and-scope-check.json

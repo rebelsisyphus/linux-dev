@@ -1,0 +1,17 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit f04df573faf9 ("netfilter: nft_set_pipapo: constify lookup fn args where possible")'
+#9: 
+commit f04df573faf90bb828a2241b650598c02c074323
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#14: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f04df573faf90bb828a2241b650598c02c074323
+
+total: 1 errors, 1 warnings, 0 checks, 208 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0006-netfilter-nft_set_pipapo-constify-lookup-fn-args-whe.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

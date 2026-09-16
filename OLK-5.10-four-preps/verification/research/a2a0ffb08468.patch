@@ -1,0 +1,39 @@
+commit a2a0ffb0846895923991aa87e022dc228d53c125
+Author:     Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+AuthorDate: Fri May 5 23:26:34 2023 +0200
+Commit:     Florian Westphal <fw@strlen.de>
+CommitDate: Thu May 18 08:48:55 2023 +0200
+
+    netfilter: nft_set_pipapo: Use struct_size()
+    
+    Use struct_size() instead of hand writing it.
+    This is less verbose and more informative.
+    
+    Signed-off-by: Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+    Reviewed-by: Simon Horman <simon.horman@corigine.com>
+    Signed-off-by: Florian Westphal <fw@strlen.de>
+
+diff --git a/net/netfilter/nft_set_pipapo.c b/net/netfilter/nft_set_pipapo.c
+index 06d46d182634..34c684e121d3 100644
+--- a/net/netfilter/nft_set_pipapo.c
++++ b/net/netfilter/nft_set_pipapo.c
+@@ -1274,8 +1274,7 @@ static struct nft_pipapo_match *pipapo_clone(struct nft_pipapo_match *old)
+ 	struct nft_pipapo_match *new;
+ 	int i;
+ 
+-	new = kmalloc(sizeof(*new) + sizeof(*dst) * old->field_count,
+-		      GFP_KERNEL);
++	new = kmalloc(struct_size(new, f, old->field_count), GFP_KERNEL);
+ 	if (!new)
+ 		return ERR_PTR(-ENOMEM);
+ 
+@@ -2059,8 +2058,7 @@ static int nft_pipapo_init(const struct nft_set *set,
+ 	if (field_count > NFT_PIPAPO_MAX_FIELDS)
+ 		return -EINVAL;
+ 
+-	m = kmalloc(sizeof(*priv->match) + sizeof(*f) * field_count,
+-		    GFP_KERNEL);
++	m = kmalloc(struct_size(m, f, field_count), GFP_KERNEL);
+ 	if (!m)
+ 		return -ENOMEM;
+ 

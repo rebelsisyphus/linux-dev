@@ -1,0 +1,31 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+Hunk #1 succeeded at 505 (offset -2 lines).
+Hunk #2 succeeded at 516 (offset -2 lines).
+error: while searching for:
+	if (m->bsize_max == 0)
+		return ret;
+
+	res_map = kmalloc_array(m->bsize_max, sizeof(*res_map), GFP_ATOMIC);
+	if (!res_map) {
+		ret = ERR_PTR(-ENOMEM);
+		goto out;
+	}
+
+	fill_map = kcalloc(m->bsize_max, sizeof(*res_map), GFP_ATOMIC);
+	if (!fill_map) {
+		ret = ERR_PTR(-ENOMEM);
+		goto out;
+
+error: patch failed: net/netfilter/nft_set_pipapo.c:530
+Hunk #4 succeeded at 611 (offset -4 lines).
+Hunk #5 succeeded at 1225 (offset -52 lines).
+Hunk #6 succeeded at 1247 (offset -52 lines).
+Hunk #7 succeeded at 1837 (offset -31 lines).
+Applying patch net/netfilter/nft_set_pipapo.c with 1 reject...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Rejected hunk #3.
+Hunk #4 applied cleanly.
+Hunk #5 applied cleanly.
+Hunk #6 applied cleanly.
+Hunk #7 applied cleanly.

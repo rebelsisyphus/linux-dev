@@ -1,0 +1,14 @@
+make: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'
+make[1]: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-qemu'
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/clone_probe.o
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/pipapo_fail.o
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/set_probe.o
+  MODPOST /tmp/cve-72252-four-preps-6a8fhcsc/share/Module.symvers
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/clone_probe.mod.o
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/pipapo_fail.mod.o
+  CC [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/set_probe.mod.o
+  LD [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/set_probe.ko
+  LD [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/clone_probe.ko
+  LD [M]  /tmp/cve-72252-four-preps-6a8fhcsc/share/pipapo_fail.ko
+make[1]: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-qemu'
+make: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'

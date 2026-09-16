@@ -1,0 +1,1 @@
+Linux sisyphus 5.10.0-cve72252-80668+ #1 SMP Wed Sep 16 21:05:10 CST 2026 x86_64 x86_64 x86_64 GNU/Linux

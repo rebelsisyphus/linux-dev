@@ -1,0 +1,671 @@
+
+build-qemu/vmlinux:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+ffffffff830f2a30 <pipapo_maybe_clone.part.0>:
+ffffffff830f2a30:	push   %r15
+ffffffff830f2a32:	push   %r14
+ffffffff830f2a34:	push   %r13
+ffffffff830f2a36:	push   %r12
+ffffffff830f2a38:	push   %rbp
+ffffffff830f2a39:	push   %rbx
+ffffffff830f2a3a:	sub    $0x40,%rsp
+ffffffff830f2a3e:	mov    %rdi,0x18(%rsp)
+ffffffff830f2a43:	call   ffffffff839bada0 <debug_lockdep_rcu_enabled>
+ffffffff830f2a48:	test   %eax,%eax
+ffffffff830f2a4a:	jne    ffffffff830f314f <pipapo_maybe_clone.part.0+0x71f>
+ffffffff830f2a50:	mov    0x18(%rsp),%rax
+ffffffff830f2a55:	lea    0xd0(%rax),%rdi
+ffffffff830f2a5c:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2a66:	mov    %rdi,%rdx
+ffffffff830f2a69:	shr    $0x3,%rdx
+ffffffff830f2a6d:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f2a71:	jne    ffffffff830f34f0 <pipapo_maybe_clone.part.0+0xac0>
+ffffffff830f2a77:	mov    0x18(%rsp),%rax
+ffffffff830f2a7c:	mov    0xd0(%rax),%r9
+ffffffff830f2a83:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2a8d:	mov    %r9,%rdx
+ffffffff830f2a90:	shr    $0x3,%rdx
+ffffffff830f2a94:	movzbl (%rdx,%rax,1),%eax
+ffffffff830f2a98:	test   %al,%al
+ffffffff830f2a9a:	je     ffffffff830f2aa4 <pipapo_maybe_clone.part.0+0x74>
+ffffffff830f2a9c:	cmp    $0x3,%al
+ffffffff830f2a9e:	jle    ffffffff830f3276 <pipapo_maybe_clone.part.0+0x846>
+ffffffff830f2aa4:	movslq (%r9),%rax
+ffffffff830f2aa7:	mov    $0x38,%edx
+ffffffff830f2aac:	mov    $0xffffffffffffffff,%rcx
+ffffffff830f2ab3:	mov    $0xcc0,%esi
+ffffffff830f2ab8:	mov    %r9,(%rsp)
+ffffffff830f2abc:	mul    %rdx
+ffffffff830f2abf:	cmovo  %rcx,%rax
+ffffffff830f2ac3:	lea    0x28(%rax),%rdi
+ffffffff830f2ac7:	cmp    $0xffffffffffffffd8,%rax
+ffffffff830f2acb:	cmovae %rcx,%rdi
+ffffffff830f2acf:	call   ffffffff8165c340 <__kmalloc>
+ffffffff830f2ad4:	mov    %rax,%r12
+ffffffff830f2ad7:	test   %rax,%rax
+ffffffff830f2ada:	je     ffffffff830f2f72 <pipapo_maybe_clone.part.0+0x542>
+ffffffff830f2ae0:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2aea:	mov    (%rsp),%r9
+ffffffff830f2aee:	mov    %r9,%rdx
+ffffffff830f2af1:	shr    $0x3,%rdx
+ffffffff830f2af5:	movzbl (%rdx,%rax,1),%eax
+ffffffff830f2af9:	test   %al,%al
+ffffffff830f2afb:	je     ffffffff830f2b05 <pipapo_maybe_clone.part.0+0xd5>
+ffffffff830f2afd:	cmp    $0x3,%al
+ffffffff830f2aff:	jle    ffffffff830f3265 <pipapo_maybe_clone.part.0+0x835>
+ffffffff830f2b05:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2b0f:	mov    %r12,%rdx
+ffffffff830f2b12:	mov    (%r9),%ebx
+ffffffff830f2b15:	shr    $0x3,%rdx
+ffffffff830f2b19:	movzbl (%rdx,%rax,1),%eax
+ffffffff830f2b1d:	test   %al,%al
+ffffffff830f2b1f:	je     ffffffff830f2b29 <pipapo_maybe_clone.part.0+0xf9>
+ffffffff830f2b21:	cmp    $0x3,%al
+ffffffff830f2b23:	jle    ffffffff830f3250 <pipapo_maybe_clone.part.0+0x820>
+ffffffff830f2b29:	lea    0x10(%r9),%r14
+ffffffff830f2b2d:	mov    %ebx,(%r12)
+ffffffff830f2b31:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2b3b:	mov    %r14,%rdx
+ffffffff830f2b3e:	shr    $0x3,%rdx
+ffffffff830f2b42:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f2b46:	jne    ffffffff830f34db <pipapo_maybe_clone.part.0+0xaab>
+ffffffff830f2b4c:	lea    0x10(%r12),%rdi
+ffffffff830f2b51:	mov    0x10(%r9),%rbx
+ffffffff830f2b55:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2b5f:	mov    %rdi,%rdx
+ffffffff830f2b62:	shr    $0x3,%rdx
+ffffffff830f2b66:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f2b6a:	jne    ffffffff830f3515 <pipapo_maybe_clone.part.0+0xae5>
+ffffffff830f2b70:	mov    %rbx,0x10(%r12)
+ffffffff830f2b75:	mov    $0x8,%esi
+ffffffff830f2b7a:	lea    0x8(%r12),%rbx
+ffffffff830f2b7f:	mov    $0x8,%edi
+ffffffff830f2b84:	mov    %r9,(%rsp)
+ffffffff830f2b88:	call   ffffffff8156ee70 <__alloc_percpu>
+ffffffff830f2b8d:	mov    %rbx,%rcx
+ffffffff830f2b90:	mov    (%rsp),%r9
+ffffffff830f2b94:	movabs $0xdffffc0000000000,%rdx
+ffffffff830f2b9e:	shr    $0x3,%rcx
+ffffffff830f2ba2:	mov    %rbx,0x20(%rsp)
+ffffffff830f2ba7:	cmpb   $0x0,(%rcx,%rdx,1)
+ffffffff830f2bab:	jne    ffffffff830f34fa <pipapo_maybe_clone.part.0+0xaca>
+ffffffff830f2bb1:	mov    %rax,0x8(%r12)
+ffffffff830f2bb6:	test   %rax,%rax
+ffffffff830f2bb9:	je     ffffffff830f2f62 <pipapo_maybe_clone.part.0+0x532>
+ffffffff830f2bbf:	mov    $0xffffffff8500cba4,%rdx
+ffffffff830f2bc6:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2bd0:	shr    $0x3,%rdx
+ffffffff830f2bd4:	movzbl (%rdx,%rax,1),%edx
+ffffffff830f2bd8:	mov    $0xffffffff8500cba4,%rax
+ffffffff830f2bdf:	and    $0x7,%eax
+ffffffff830f2be2:	add    $0x3,%eax
+ffffffff830f2be5:	cmp    %dl,%al
+ffffffff830f2be7:	jl     ffffffff830f2bf1 <pipapo_maybe_clone.part.0+0x1c1>
+ffffffff830f2be9:	test   %dl,%dl
+ffffffff830f2beb:	jne    ffffffff830f328b <pipapo_maybe_clone.part.0+0x85b>
+ffffffff830f2bf1:	mov    0x20(%rsp),%rbp
+ffffffff830f2bf6:	mov    0x1f19fa7(%rip),%r13d        # ffffffff8500cba4 <nr_cpu_ids>
+ffffffff830f2bfd:	mov    $0xffffffff,%eax
+ffffffff830f2c02:	mov    %r9,%r15
+ffffffff830f2c05:	movabs $0xdffffc0000000000,%rbx
+ffffffff830f2c0f:	shr    $0x3,%rbp
+ffffffff830f2c13:	add    %rbx,%rbp
+ffffffff830f2c16:	jmp    ffffffff830f2c63 <pipapo_maybe_clone.part.0+0x233>
+ffffffff830f2c18:	cmpb   $0x0,0x0(%rbp)
+ffffffff830f2c1c:	jne    ffffffff830f3435 <pipapo_maybe_clone.part.0+0xa05>
+ffffffff830f2c22:	movslq %eax,%rcx
+ffffffff830f2c25:	mov    0x8(%r12),%rdx
+ffffffff830f2c2a:	lea    -0x7b9ca700(,%rcx,8),%rdi
+ffffffff830f2c32:	mov    %rdi,%rsi
+ffffffff830f2c35:	shr    $0x3,%rsi
+ffffffff830f2c39:	cmpb   $0x0,(%rsi,%rbx,1)
+ffffffff830f2c3d:	jne    ffffffff830f3411 <pipapo_maybe_clone.part.0+0x9e1>
+ffffffff830f2c43:	add    -0x7b9ca700(,%rcx,8),%rdx
+ffffffff830f2c4b:	mov    %rdx,%rcx
+ffffffff830f2c4e:	shr    $0x3,%rcx
+ffffffff830f2c52:	cmpb   $0x0,(%rcx,%rbx,1)
+ffffffff830f2c56:	jne    ffffffff830f33f4 <pipapo_maybe_clone.part.0+0x9c4>
+ffffffff830f2c5c:	movq   $0x0,(%rdx)
+ffffffff830f2c63:	mov    $0xffffffff8500c9d8,%rsi
+ffffffff830f2c6a:	mov    %eax,%edi
+ffffffff830f2c6c:	call   ffffffff81eabad0 <cpumask_next>
+ffffffff830f2c71:	cmp    %r13d,%eax
+ffffffff830f2c74:	jb     ffffffff830f2c18 <pipapo_maybe_clone.part.0+0x1e8>
+ffffffff830f2c76:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2c80:	mov    %r14,%rdx
+ffffffff830f2c83:	mov    %r15,%r9
+ffffffff830f2c86:	shr    $0x3,%rdx
+ffffffff830f2c8a:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f2c8e:	jne    ffffffff830f34c6 <pipapo_maybe_clone.part.0+0xa96>
+ffffffff830f2c94:	mov    0x10(%r9),%rsi
+ffffffff830f2c98:	mov    %r12,%rdi
+ffffffff830f2c9b:	mov    %r9,(%rsp)
+ffffffff830f2c9f:	call   ffffffff830f1bc0 <pipapo_realloc_scratch>
+ffffffff830f2ca4:	mov    (%rsp),%r9
+ffffffff830f2ca8:	test   %eax,%eax
+ffffffff830f2caa:	mov    %eax,%r15d
+ffffffff830f2cad:	jne    ffffffff830f3055 <pipapo_maybe_clone.part.0+0x625>
+ffffffff830f2cb3:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2cbd:	lea    0x20(%r12),%rdi
+ffffffff830f2cc2:	mov    %rdi,%rcx
+ffffffff830f2cc5:	shr    $0x3,%rcx
+ffffffff830f2cc9:	cmpb   $0x0,(%rcx,%rax,1)
+ffffffff830f2ccd:	jne    ffffffff830f3557 <pipapo_maybe_clone.part.0+0xb27>
+ffffffff830f2cd3:	mov    %r9,%rsi
+ffffffff830f2cd6:	lea    0x28(%r9),%rbx
+ffffffff830f2cda:	lea    0x28(%r12),%r14
+ffffffff830f2cdf:	movabs $0xdffffc0000000000,%rcx
+ffffffff830f2ce9:	movq   $0xffffffffffffffff,0x20(%r12)
+ffffffff830f2cf2:	shr    $0x3,%rsi
+ffffffff830f2cf6:	movzbl (%rsi,%rcx,1),%ecx
+ffffffff830f2cfa:	test   %cl,%cl
+ffffffff830f2cfc:	je     ffffffff830f2d07 <pipapo_maybe_clone.part.0+0x2d7>
+ffffffff830f2cfe:	cmp    $0x3,%cl
+ffffffff830f2d01:	jle    ffffffff830f3531 <pipapo_maybe_clone.part.0+0xb01>
+ffffffff830f2d07:	movabs $0xdffffc0000000000,%rbp
+ffffffff830f2d11:	mov    %r9,%rax
+ffffffff830f2d14:	shr    $0x3,%rax
+ffffffff830f2d18:	add    %rbp,%rax
+ffffffff830f2d1b:	mov    %rax,0x8(%rsp)
+ffffffff830f2d20:	mov    (%r9),%eax
+ffffffff830f2d23:	test   %eax,%eax
+ffffffff830f2d25:	jle    ffffffff830f3219 <pipapo_maybe_clone.part.0+0x7e9>
+ffffffff830f2d2b:	mov    %r9,0x10(%rsp)
+ffffffff830f2d30:	mov    %r12,0x28(%rsp)
+ffffffff830f2d35:	jmp    ffffffff830f2ec9 <pipapo_maybe_clone.part.0+0x499>
+ffffffff830f2d3a:	lea    0x20(%r14),%rdi
+ffffffff830f2d3e:	lea    0x1f(%rax),%rax
+ffffffff830f2d42:	mov    (%rsp),%rcx
+ffffffff830f2d46:	mov    %rdi,%rsi
+ffffffff830f2d49:	and    $0xffffffffffffffe0,%rax
+ffffffff830f2d4d:	shr    $0x3,%rsi
+ffffffff830f2d51:	cmpb   $0x0,(%rsi,%rbp,1)
+ffffffff830f2d55:	jne    ffffffff830f344a <pipapo_maybe_clone.part.0+0xa1a>
+ffffffff830f2d5b:	lea    0x28(%r14),%r13
+ffffffff830f2d5f:	mov    %rax,0x20(%r14)
+ffffffff830f2d63:	mov    %r13,%rsi
+ffffffff830f2d66:	shr    $0x3,%rsi
+ffffffff830f2d6a:	cmpb   $0x0,(%rsi,%rbp,1)
+ffffffff830f2d6e:	jne    ffffffff830f3363 <pipapo_maybe_clone.part.0+0x933>
+ffffffff830f2d74:	mov    %rdx,0x28(%r14)
+ffffffff830f2d78:	mov    %rcx,%rdx
+ffffffff830f2d7b:	shr    $0x3,%rdx
+ffffffff830f2d7f:	cmpb   $0x0,(%rdx,%rbp,1)
+ffffffff830f2d83:	jne    ffffffff830f334e <pipapo_maybe_clone.part.0+0x91e>
+ffffffff830f2d89:	mov    %rbx,%rdx
+ffffffff830f2d8c:	mov    0x10(%rbx),%rsi
+ffffffff830f2d90:	shr    $0x3,%rdx
+ffffffff830f2d94:	movzbl (%rdx,%rbp,1),%edx
+ffffffff830f2d98:	test   %dl,%dl
+ffffffff830f2d9a:	je     ffffffff830f2da5 <pipapo_maybe_clone.part.0+0x375>
+ffffffff830f2d9c:	cmp    $0x3,%dl
+ffffffff830f2d9f:	jle    ffffffff830f332f <pipapo_maybe_clone.part.0+0x8ff>
+ffffffff830f2da5:	mov    %r12,%rdx
+ffffffff830f2da8:	movslq (%rbx),%r8
+ffffffff830f2dab:	shr    $0x3,%rdx
+ffffffff830f2daf:	movzbl (%rdx,%rbp,1),%edx
+ffffffff830f2db3:	test   %dl,%dl
+ffffffff830f2db5:	je     ffffffff830f2dc0 <pipapo_maybe_clone.part.0+0x390>
+ffffffff830f2db7:	cmp    $0x3,%dl
+ffffffff830f2dba:	jle    ffffffff830f3306 <pipapo_maybe_clone.part.0+0x8d6>
+ffffffff830f2dc0:	mov    0x18(%rbx),%ecx
+ffffffff830f2dc3:	imul   %r8,%rsi
+ffffffff830f2dc7:	mov    $0x1,%edx
+ffffffff830f2dcc:	lea    0x28(%rbx),%rdi
+ffffffff830f2dd0:	shl    %cl,%edx
+ffffffff830f2dd2:	mov    %rdi,%rcx
+ffffffff830f2dd5:	movslq %edx,%rdx
+ffffffff830f2dd8:	shr    $0x3,%rcx
+ffffffff830f2ddc:	imul   %rsi,%rdx
+ffffffff830f2de0:	shl    $0x3,%rdx
+ffffffff830f2de4:	cmpb   $0x0,(%rcx,%rbp,1)
+ffffffff830f2de8:	jne    ffffffff830f33cb <pipapo_maybe_clone.part.0+0x99b>
+ffffffff830f2dee:	mov    0x28(%rbx),%rcx
+ffffffff830f2df2:	mov    %rax,%rdi
+ffffffff830f2df5:	lea    0x8(%rbx),%r12
+ffffffff830f2df9:	lea    0x1f(%rcx),%rsi
+ffffffff830f2dfd:	and    $0xffffffffffffffe0,%rsi
+ffffffff830f2e01:	call   ffffffff81660e80 <memcpy>
+ffffffff830f2e06:	mov    %r12,%rax
+ffffffff830f2e09:	shr    $0x3,%rax
+ffffffff830f2e0d:	cmpb   $0x0,(%rax,%rbp,1)
+ffffffff830f2e11:	jne    ffffffff830f33be <pipapo_maybe_clone.part.0+0x98e>
+ffffffff830f2e17:	mov    0x8(%rbx),%rdi
+ffffffff830f2e1b:	cmp    $0xfffffff,%rdi
+ffffffff830f2e22:	ja     ffffffff830f2fbe <pipapo_maybe_clone.part.0+0x58e>
+ffffffff830f2e28:	shl    $0x3,%rdi
+ffffffff830f2e2c:	mov    $0xffffffff,%edx
+ffffffff830f2e31:	mov    $0xcc0,%esi
+ffffffff830f2e36:	call   ffffffff81558750 <kvmalloc_node>
+ffffffff830f2e3b:	lea    0x30(%r14),%rdi
+ffffffff830f2e3f:	mov    %rdi,%rdx
+ffffffff830f2e42:	shr    $0x3,%rdx
+ffffffff830f2e46:	cmpb   $0x0,(%rdx,%rbp,1)
+ffffffff830f2e4a:	jne    ffffffff830f33ac <pipapo_maybe_clone.part.0+0x97c>
+ffffffff830f2e50:	mov    %rax,0x30(%r14)
+ffffffff830f2e54:	test   %rax,%rax
+ffffffff830f2e57:	je     ffffffff830f2fbe <pipapo_maybe_clone.part.0+0x58e>
+ffffffff830f2e5d:	mov    %r12,%rdx
+ffffffff830f2e60:	shr    $0x3,%rdx
+ffffffff830f2e64:	cmpb   $0x0,(%rdx,%rbp,1)
+ffffffff830f2e68:	jne    ffffffff830f32c0 <pipapo_maybe_clone.part.0+0x890>
+ffffffff830f2e6e:	mov    0x8(%rbx),%rcx
+ffffffff830f2e72:	lea    0x30(%rbx),%rdi
+ffffffff830f2e76:	lea    0x0(,%rcx,8),%rdx
+ffffffff830f2e7e:	mov    %rdi,%rcx
+ffffffff830f2e81:	shr    $0x3,%rcx
+ffffffff830f2e85:	cmpb   $0x0,(%rcx,%rbp,1)
+ffffffff830f2e89:	jne    ffffffff830f32a4 <pipapo_maybe_clone.part.0+0x874>
+ffffffff830f2e8f:	mov    0x30(%rbx),%rsi
+ffffffff830f2e93:	mov    %rax,%rdi
+ffffffff830f2e96:	add    $0x38,%rbx
+ffffffff830f2e9a:	add    $0x38,%r14
+ffffffff830f2e9e:	add    $0x1,%r15d
+ffffffff830f2ea2:	call   ffffffff81660e80 <memcpy>
+ffffffff830f2ea7:	mov    0x8(%rsp),%rax
+ffffffff830f2eac:	movzbl (%rax),%eax
+ffffffff830f2eaf:	test   %al,%al
+ffffffff830f2eb1:	je     ffffffff830f2ebb <pipapo_maybe_clone.part.0+0x48b>
+ffffffff830f2eb3:	cmp    $0x3,%al
+ffffffff830f2eb5:	jle    ffffffff830f32d5 <pipapo_maybe_clone.part.0+0x8a5>
+ffffffff830f2ebb:	mov    0x10(%rsp),%rax
+ffffffff830f2ec0:	cmp    (%rax),%r15d
+ffffffff830f2ec3:	jge    ffffffff830f3214 <pipapo_maybe_clone.part.0+0x7e4>
+ffffffff830f2ec9:	mov    $0x28,%edx
+ffffffff830f2ece:	mov    %rbx,%rsi
+ffffffff830f2ed1:	mov    %r14,%rdi
+ffffffff830f2ed4:	call   ffffffff81660e80 <memcpy>
+ffffffff830f2ed9:	mov    %rbx,%rax
+ffffffff830f2edc:	shr    $0x3,%rax
+ffffffff830f2ee0:	movzbl (%rax,%rbp,1),%eax
+ffffffff830f2ee4:	test   %al,%al
+ffffffff830f2ee6:	je     ffffffff830f2ef0 <pipapo_maybe_clone.part.0+0x4c0>
+ffffffff830f2ee8:	cmp    $0x3,%al
+ffffffff830f2eea:	jle    ffffffff830f33e7 <pipapo_maybe_clone.part.0+0x9b7>
+ffffffff830f2ef0:	lea    0x18(%rbx),%r12
+ffffffff830f2ef4:	mov    (%rbx),%r13d
+ffffffff830f2ef7:	mov    %r12,%rax
+ffffffff830f2efa:	shr    $0x3,%rax
+ffffffff830f2efe:	movzbl (%rax,%rbp,1),%eax
+ffffffff830f2f02:	test   %al,%al
+ffffffff830f2f04:	je     ffffffff830f2f0e <pipapo_maybe_clone.part.0+0x4de>
+ffffffff830f2f06:	cmp    $0x3,%al
+ffffffff830f2f08:	jle    ffffffff830f32f9 <pipapo_maybe_clone.part.0+0x8c9>
+ffffffff830f2f0e:	mov    0x18(%rbx),%ecx
+ffffffff830f2f11:	shl    %cl,%r13d
+ffffffff830f2f14:	lea    0x10(%rbx),%rcx
+ffffffff830f2f18:	mov    %rcx,%rax
+ffffffff830f2f1b:	movslq %r13d,%r13
+ffffffff830f2f1e:	shr    $0x3,%rax
+ffffffff830f2f22:	cmpb   $0x0,(%rax,%rbp,1)
+ffffffff830f2f26:	jne    ffffffff830f32e4 <pipapo_maybe_clone.part.0+0x8b4>
+ffffffff830f2f2c:	imul   0x10(%rbx),%r13
+ffffffff830f2f31:	mov    $0xffffffff,%edx
+ffffffff830f2f36:	mov    $0xdc0,%esi
+ffffffff830f2f3b:	mov    %rcx,(%rsp)
+ffffffff830f2f3f:	lea    0x18(,%r13,8),%rdi
+ffffffff830f2f47:	call   ffffffff81558750 <kvmalloc_node>
+ffffffff830f2f4c:	mov    %rax,%rdx
+ffffffff830f2f4f:	test   %rax,%rax
+ffffffff830f2f52:	jne    ffffffff830f2d3a <pipapo_maybe_clone.part.0+0x30a>
+ffffffff830f2f58:	mov    0x28(%rsp),%r12
+ffffffff830f2f5d:	jmp    ffffffff830f2fe7 <pipapo_maybe_clone.part.0+0x5b7>
+ffffffff830f2f62:	mov    %rax,%rdi
+ffffffff830f2f65:	call   ffffffff8156c990 <free_percpu>
+ffffffff830f2f6a:	mov    %r12,%rdi
+ffffffff830f2f6d:	call   ffffffff8165e850 <kfree>
+ffffffff830f2f72:	xor    %r12d,%r12d
+ffffffff830f2f75:	mov    0x18(%rsp),%rax
+ffffffff830f2f7a:	lea    0xd8(%rax),%rdi
+ffffffff830f2f81:	movabs $0xdffffc0000000000,%rax
+ffffffff830f2f8b:	mov    %rdi,%rdx
+ffffffff830f2f8e:	shr    $0x3,%rdx
+ffffffff830f2f92:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f2f96:	jne    ffffffff830f34bc <pipapo_maybe_clone.part.0+0xa8c>
+ffffffff830f2f9c:	mov    0x18(%rsp),%rax
+ffffffff830f2fa1:	mov    %r12,0xd8(%rax)
+ffffffff830f2fa8:	add    $0x40,%rsp
+ffffffff830f2fac:	mov    %r12,%rax
+ffffffff830f2faf:	pop    %rbx
+ffffffff830f2fb0:	pop    %rbp
+ffffffff830f2fb1:	pop    %r12
+ffffffff830f2fb3:	pop    %r13
+ffffffff830f2fb5:	pop    %r14
+ffffffff830f2fb7:	pop    %r15
+ffffffff830f2fb9:	jmp    ffffffff83c03f80 <__x86_return_thunk>
+ffffffff830f2fbe:	mov    %r13,%rsi
+ffffffff830f2fc1:	mov    0x28(%rsp),%r12
+ffffffff830f2fc6:	movabs $0xdffffc0000000000,%rcx
+ffffffff830f2fd0:	shr    $0x3,%rsi
+ffffffff830f2fd4:	cmpb   $0x0,(%rsi,%rcx,1)
+ffffffff830f2fd8:	jne    ffffffff830f3573 <pipapo_maybe_clone.part.0+0xb43>
+ffffffff830f2fde:	mov    0x28(%r14),%rdi
+ffffffff830f2fe2:	call   ffffffff815587e0 <kvfree>
+ffffffff830f2fe7:	test   %r15d,%r15d
+ffffffff830f2fea:	jle    ffffffff830f3055 <pipapo_maybe_clone.part.0+0x625>
+ffffffff830f2fec:	lea    -0x1(%r15),%edx
+ffffffff830f2ff0:	lea    -0x40(%r14),%rbx
+ffffffff830f2ff4:	movabs $0xdffffc0000000000,%rbp
+ffffffff830f2ffe:	lea    0x0(,%rdx,8),%rax
+ffffffff830f3006:	lea    -0x8(%r14),%r13
+ffffffff830f300a:	sub    %rdx,%rax
+ffffffff830f300d:	shl    $0x3,%rax
+ffffffff830f3011:	sub    %rax,%rbx
+ffffffff830f3014:	mov    %r13,%rax
+ffffffff830f3017:	shr    $0x3,%rax
+ffffffff830f301b:	cmpb   $0x0,(%rax,%rbp,1)
+ffffffff830f301f:	jne    ffffffff830f3470 <pipapo_maybe_clone.part.0+0xa40>
+ffffffff830f3025:	mov    0x0(%r13),%rdi
+ffffffff830f3029:	call   ffffffff815587e0 <kvfree>
+ffffffff830f302e:	lea    -0x8(%r13),%rdi
+ffffffff830f3032:	mov    %rdi,%rax
+ffffffff830f3035:	shr    $0x3,%rax
+ffffffff830f3039:	cmpb   $0x0,(%rax,%rbp,1)
+ffffffff830f303d:	jne    ffffffff830f347d <pipapo_maybe_clone.part.0+0xa4d>
+ffffffff830f3043:	mov    -0x8(%r13),%rdi
+ffffffff830f3047:	sub    $0x38,%r13
+ffffffff830f304b:	call   ffffffff815587e0 <kvfree>
+ffffffff830f3050:	cmp    %rbx,%r13
+ffffffff830f3053:	jne    ffffffff830f3014 <pipapo_maybe_clone.part.0+0x5e4>
+ffffffff830f3055:	mov    0x20(%rsp),%rax
+ffffffff830f305a:	mov    $0xffffffff,%r13d
+ffffffff830f3060:	mov    $0xffffffff8500cba4,%rbp
+ffffffff830f3067:	mov    $0xffffffff8500cba4,%rbx
+ffffffff830f306e:	shr    $0x3,%rbp
+ffffffff830f3072:	and    $0x7,%ebx
+ffffffff830f3075:	movabs $0xdffffc0000000000,%r15
+ffffffff830f307f:	shr    $0x3,%rax
+ffffffff830f3083:	add    %r15,%rbp
+ffffffff830f3086:	add    $0x3,%ebx
+ffffffff830f3089:	mov    %rax,(%rsp)
+ffffffff830f308d:	mov    %r13d,%edi
+ffffffff830f3090:	mov    $0xffffffff8500c9d8,%rsi
+ffffffff830f3097:	call   ffffffff81eabad0 <cpumask_next>
+ffffffff830f309c:	mov    %eax,%r13d
+ffffffff830f309f:	movzbl 0x0(%rbp),%eax
+ffffffff830f30a3:	cmp    %al,%bl
+ffffffff830f30a5:	jl     ffffffff830f30af <pipapo_maybe_clone.part.0+0x67f>
+ffffffff830f30a7:	test   %al,%al
+ffffffff830f30a9:	jne    ffffffff830f339b <pipapo_maybe_clone.part.0+0x96b>
+ffffffff830f30af:	mov    (%rsp),%rax
+ffffffff830f30b3:	mov    0x1f19aea(%rip),%r14d        # ffffffff8500cba4 <nr_cpu_ids>
+ffffffff830f30ba:	cmpb   $0x0,(%rax,%r15,1)
+ffffffff830f30bf:	jne    ffffffff830f338c <pipapo_maybe_clone.part.0+0x95c>
+ffffffff830f30c5:	mov    0x8(%r12),%rax
+ffffffff830f30ca:	cmp    %r14d,%r13d
+ffffffff830f30cd:	jae    ffffffff830f2f62 <pipapo_maybe_clone.part.0+0x532>
+ffffffff830f30d3:	mov    %r13d,%r14d
+ffffffff830f30d6:	lea    -0x7b9ca700(,%r14,8),%rdi
+ffffffff830f30de:	mov    %rdi,%rdx
+ffffffff830f30e1:	shr    $0x3,%rdx
+ffffffff830f30e5:	cmpb   $0x0,(%rdx,%r15,1)
+ffffffff830f30ea:	jne    ffffffff830f3487 <pipapo_maybe_clone.part.0+0xa57>
+ffffffff830f30f0:	add    -0x7b9ca700(,%r14,8),%rax
+ffffffff830f30f8:	mov    %rax,%rdx
+ffffffff830f30fb:	shr    $0x3,%rdx
+ffffffff830f30ff:	cmpb   $0x0,(%rdx,%r15,1)
+ffffffff830f3104:	jne    ffffffff830f349b <pipapo_maybe_clone.part.0+0xa6b>
+ffffffff830f310a:	mov    (%rax),%r14
+ffffffff830f310d:	test   %r14,%r14
+ffffffff830f3110:	je     ffffffff830f308d <pipapo_maybe_clone.part.0+0x65d>
+ffffffff830f3116:	lea    0x4(%r14),%rdi
+ffffffff830f311a:	mov    %rdi,%rax
+ffffffff830f311d:	shr    $0x3,%rax
+ffffffff830f3121:	movzbl (%rax,%r15,1),%edx
+ffffffff830f3126:	mov    %rdi,%rax
+ffffffff830f3129:	and    $0x7,%eax
+ffffffff830f312c:	add    $0x3,%eax
+ffffffff830f312f:	cmp    %dl,%al
+ffffffff830f3131:	jl     ffffffff830f313b <pipapo_maybe_clone.part.0+0x70b>
+ffffffff830f3133:	test   %dl,%dl
+ffffffff830f3135:	jne    ffffffff830f34b2 <pipapo_maybe_clone.part.0+0xa82>
+ffffffff830f313b:	mov    0x4(%r14),%eax
+ffffffff830f313f:	mov    %r14,%rdi
+ffffffff830f3142:	sub    %rax,%rdi
+ffffffff830f3145:	call   ffffffff8165e850 <kfree>
+ffffffff830f314a:	jmp    ffffffff830f308d <pipapo_maybe_clone.part.0+0x65d>
+ffffffff830f314f:	call   ffffffff839bada0 <debug_lockdep_rcu_enabled>
+ffffffff830f3154:	mov    0x18(%rsp),%rax
+ffffffff830f3159:	lea    0x30(%rax),%rdi
+ffffffff830f315d:	movabs $0xdffffc0000000000,%rax
+ffffffff830f3167:	mov    %rdi,%rdx
+ffffffff830f316a:	shr    $0x3,%rdx
+ffffffff830f316e:	cmpb   $0x0,(%rdx,%rax,1)
+ffffffff830f3172:	jne    ffffffff830f3569 <pipapo_maybe_clone.part.0+0xb39>
+ffffffff830f3178:	movabs $0xdffffc0000000000,%rdx
+ffffffff830f3182:	mov    0x18(%rsp),%rax
+ffffffff830f3187:	mov    0x30(%rax),%rbx
+ffffffff830f318b:	mov    $0xffffffff8501235c,%rax
+ffffffff830f3192:	mov    %rax,%rcx
+ffffffff830f3195:	and    $0x7,%eax
+ffffffff830f3198:	shr    $0x3,%rcx
+ffffffff830f319c:	add    $0x3,%eax
+ffffffff830f319f:	movzbl (%rcx,%rdx,1),%edx
+ffffffff830f31a3:	cmp    %dl,%al
+ffffffff830f31a5:	jl     ffffffff830f31af <pipapo_maybe_clone.part.0+0x77f>
+ffffffff830f31a7:	test   %dl,%dl
+ffffffff830f31a9:	jne    ffffffff830f3546 <pipapo_maybe_clone.part.0+0xb16>
+ffffffff830f31af:	mov    0x1f1f1a7(%rip),%esi        # ffffffff8501235c <nf_tables_net_id>
+ffffffff830f31b5:	mov    %rbx,%rdi
+ffffffff830f31b8:	call   ffffffff830f1f90 <net_generic>
+ffffffff830f31bd:	mov    $0xffffffff,%esi
+ffffffff830f31c2:	lea    0xb8(%rax),%rdi
+ffffffff830f31c9:	call   ffffffff839bac90 <lock_is_held_type>
+ffffffff830f31ce:	test   %eax,%eax
+ffffffff830f31d0:	jne    ffffffff830f2a50 <pipapo_maybe_clone.part.0+0x20>
+ffffffff830f31d6:	call   ffffffff839bada0 <debug_lockdep_rcu_enabled>
+ffffffff830f31db:	test   %eax,%eax
+ffffffff830f31dd:	je     ffffffff830f2a50 <pipapo_maybe_clone.part.0+0x20>
+ffffffff830f31e3:	cmpb   $0x0,0x1ef657b(%rip)        # ffffffff84fe9765 <__warned.3>
+ffffffff830f31ea:	jne    ffffffff830f2a50 <pipapo_maybe_clone.part.0+0x20>
+ffffffff830f31f0:	mov    $0xffffffff84291d20,%rdx
+ffffffff830f31f7:	mov    $0x4cb,%esi
+ffffffff830f31fc:	mov    $0xffffffff84291b40,%rdi
+ffffffff830f3203:	movb   $0x1,0x1ef655b(%rip)        # ffffffff84fe9765 <__warned.3>
+ffffffff830f320a:	call   ffffffff83901748 <lockdep_rcu_suspicious>
+ffffffff830f320f:	jmp    ffffffff830f2a50 <pipapo_maybe_clone.part.0+0x20>
+ffffffff830f3214:	mov    0x28(%rsp),%r12
+ffffffff830f3219:	movabs $0xdffffc0000000000,%rax
+ffffffff830f3223:	lea    0x4(%r12),%rdi
+ffffffff830f3228:	mov    %rdi,%rdx
+ffffffff830f322b:	shr    $0x3,%rdx
+ffffffff830f322f:	movzbl (%rdx,%rax,1),%eax
+ffffffff830f3233:	mov    %rdi,%rdx
+ffffffff830f3236:	and    $0x7,%edx
+ffffffff830f3239:	cmp    %dl,%al
+ffffffff830f323b:	jg     ffffffff830f3245 <pipapo_maybe_clone.part.0+0x815>
+ffffffff830f323d:	test   %al,%al
+ffffffff830f323f:	jne    ffffffff830f3527 <pipapo_maybe_clone.part.0+0xaf7>
+ffffffff830f3245:	movb   $0x0,0x4(%r12)
+ffffffff830f324b:	jmp    ffffffff830f2f75 <pipapo_maybe_clone.part.0+0x545>
+ffffffff830f3250:	mov    %r12,%rdi
+ffffffff830f3253:	mov    %r9,(%rsp)
+ffffffff830f3257:	call   ffffffff81663620 <__asan_report_store4_noabort>
+ffffffff830f325c:	mov    (%rsp),%r9
+ffffffff830f3260:	jmp    ffffffff830f2b29 <pipapo_maybe_clone.part.0+0xf9>
+ffffffff830f3265:	mov    %r9,%rdi
+ffffffff830f3268:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f326d:	mov    (%rsp),%r9
+ffffffff830f3271:	jmp    ffffffff830f2b05 <pipapo_maybe_clone.part.0+0xd5>
+ffffffff830f3276:	mov    %r9,%rdi
+ffffffff830f3279:	mov    %r9,(%rsp)
+ffffffff830f327d:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f3282:	mov    (%rsp),%r9
+ffffffff830f3286:	jmp    ffffffff830f2aa4 <pipapo_maybe_clone.part.0+0x74>
+ffffffff830f328b:	mov    $0xffffffff8500cba4,%rdi
+ffffffff830f3292:	mov    %r9,(%rsp)
+ffffffff830f3296:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f329b:	mov    (%rsp),%r9
+ffffffff830f329f:	jmp    ffffffff830f2bf1 <pipapo_maybe_clone.part.0+0x1c1>
+ffffffff830f32a4:	mov    %rdx,0x30(%rsp)
+ffffffff830f32a9:	mov    %rax,(%rsp)
+ffffffff830f32ad:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f32b2:	mov    0x30(%rsp),%rdx
+ffffffff830f32b7:	mov    (%rsp),%rax
+ffffffff830f32bb:	jmp    ffffffff830f2e8f <pipapo_maybe_clone.part.0+0x45f>
+ffffffff830f32c0:	mov    %r12,%rdi
+ffffffff830f32c3:	mov    %rax,(%rsp)
+ffffffff830f32c7:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f32cc:	mov    (%rsp),%rax
+ffffffff830f32d0:	jmp    ffffffff830f2e6e <pipapo_maybe_clone.part.0+0x43e>
+ffffffff830f32d5:	mov    0x10(%rsp),%rdi
+ffffffff830f32da:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f32df:	jmp    ffffffff830f2ebb <pipapo_maybe_clone.part.0+0x48b>
+ffffffff830f32e4:	mov    %rcx,%rdi
+ffffffff830f32e7:	mov    %rcx,(%rsp)
+ffffffff830f32eb:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f32f0:	mov    (%rsp),%rcx
+ffffffff830f32f4:	jmp    ffffffff830f2f2c <pipapo_maybe_clone.part.0+0x4fc>
+ffffffff830f32f9:	mov    %r12,%rdi
+ffffffff830f32fc:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f3301:	jmp    ffffffff830f2f0e <pipapo_maybe_clone.part.0+0x4de>
+ffffffff830f3306:	mov    %r12,%rdi
+ffffffff830f3309:	mov    %r8,0x38(%rsp)
+ffffffff830f330e:	mov    %rsi,0x30(%rsp)
+ffffffff830f3313:	mov    %rax,(%rsp)
+ffffffff830f3317:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f331c:	mov    0x38(%rsp),%r8
+ffffffff830f3321:	mov    0x30(%rsp),%rsi
+ffffffff830f3326:	mov    (%rsp),%rax
+ffffffff830f332a:	jmp    ffffffff830f2dc0 <pipapo_maybe_clone.part.0+0x390>
+ffffffff830f332f:	mov    %rbx,%rdi
+ffffffff830f3332:	mov    %rsi,0x30(%rsp)
+ffffffff830f3337:	mov    %rax,(%rsp)
+ffffffff830f333b:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f3340:	mov    0x30(%rsp),%rsi
+ffffffff830f3345:	mov    (%rsp),%rax
+ffffffff830f3349:	jmp    ffffffff830f2da5 <pipapo_maybe_clone.part.0+0x375>
+ffffffff830f334e:	mov    %rcx,%rdi
+ffffffff830f3351:	mov    %rax,(%rsp)
+ffffffff830f3355:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f335a:	mov    (%rsp),%rax
+ffffffff830f335e:	jmp    ffffffff830f2d89 <pipapo_maybe_clone.part.0+0x359>
+ffffffff830f3363:	mov    %r13,%rdi
+ffffffff830f3366:	mov    %rcx,0x38(%rsp)
+ffffffff830f336b:	mov    %rax,0x30(%rsp)
+ffffffff830f3370:	mov    %rdx,(%rsp)
+ffffffff830f3374:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f3379:	mov    0x38(%rsp),%rcx
+ffffffff830f337e:	mov    0x30(%rsp),%rax
+ffffffff830f3383:	mov    (%rsp),%rdx
+ffffffff830f3387:	jmp    ffffffff830f2d74 <pipapo_maybe_clone.part.0+0x344>
+ffffffff830f338c:	mov    0x20(%rsp),%rdi
+ffffffff830f3391:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3396:	jmp    ffffffff830f30c5 <pipapo_maybe_clone.part.0+0x695>
+ffffffff830f339b:	mov    $0xffffffff8500cba4,%rdi
+ffffffff830f33a2:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f33a7:	jmp    ffffffff830f30af <pipapo_maybe_clone.part.0+0x67f>
+ffffffff830f33ac:	mov    %rax,(%rsp)
+ffffffff830f33b0:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f33b5:	mov    (%rsp),%rax
+ffffffff830f33b9:	jmp    ffffffff830f2e50 <pipapo_maybe_clone.part.0+0x420>
+ffffffff830f33be:	mov    %r12,%rdi
+ffffffff830f33c1:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f33c6:	jmp    ffffffff830f2e17 <pipapo_maybe_clone.part.0+0x3e7>
+ffffffff830f33cb:	mov    %rdx,0x30(%rsp)
+ffffffff830f33d0:	mov    %rax,(%rsp)
+ffffffff830f33d4:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f33d9:	mov    0x30(%rsp),%rdx
+ffffffff830f33de:	mov    (%rsp),%rax
+ffffffff830f33e2:	jmp    ffffffff830f2dee <pipapo_maybe_clone.part.0+0x3be>
+ffffffff830f33e7:	mov    %rbx,%rdi
+ffffffff830f33ea:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f33ef:	jmp    ffffffff830f2ef0 <pipapo_maybe_clone.part.0+0x4c0>
+ffffffff830f33f4:	mov    %rdx,%rdi
+ffffffff830f33f7:	mov    %eax,0x8(%rsp)
+ffffffff830f33fb:	mov    %rdx,(%rsp)
+ffffffff830f33ff:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f3404:	mov    0x8(%rsp),%eax
+ffffffff830f3408:	mov    (%rsp),%rdx
+ffffffff830f340c:	jmp    ffffffff830f2c5c <pipapo_maybe_clone.part.0+0x22c>
+ffffffff830f3411:	mov    %eax,0x10(%rsp)
+ffffffff830f3415:	mov    %rcx,0x8(%rsp)
+ffffffff830f341a:	mov    %rdx,(%rsp)
+ffffffff830f341e:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3423:	mov    0x10(%rsp),%eax
+ffffffff830f3427:	mov    0x8(%rsp),%rcx
+ffffffff830f342c:	mov    (%rsp),%rdx
+ffffffff830f3430:	jmp    ffffffff830f2c43 <pipapo_maybe_clone.part.0+0x213>
+ffffffff830f3435:	mov    0x20(%rsp),%rdi
+ffffffff830f343a:	mov    %eax,(%rsp)
+ffffffff830f343d:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3442:	mov    (%rsp),%eax
+ffffffff830f3445:	jmp    ffffffff830f2c22 <pipapo_maybe_clone.part.0+0x1f2>
+ffffffff830f344a:	mov    %rcx,0x38(%rsp)
+ffffffff830f344f:	mov    %rax,0x30(%rsp)
+ffffffff830f3454:	mov    %rdx,(%rsp)
+ffffffff830f3458:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f345d:	mov    0x38(%rsp),%rcx
+ffffffff830f3462:	mov    0x30(%rsp),%rax
+ffffffff830f3467:	mov    (%rsp),%rdx
+ffffffff830f346b:	jmp    ffffffff830f2d5b <pipapo_maybe_clone.part.0+0x32b>
+ffffffff830f3470:	mov    %r13,%rdi
+ffffffff830f3473:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3478:	jmp    ffffffff830f3025 <pipapo_maybe_clone.part.0+0x5f5>
+ffffffff830f347d:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3482:	jmp    ffffffff830f3043 <pipapo_maybe_clone.part.0+0x613>
+ffffffff830f3487:	mov    %rax,0x8(%rsp)
+ffffffff830f348c:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f3491:	mov    0x8(%rsp),%rax
+ffffffff830f3496:	jmp    ffffffff830f30f0 <pipapo_maybe_clone.part.0+0x6c0>
+ffffffff830f349b:	mov    %rax,%rdi
+ffffffff830f349e:	mov    %rax,0x8(%rsp)
+ffffffff830f34a3:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f34a8:	mov    0x8(%rsp),%rax
+ffffffff830f34ad:	jmp    ffffffff830f310a <pipapo_maybe_clone.part.0+0x6da>
+ffffffff830f34b2:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f34b7:	jmp    ffffffff830f313b <pipapo_maybe_clone.part.0+0x70b>
+ffffffff830f34bc:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f34c1:	jmp    ffffffff830f2f9c <pipapo_maybe_clone.part.0+0x56c>
+ffffffff830f34c6:	mov    %r14,%rdi
+ffffffff830f34c9:	mov    %r15,(%rsp)
+ffffffff830f34cd:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f34d2:	mov    (%rsp),%r9
+ffffffff830f34d6:	jmp    ffffffff830f2c94 <pipapo_maybe_clone.part.0+0x264>
+ffffffff830f34db:	mov    %r14,%rdi
+ffffffff830f34de:	mov    %r9,(%rsp)
+ffffffff830f34e2:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f34e7:	mov    (%rsp),%r9
+ffffffff830f34eb:	jmp    ffffffff830f2b4c <pipapo_maybe_clone.part.0+0x11c>
+ffffffff830f34f0:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f34f5:	jmp    ffffffff830f2a77 <pipapo_maybe_clone.part.0+0x47>
+ffffffff830f34fa:	mov    %rbx,%rdi
+ffffffff830f34fd:	mov    %rax,0x8(%rsp)
+ffffffff830f3502:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f3507:	mov    0x8(%rsp),%rax
+ffffffff830f350c:	mov    (%rsp),%r9
+ffffffff830f3510:	jmp    ffffffff830f2bb1 <pipapo_maybe_clone.part.0+0x181>
+ffffffff830f3515:	mov    %r9,(%rsp)
+ffffffff830f3519:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f351e:	mov    (%rsp),%r9
+ffffffff830f3522:	jmp    ffffffff830f2b70 <pipapo_maybe_clone.part.0+0x140>
+ffffffff830f3527:	call   ffffffff816635e0 <__asan_report_store1_noabort>
+ffffffff830f352c:	jmp    ffffffff830f3245 <pipapo_maybe_clone.part.0+0x815>
+ffffffff830f3531:	mov    %r9,%rdi
+ffffffff830f3534:	mov    %r9,(%rsp)
+ffffffff830f3538:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f353d:	mov    (%rsp),%r9
+ffffffff830f3541:	jmp    ffffffff830f2d07 <pipapo_maybe_clone.part.0+0x2d7>
+ffffffff830f3546:	mov    $0xffffffff8501235c,%rdi
+ffffffff830f354d:	call   ffffffff816635b0 <__asan_report_load4_noabort>
+ffffffff830f3552:	jmp    ffffffff830f31af <pipapo_maybe_clone.part.0+0x77f>
+ffffffff830f3557:	mov    %r9,(%rsp)
+ffffffff830f355b:	call   ffffffff81663640 <__asan_report_store8_noabort>
+ffffffff830f3560:	mov    (%rsp),%r9
+ffffffff830f3564:	jmp    ffffffff830f2cd3 <pipapo_maybe_clone.part.0+0x2a3>
+ffffffff830f3569:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f356e:	jmp    ffffffff830f3178 <pipapo_maybe_clone.part.0+0x748>
+ffffffff830f3573:	mov    %r13,%rdi
+ffffffff830f3576:	call   ffffffff816635c0 <__asan_report_load8_noabort>
+ffffffff830f357b:	jmp    ffffffff830f2fde <pipapo_maybe_clone.part.0+0x5ae>
+
+Disassembly of section .init.text:
+
+Disassembly of section .altinstr_aux:
+
+Disassembly of section .altinstr_replacement:
+
+Disassembly of section .exit.text:

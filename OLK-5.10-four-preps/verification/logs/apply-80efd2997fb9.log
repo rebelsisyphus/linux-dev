@@ -1,0 +1,8 @@
+Checking patch net/netfilter/nft_set_pipapo.c...
+Hunk #1 succeeded at 1326 (offset -69 lines).
+Hunk #2 succeeded at 1336 (offset -69 lines).
+Hunk #3 succeeded at 1404 (offset -73 lines).
+Hunk #4 succeeded at 1754 (offset -43 lines).
+Hunk #5 succeeded at 1790 (offset -31 lines).
+Hunk #6 succeeded at 2235 (offset -34 lines).
+Applied patch net/netfilter/nft_set_pipapo.c cleanly.

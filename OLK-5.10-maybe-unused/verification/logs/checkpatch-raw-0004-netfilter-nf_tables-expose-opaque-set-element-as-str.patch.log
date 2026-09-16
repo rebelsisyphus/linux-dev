@@ -1,0 +1,17 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 9dad402b89e8 ("netfilter: nf_tables: expose opaque set element as struct nft_elem_priv")'
+#9: 
+commit 9dad402b89e81a0516bad5e0ac009b7a0a80898f
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#14: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=9dad402b89e81a0516bad5e0ac009b7a0a80898f
+
+total: 1 errors, 1 warnings, 0 checks, 826 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused/0004-netfilter-nf_tables-expose-opaque-set-element-as-str.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

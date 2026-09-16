@@ -1,0 +1,53 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit c9526aeb4998 ("netfilter: nf_tables: do not remove elements if set backend implements .abort")'
+#9: 
+commit c9526aeb4998393171d85225ff540e28c7d4ab86
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#14: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c9526aeb4998393171d85225ff540e28c7d4ab86
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit f86fb94011ae ("netfilter: nf_tables: revert do not remove elements if set backend implements .abort")'
+#25: 
+  f86fb94011ae ("netfilter: nf_tables: revert do not remove elements if set backend implements .abort")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 532aec7e878b ("netfilter: nft_set_pipapo: remove dirty flag")'
+#30: 
+  532aec7e878b ("netfilter: nft_set_pipapo: remove dirty flag")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 3f1d886cc7c3 ("netfilter: nft_set_pipapo: move cloning of match info to insert/removal path")'
+#31: 
+  3f1d886cc7c3 ("netfilter: nft_set_pipapo: move cloning of match info to insert/removal path")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit a238106703ab ("netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone")'
+#32: 
+  a238106703ab ("netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit c5444786d0ea ("netfilter: nft_set_pipapo: merge deactivate helper into caller")'
+#33: 
+  c5444786d0ea ("netfilter: nft_set_pipapo: merge deactivate helper into caller")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 6c108d9bee44 ("netfilter: nft_set_pipapo: prepare walk function for on-demand clone")'
+#34: 
+  6c108d9bee44 ("netfilter: nft_set_pipapo: prepare walk function for on-demand clone")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 8b8a2417558c ("netfilter: nft_set_pipapo: prepare destroy function for on-demand clone")'
+#35: 
+  8b8a2417558c ("netfilter: nft_set_pipapo: prepare destroy function for on-demand clone")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 80efd2997fb9 ("netfilter: nft_set_pipapo: make pipapo_clone helper return NULL")'
+#36: 
+  80efd2997fb9 ("netfilter: nft_set_pipapo: make pipapo_clone helper return NULL")
+
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit a590f4760922 ("netfilter: nft_set_pipapo: move prove_locking helper around")'
+#37: 
+  a590f4760922 ("netfilter: nft_set_pipapo: move prove_locking helper around")
+
+total: 10 errors, 1 warnings, 0 checks, 10 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0015-netfilter-nf_tables-do-not-remove-elements-if-set-ba.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

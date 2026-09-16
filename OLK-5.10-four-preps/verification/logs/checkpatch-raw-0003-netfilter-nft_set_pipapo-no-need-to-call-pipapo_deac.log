@@ -1,0 +1,17 @@
+ERROR:GIT_COMMIT_ID: Please use git commit description style 'commit <12+ chars of sha1> ("<title line>")' - ie: 'commit 26cec9d4144e ("netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush")'
+#9: 
+commit 26cec9d4144eb23c45cd5c033d5c141f04d61a9c
+
+WARNING:COMMIT_LOG_LONG_LINE: Possible unwrapped commit description (prefer a maximum 75 chars per line)
+#14: 
+Reference: https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=26cec9d4144eb23c45cd5c033d5c141f04d61a9c
+
+total: 1 errors, 1 warnings, 0 checks, 11 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0003-netfilter-nft_set_pipapo-no-need-to-call-pipapo_deac.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

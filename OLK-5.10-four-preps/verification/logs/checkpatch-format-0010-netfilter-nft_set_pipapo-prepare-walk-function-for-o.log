@@ -1,0 +1,5 @@
+total: 0 errors, 0 warnings, 0 checks, 88 lines checked
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0010-netfilter-nft_set_pipapo-prepare-walk-function-for-o.patch has no obvious style problems and is ready for submission.
+
+NOTE: Ignored message types: COMMIT_LOG_LONG_LINE GIT_COMMIT_ID

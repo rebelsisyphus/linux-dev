@@ -1,0 +1,74 @@
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused f943d74a1922] netfilter: nft_set_pipapo: Use struct_size()
+ Author: Christophe JAILLET <christophe.jaillet@wanadoo.fr>
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused edbbce02ed81] netfilter: nf_tables: fix false-positive lockdep splat
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 12cd92f3b87b] netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused a226639a9ee0] netfilter: nf_tables: expose opaque set element as struct nft_elem_priv
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 8 files changed, 172 insertions(+), 120 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused e735517a593e] netfilter: nft_set_pipapo: remove static in nft_pipapo_get()
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 5128efbe0c9f] netfilter: nft_set_pipapo: constify lookup fn args where possible
+ Author: Florian Westphal <fw@strlen.de>
+ 3 files changed, 48 insertions(+), 35 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 6367d4d077cb] netfilter: nft_set_pipapo: use GFP_KERNEL for insertions
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 11 insertions(+), 7 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 8f91bb6483ae] netfilter: nf_tables: restore set elements when delete set fails
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 2 files changed, 7 insertions(+)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 245b70836807] netfilter: nft_set_pipapo: make pipapo_clone helper return NULL
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 58e4e9ab513c] netfilter: nft_set_pipapo: prepare destroy function for on-demand clone
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 6 insertions(+), 21 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 00765a8f7091] netfilter: nft_set_pipapo: prepare walk function for on-demand clone
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 39 insertions(+), 21 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused bcbad45f6dc1] netfilter: nft_set_pipapo: merge deactivate helper into caller
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 9 insertions(+), 30 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 3cfd6bb65015] netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 0f8bf5f72792] netfilter: nft_set_pipapo: move cloning of match info to insert/removal path
+ Author: Florian Westphal <fw@strlen.de>
+ 1 file changed, 60 insertions(+), 31 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 1101e464ee73] netfilter: nft_set_pipapo: remove dirty flag
+ Author: Florian Westphal <fw@strlen.de>
+ 2 files changed, 27 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 4819f0097746] netfilter: nf_tables: do not remove elements if set backend implements .abort
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused e30bede21a9f] netfilter: nf_tables: clone set on flush only
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 3 files changed, 20 insertions(+), 3 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused ebd25f42801b] netfilter: nft_set_pipapo: don't leak bad clone into future transaction
+ Author: Florian Westphal <fw@strlen.de>
+ 2 files changed, 37 insertions(+), 5 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused ca4588b8a66f] netfilter: remove nf_conntrack_helper sysctl and modparam toggles
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 6 files changed, 37 insertions(+), 96 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused c78dc96f5db7] netfilter: nf_conntrack_expect: use conntrack GC to reap expectations
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 9 files changed, 143 insertions(+), 108 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 93662a6d017b] netfilter: nf_conntrack_expect: add and use nf_ct_expect_related_pair()
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 4 files changed, 51 insertions(+), 30 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused e09b683d665b] netfilter: nf_conntrack_expect: bail out on insert dead expectations
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 1 file changed, 6 insertions(+)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 0f17632ae6f5] netfilter: nf_conntrack_expect: consolidate check for insertion of dead expectation
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 7d74264165c2] netfilter: ctnetlink: do not expose expectation DEAD flag
+ Author: Pablo Neira Ayuso <pablo@netfilter.org>
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+[backport/CVE-2026-72252-OLK-5.10-maybe-unused 855cd8b996ed] netfilter: conntrack: preserve kABI for expectation GC
+ 3 files changed, 26 insertions(+), 2 deletions(-)

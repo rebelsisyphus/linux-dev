@@ -1,0 +1,138 @@
+{
+  "b9f052dc68f6": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "9df95785d3d8: queue GC reclamation after swapping the live match."
+    ]
+  },
+  "9dad402b89e8": {
+    "files": [
+      "include/net/netfilter/nf_tables.h",
+      "net/netfilter/nf_tables_api.c",
+      "net/netfilter/nft_dynset.c",
+      "net/netfilter/nft_set_bitmap.c",
+      "net/netfilter/nft_set_hash.c",
+      "net/netfilter/nft_set_pipapo.c",
+      "net/netfilter/nft_set_rbtree.c"
+    ],
+    "causes": [
+      "29b359cf6d95: set iterator types are already backported.",
+      "6509a2e410c3: target flush callbacks still return bool.",
+      "563125a73ac3: target elements support a single expression.",
+      "aaa31047a6d2: target lacks catchall set elements.",
+      "34aae2c2fb1e: target element allocation still returns NULL.",
+      "7395dfacfff6: target lookup and insertion use transaction timestamps.",
+      "8079fc30f797: target keeps the original rbtree GC helper name.",
+      "e79b47a8615d: rollback already restores generation bits in activate.",
+      "7d259f021aaa: target retains rbtree insert and GC locking."
+    ]
+  },
+  "ab0beafd52b9": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "7395dfacfff6: element lookup already takes a timestamp."
+    ]
+  },
+  "f04df573faf9": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c",
+      "net/netfilter/nft_set_pipapo.h",
+      "net/netfilter/nft_set_pipapo_avx2.c"
+    ],
+    "causes": [
+      "9df95785d3d8: GC scan already has a separate element variable.",
+      "29b359cf6d95: walk already selects the view by iterator type.",
+      "791a615b7ad2: AVX2 fallback initializes maps using match data.",
+      "f227925e53c3: target retains the PIPAPO lookup declaration locally."
+    ]
+  },
+  "5b651783d80b": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "07ace0bbe03b: target retains zero-sized scratch allocations."
+    ]
+  },
+  "8b8a2417558c": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "9df95785d3d8: destruction already checks the pending GC list."
+    ]
+  },
+  "6c108d9bee44": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "aac14d516c2b: target keeps signed field and rule loop counters.",
+      "0e1ea651c971: walk callbacks still take struct nft_set_elem."
+    ]
+  },
+  "a238106703ab": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "07ace0bbe03b: target lacks the empty scratch lookup shortcut."
+    ]
+  },
+  "3f1d886cc7c3": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c"
+    ],
+    "causes": [
+      "a590f4760922: lockdep helper still follows the commit callback.",
+      "9df95785d3d8: preserve GC scan before publish and reclaim after publish."
+    ]
+  },
+  "532aec7e878b": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c",
+      "net/netfilter/nft_set_pipapo.h"
+    ],
+    "causes": [
+      "9df95785d3d8: target uses split GC phases and a pending GC list."
+    ]
+  },
+  "c9526aeb4998": {
+    "files": [
+      "net/netfilter/nf_tables_api.c"
+    ],
+    "causes": [
+      "0e1ea651c971: transactions still store struct nft_set_elem.",
+      "aaa31047a6d2: target has no catchall elements."
+    ]
+  },
+  "fb7fb4016300": {
+    "files": [
+      "include/net/netfilter/nf_tables.h",
+      "net/netfilter/nf_tables_api.c",
+      "net/netfilter/nft_set_hash.c",
+      "net/netfilter/nft_set_rbtree.c"
+    ],
+    "causes": [
+      "c362646b6fc1: target lacks NFT_ITER_UNSPEC documentation.",
+      "e6ba7cb63b8a: flush still lives in nf_tables_delsetelem().",
+      "a60a5abe19d6: hash and rbtree walks do not branch on iterator type.",
+      "7e43e0a1141d: target has no rbtree array representation."
+    ]
+  },
+  "47e65eff5069": {
+    "files": [
+      "net/netfilter/nft_set_pipapo.c",
+      "net/netfilter/nft_set_pipapo.h"
+    ],
+    "causes": [
+      "d8d871a35ca9: target retains the separate pipapo_get() implementation.",
+      "aac14d516c2b: target keeps int-sized match fields.",
+      "42eb1ca711b6: target lacks DEBUG_NET_WARN_ON_ONCE."
+    ]
+  }
+}

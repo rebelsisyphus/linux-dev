@@ -1,0 +1,5 @@
+total: 0 errors, 0 warnings, 0 checks, 10 lines checked
+
+/tmp/cve-72252-four-preps-6a8fhcsc/export/0015-netfilter-nf_tables-do-not-remove-elements-if-set-ba.patch has no obvious style problems and is ready for submission.
+
+NOTE: Ignored message types: COMMIT_LOG_LONG_LINE GIT_COMMIT_ID

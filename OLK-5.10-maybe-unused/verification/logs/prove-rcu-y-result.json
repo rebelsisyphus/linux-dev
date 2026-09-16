@@ -1,0 +1,51 @@
+{
+  "profile": "prove-rcu-y",
+  "source_commit": "855cd8b996ed75a750f8eeea72e87374d25daab6",
+  "source_tree": "21b04e652765261d1e10d5321867526a2e59107f",
+  "build_dir": "/tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-y",
+  "seed_config": "/home/sisyphus/code/kernel/cve_patches/CVE-2026-72252/OLK-5.10-maybe-unused/verification/prove-rcu-y-seed.config",
+  "commands": [
+    [
+      "make",
+      "-C",
+      "/tmp/cve-72252-maybe-unused-9seqhpb5/source",
+      "O=/tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-y",
+      "olddefconfig"
+    ],
+    [
+      "make",
+      "-C",
+      "/tmp/cve-72252-maybe-unused-9seqhpb5/source",
+      "O=/tmp/cve-72252-maybe-unused-9seqhpb5/build-prove-rcu-y",
+      "-j4",
+      "KCFLAGS=-Werror=unused-function",
+      "net/netfilter/nf_tables_api.o",
+      "net/netfilter/nf_tables_core.o",
+      "net/netfilter/nft_lookup.o",
+      "net/netfilter/nft_set_pipapo.o",
+      "net/netfilter/nft_set_pipapo_avx2.o",
+      "net/netfilter/nft_set_hash.o",
+      "net/netfilter/nft_set_rbtree.o",
+      "net/netfilter/nft_set_bitmap.o",
+      "net/netfilter/nft_dynset.o",
+      "net/netfilter/nfnetlink.o"
+    ]
+  ],
+  "targets": [
+    "net/netfilter/nf_tables_api.o",
+    "net/netfilter/nf_tables_core.o",
+    "net/netfilter/nft_lookup.o",
+    "net/netfilter/nft_set_pipapo.o",
+    "net/netfilter/nft_set_pipapo_avx2.o",
+    "net/netfilter/nft_set_hash.o",
+    "net/netfilter/nft_set_rbtree.o",
+    "net/netfilter/nft_set_bitmap.o",
+    "net/netfilter/nft_dynset.o",
+    "net/netfilter/nfnetlink.o"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 9.03,
+  "runtime_test": false,
+  "equivalent_final_commit": "a8fb09599f4ed39d3c2d2e3cd680b26ae7768741",
+  "equivalence": "identical Git source tree after commit-message newline normalization"
+}

@@ -1,0 +1,182 @@
+[
+  {
+    "upstream": "a2a0ffb0846895923991aa87e022dc228d53c125",
+    "tag": "v6.5-rc1",
+    "subject": "netfilter: nft_set_pipapo: Use struct_size()",
+    "local": "fa2382737f4827e83f061f71f683ad889398894d",
+    "previous_local": "7f492c9c32df30105ed6fe127759705e61eed051",
+    "previous_25_local": "51ac3fa94d6d7f2a6f8494f52b27b278a0e08e8a",
+    "number": 1,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "b9f052dc68f69dac89fe1e24693354c033daa091",
+    "tag": "v6.5-rc7",
+    "subject": "netfilter: nf_tables: fix false-positive lockdep splat",
+    "local": "ac94bc96be3ae477a4dccb01cad9c31202a931a8",
+    "previous_local": "86475099d1d15d86a4e67cc866092066c02511e7",
+    "previous_25_local": "b71d6bb4dbd7eca04dd5e9303076b0c9e922ad33",
+    "number": 2,
+    "local_annotation_change": true
+  },
+  {
+    "upstream": "26cec9d4144eb23c45cd5c033d5c141f04d61a9c",
+    "tag": "v6.7-rc1",
+    "subject": "netfilter: nft_set_pipapo: no need to call pipapo_deactivate() from flush",
+    "local": "9b3a68992fdaa85c14399a88f5a1d159def95549",
+    "previous_local": "caf9cfa04c519f162f4f9bba50bca6f87bdf8f62",
+    "previous_25_local": "e46a2a631d39ce02ca1ea857313e16289534af6f",
+    "number": 3,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "9dad402b89e81a0516bad5e0ac009b7a0a80898f",
+    "tag": "v6.7-rc1",
+    "subject": "netfilter: nf_tables: expose opaque set element as struct nft_elem_priv",
+    "local": "5b6e9d53420a587d52a051810c09385df10d73a2",
+    "previous_local": "5cbc64424075a911fd00f8c897596be79341dfe0",
+    "previous_25_local": "f36640318736f9d5e107d97ae2a47bffeb93f595",
+    "number": 4,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "ab0beafd52b98dfb8b8244b2c6794efbc87478db",
+    "tag": "v6.8-rc4",
+    "subject": "netfilter: nft_set_pipapo: remove static in nft_pipapo_get()",
+    "local": "bdbaedf35639dfc03ed33b79ac756a3f3dc32f07",
+    "previous_local": "d1ebcba612d63aa5e426bad8adbd945e64cdc6a2",
+    "previous_25_local": "9fd565b214e0221dcb668aa03db48a2b4a55354d",
+    "number": 5,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "f04df573faf90bb828a2241b650598c02c074323",
+    "tag": "v6.9-rc1",
+    "subject": "netfilter: nft_set_pipapo: constify lookup fn args where possible",
+    "local": "e95bc6179c1a37d5ff15cd705b35b79ef94b766b",
+    "previous_local": "1cf216dbe57d9acab4e7116a34d49f71569f5f24",
+    "previous_25_local": "42abf918e2dd31f458e3aadab99c0977b948d0b2",
+    "number": 6,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "5b651783d80b97167ecd27dc6a4408c694873902",
+    "tag": "v6.9-rc1",
+    "subject": "netfilter: nft_set_pipapo: use GFP_KERNEL for insertions",
+    "local": "faa3bd3a10ccdf7a85937a01a3275d6bcdccd410",
+    "previous_local": "1391bff5c36debe701ce6f84fcdff2cf49aaa789",
+    "previous_25_local": "fc7d87e7a1a46618c5ce836781d4a7205ec401f3",
+    "number": 7,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "e79b47a8615d42c68aaeb68971593333667382ed",
+    "tag": "v6.9-rc5",
+    "subject": "netfilter: nf_tables: restore set elements when delete set fails",
+    "purpose": "Complete the existing backport: missing flush and verdict-map validation callback generation checks.",
+    "local": "2106d8d416904c2d2aeb33f4eee425b1a92d2afb",
+    "previous_25_local": "391dfb36384374cf73aca036ba54b8c760b42f1d",
+    "number": 8,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "80efd2997fb9343a0283cf3cac5524a4595c8ff4",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: make pipapo_clone helper return NULL",
+    "local": "6dfb21b2c4daecbf898b374808be0ec900a5a46d",
+    "previous_local": "7cf0a4ad79381cea539d14fef0505f25d204e6a6",
+    "previous_25_local": "e69dc16624b269b2c0781430b2107230fc1a0cda",
+    "number": 9,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "8b8a2417558c632f249abebde97adf8c46540de2",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare destroy function for on-demand clone",
+    "local": "60bfc5982a09cd267372e7325ee1f9360f54dcce",
+    "previous_local": "2f1efdf84638fa0df507734e811ea38efc35d152",
+    "previous_25_local": "c1838bdd9e19883f4276d1d163d0ac7f0b61fdae",
+    "number": 10,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "6c108d9bee448a850b03e682836bfe91fca645cb",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare walk function for on-demand clone",
+    "local": "15be991cbfdf1e7a7ff8a6950296417ee68f4284",
+    "previous_local": "52923552e0e654a782e6d0dbb0b5dc1d0d4f27c0",
+    "previous_25_local": "09dc34af1e1ac0888012d34ac885d90af98854d0",
+    "number": 11,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "c5444786d0ea2417a5e2cee7bd67137fc8bad687",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: merge deactivate helper into caller",
+    "local": "b7c8fa3dff6f6888767c445567ec219e44217beb",
+    "previous_local": "a68c8c6a2c77a407488faddbfae8bc4412ea3f1d",
+    "previous_25_local": "ac0ea4a363677ba4a1d95e623f7ce5cc182b4c0d",
+    "number": 12,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "a238106703ab4ae1090b86eba128815b8626d8f1",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: prepare pipapo_get helper for on-demand clone",
+    "local": "3f2fa719bcb4d0faf773fdc247de7fdb56d86d0a",
+    "previous_local": "6b2feef394728da94c14f42484f1abe23257819c",
+    "previous_25_local": "54f68bbef20b9db16726a827839266ad960b8e0f",
+    "number": 13,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "3f1d886cc7c3525d4dbeee24bfa9bb3fe0d48ddc",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: move cloning of match info to insert/removal path",
+    "local": "e056a5eb0769301e88022c6f8acff309feb9b32b",
+    "previous_local": "1565151a320afc4603948c6132404be315c177c8",
+    "previous_25_local": "667d3f034d45db871246d74ed32afea106eeecb8",
+    "number": 14,
+    "local_annotation_change": true
+  },
+  {
+    "upstream": "532aec7e878b527fcee8877350ab5c5341789626",
+    "tag": "v6.10-rc1",
+    "subject": "netfilter: nft_set_pipapo: remove dirty flag",
+    "local": "271cbc4f4b661c6d7000a90490304c1fc2325671",
+    "previous_local": "445da5645499bd78160afa35610e43113c1cad70",
+    "previous_25_local": "7d74f6ead333d62934a114e2bec7e3fa69fb1dc2",
+    "number": 15,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "c9526aeb4998393171d85225ff540e28c7d4ab86",
+    "tag": "v6.12-rc1",
+    "subject": "netfilter: nf_tables: do not remove elements if set backend implements .abort",
+    "local": "873705b013b12be026bb675be651b42c389f12ff",
+    "previous_local": "b409bfc1aa4338c7ba8959b0085efd3a5529840b",
+    "previous_25_local": "5d812d7c8a6e09f6c0946589dfee9a468faf9c7e",
+    "number": 16,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "fb7fb4016300ac622c964069e286dc83166a5d52",
+    "tag": "v7.0-rc3",
+    "subject": "netfilter: nf_tables: clone set on flush only",
+    "local": "0b4eb9d9d828e44e8a251ff4693fc65d7e9939ca",
+    "previous_local": "3d00fb40b2c877b405e65821af404480329df0fb",
+    "previous_25_local": "fce80740cbfa0acfa32b3b52ce6868e825c937e9",
+    "number": 17,
+    "local_annotation_change": false
+  },
+  {
+    "upstream": "47e65eff50691f0a5b79d325e28d83ec1da43bcf",
+    "tag": "v7.2-rc2",
+    "subject": "netfilter: nft_set_pipapo: don't leak bad clone into future transaction",
+    "local": "8805c7a55dd02ac8d80822a040e96a08b7857c78",
+    "previous_local": "3618a1a7f94d4f2690ae4aef0095ce49229f20e6",
+    "previous_25_local": "00fc45f16e3c7a16fc4ce82f5600569dea033aa0",
+    "number": 18,
+    "local_annotation_change": false
+  }
+]

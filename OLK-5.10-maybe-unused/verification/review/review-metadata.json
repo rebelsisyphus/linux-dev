@@ -1,0 +1,8 @@
+{
+  "author": "Florian Westphal <fw@strlen.de>",
+  "sha": "8805c7a55dd02ac8d80822a040e96a08b7857c78",
+  "subject": "CVE-2026-72252 OLK-5.10 18-patch series: local __maybe_unused adaptation",
+  "issues-found": 0,
+  "issue-severity-score": "none",
+  "issue-severity-explanation": "none"
+}

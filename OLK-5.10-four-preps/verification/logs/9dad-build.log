@@ -1,0 +1,196 @@
+make: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'
+make[1]: Entering directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-distro'
+  GEN     Makefile
+  SYSTBL  arch/x86/include/generated/asm/syscalls_32.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_32_ia32.h
+  SYSHDR  arch/x86/include/generated/asm/unistd_64_x32.h
+  SYSTBL  arch/x86/include/generated/asm/syscalls_64.h
+  HYPERCALLS arch/x86/include/generated/asm/xen-hypercalls.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_32.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_64.h
+  SYSHDR  arch/x86/include/generated/uapi/asm/unistd_x32.h
+  WRAP    arch/x86/include/generated/uapi/asm/bpf_perf_event.h
+  WRAP    arch/x86/include/generated/uapi/asm/errno.h
+  WRAP    arch/x86/include/generated/uapi/asm/fcntl.h
+  WRAP    arch/x86/include/generated/uapi/asm/ioctl.h
+  WRAP    arch/x86/include/generated/uapi/asm/ioctls.h
+  WRAP    arch/x86/include/generated/uapi/asm/ipcbuf.h
+  WRAP    arch/x86/include/generated/uapi/asm/param.h
+  WRAP    arch/x86/include/generated/uapi/asm/poll.h
+  WRAP    arch/x86/include/generated/uapi/asm/resource.h
+  WRAP    arch/x86/include/generated/uapi/asm/socket.h
+  WRAP    arch/x86/include/generated/uapi/asm/sockios.h
+  WRAP    arch/x86/include/generated/uapi/asm/termbits.h
+  WRAP    arch/x86/include/generated/uapi/asm/termios.h
+  WRAP    arch/x86/include/generated/uapi/asm/types.h
+  HOSTCC  arch/x86/tools/relocs_32.o
+  HOSTCC  arch/x86/tools/relocs_64.o
+  HOSTCC  arch/x86/tools/relocs_common.o
+  WRAP    arch/x86/include/generated/asm/early_ioremap.h
+  WRAP    arch/x86/include/generated/asm/mcs_spinlock.h
+  WRAP    arch/x86/include/generated/asm/export.h
+  WRAP    arch/x86/include/generated/asm/irq_regs.h
+  WRAP    arch/x86/include/generated/asm/local64.h
+  WRAP    arch/x86/include/generated/asm/mm-arch-hooks.h
+  WRAP    arch/x86/include/generated/asm/mmiowb.h
+  WRAP    arch/x86/include/generated/asm/module.lds.h
+  WRAP    arch/x86/include/generated/asm/rwonce.h
+  UPD     include/config/kernel.release
+  UPD     include/generated/uapi/linux/version.h
+  HOSTCC  scripts/bin2c
+  HOSTCC  scripts/kallsyms
+  HOSTCC  scripts/recordmcount
+  HOSTCC  scripts/sorttable
+  UPD     include/generated/utsrelease.h
+  HOSTCC  scripts/genksyms/genksyms.o
+  HOSTCC  scripts/selinux/genheaders/genheaders
+  YACC    scripts/genksyms/parse.tab.[ch]
+  DESCEND  objtool
+  LEX     scripts/genksyms/lex.lex.c
+  HOSTCC  scripts/asn1_compiler
+  HOSTCC   /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/fixdep.o
+  HOSTCC  scripts/sign-file
+  HOSTLD  arch/x86/tools/relocs
+  HOSTCC  scripts/genksyms/parse.tab.o
+  HOSTLD   /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/fixdep-in.o
+  LINK     /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/fixdep
+  HOSTCC  scripts/genksyms/lex.lex.o
+  HOSTCC  scripts/selinux/mdp/mdp
+  HOSTCC  scripts/extract-cert
+  MKDIR    /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/special.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/exec-cmd.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/help.o
+  MKDIR    /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/lib/
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/pager.o
+  GEN      /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/lib/inat-tables.c
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/decode.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/parse-options.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/run-command.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/sigchain.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/subcmd-config.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/weak.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/check.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/special.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/orc_gen.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/orc_dump.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/builtin-check.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/builtin-orc.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/elf.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/objtool.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/libstring.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/libctype.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/str_error_r.o
+  CC       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/librbtree.o
+  HOSTLD  scripts/genksyms/genksyms
+  LD       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/arch/x86/objtool-in.o
+  CC      scripts/mod/empty.o
+  HOSTCC  scripts/mod/mk_elfconfig
+  CC      scripts/mod/devicetable-offsets.s
+  LD       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/libsubcmd-in.o
+  AR       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/libsubcmd.a
+  UPD     scripts/mod/devicetable-offsets.h
+  MKELF   scripts/mod/elfconfig.h
+  HOSTCC  scripts/mod/modpost.o
+  HOSTCC  scripts/mod/file2alias.o
+  HOSTCC  scripts/mod/sumversion.o
+  HOSTLD  scripts/mod/modpost
+  LD       /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/objtool-in.o
+  LINK     /tmp/cve-72252-four-preps-6a8fhcsc/build-distro/tools/objtool/objtool
+  CC      kernel/bounds.s
+  CALL    /tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/atomic/check-atomics.sh
+  UPD     include/generated/timeconst.h
+  UPD     include/generated/bounds.h
+  CC      arch/x86/kernel/asm-offsets.s
+  UPD     include/generated/asm-offsets.h
+  CALL    /tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/checksyscalls.sh
+  CC [M]  net/netfilter/nf_tables_api.o
+  CC [M]  net/netfilter/nft_dynset.o
+  CC [M]  net/netfilter/nft_set_bitmap.o
+  CC [M]  net/netfilter/nft_set_hash.o
+  CC [M]  net/netfilter/nft_set_pipapo.o
+  CC [M]  net/netfilter/nft_set_pipapo_avx2.o
+  CC [M]  net/netfilter/nft_set_rbtree.o
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_hash.c: In function ‘nft_rhash_gc’:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_hash.c:369:43: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+  369 |                 nft_trans_gc_elem_add(gc, he);
+      |                                           ^~
+      |                                           |
+      |                                           struct nft_rhash_elem *
+In file included from /tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables_core.h:5,
+                 from /tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_hash.c:19:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_rhash_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c: In function ‘nft_rbtree_gc_elem’:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c:281:43: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+  281 |                 nft_trans_gc_elem_add(gc, rbe_prev);
+      |                                           ^~~~~~~~
+      |                                           |
+      |                                           struct nft_rbtree_elem *
+In file included from /tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables_core.h:5,
+                 from /tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c:16:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_rbtree_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c:289:35: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+  289 |         nft_trans_gc_elem_add(gc, rbe);
+      |                                   ^~~
+      |                                   |
+      |                                   struct nft_rbtree_elem *
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_rbtree_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c: In function ‘nft_rbtree_gc’:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c:665:43: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+  665 |                 nft_trans_gc_elem_add(gc, rbe_end);
+      |                                           ^~~~~~~
+      |                                           |
+      |                                           struct nft_rbtree_elem *
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_rbtree_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_rbtree.c:672:43: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+  672 |                 nft_trans_gc_elem_add(gc, rbe);
+      |                                           ^~~
+      |                                           |
+      |                                           struct nft_rbtree_elem *
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_rbtree_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c: In function ‘pipapo_gc_scan’:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c:1650:51: error: passing argument 2 of ‘nft_trans_gc_elem_add’ from incompatible pointer type [-Werror=incompatible-pointer-types]
+ 1650 |                         nft_trans_gc_elem_add(gc, e);
+      |                                                   ^
+      |                                                   |
+      |                                                   struct nft_pipapo_elem *
+In file included from /tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables_core.h:5,
+                 from /tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c:337:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:75: note: expected ‘struct nft_elem_priv *’ but argument is of type ‘struct nft_pipapo_elem *’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |                                                     ~~~~~~~~~~~~~~~~~~~~~~^~~~
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c: At top level:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nft_set_pipapo.c:1766:13: warning: ‘nft_pipapo_transaction_mutex_held’ defined but not used [-Wunused-function]
+ 1766 | static bool nft_pipapo_transaction_mutex_held(const struct nft_set *set)
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+cc1: some warnings being treated as errors
+make[3]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/Makefile.build:284: net/netfilter/nft_set_rbtree.o] Error 1
+make[3]: *** Waiting for unfinished jobs....
+/tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nf_tables_api.c:8292:6: error: conflicting types for ‘nft_trans_gc_elem_add’; have ‘void(struct nft_trans_gc *, void *)’
+ 8292 | void nft_trans_gc_elem_add(struct nft_trans_gc *trans, void *priv)
+      |      ^~~~~~~~~~~~~~~~~~~~~
+In file included from /tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables_core.h:5,
+                 from /tmp/cve-72252-four-preps-6a8fhcsc/source/net/netfilter/nf_tables_api.c:20:
+/tmp/cve-72252-four-preps-6a8fhcsc/source/include/net/netfilter/nf_tables.h:1605:6: note: previous declaration of ‘nft_trans_gc_elem_add’ with type ‘void(struct nft_trans_gc *, struct nft_elem_priv *)’
+ 1605 | void nft_trans_gc_elem_add(struct nft_trans_gc *gc, struct nft_elem_priv *priv);
+      |      ^~~~~~~~~~~~~~~~~~~~~
+make[3]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/Makefile.build:284: net/netfilter/nf_tables_api.o] Error 1
+cc1: some warnings being treated as errors
+make[3]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/Makefile.build:284: net/netfilter/nft_set_hash.o] Error 1
+cc1: some warnings being treated as errors
+make[3]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/Makefile.build:284: net/netfilter/nft_set_pipapo.o] Error 1
+make[2]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/scripts/Makefile.build:501: net/netfilter] Error 2
+make[1]: *** [/tmp/cve-72252-four-preps-6a8fhcsc/source/Makefile:1853: net] Error 2
+make[1]: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/build-distro'
+make: *** [Makefile:195: __sub-make] Error 2
+make: Leaving directory '/tmp/cve-72252-four-preps-6a8fhcsc/source'

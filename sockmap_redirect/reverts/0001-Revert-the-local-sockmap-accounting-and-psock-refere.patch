@@ -1,0 +1,143 @@
+From 61c044e00cf87547834c213d5b001acf6d3b230d Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 15 Sep 2026 20:57:36 +0800
+Subject: [PATCH] Revert the local sockmap accounting and psock reference
+ series
+
+Revert commits 25c6195698444ba66fc0e97b5f5b757893132416 and
+61895c2fb1139734e3bd5b54ec4d2c2f6aba6dd4 before rebuilding the local series
+as separate reference, retry metadata, accounting and synchronization
+fixes.
+
+The accounting commit assumes sock_map_destroy() always runs with TCP
+socket ownership excluded. inet_csk_listen_stop() can instead continue
+after warning about an owned child, so that assumption is not valid for
+unaccepted sockets. The replacement series must describe that remaining
+TCP teardown race explicitly and avoid immediate TCP cork reclamation
+from callers without a reliable socket lock contract.
+
+The reference fix remains valid and will be reapplied independently.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/skmsg.c    | 36 +++++++-----------------------------
+ net/core/sock_map.c |  2 --
+ 2 files changed, 7 insertions(+), 31 deletions(-)
+
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index 13663edaea86..2521b643fa05 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -675,7 +675,6 @@ static void sk_psock_backlog(struct work_struct *work)
+ 	struct sk_psock_work_state *state = &psock->work_state;
+ 	struct sk_buff *skb = NULL;
+ 	u32 len = 0, off = 0;
+-	bool locked = false;
+ 	bool ingress;
+ 	int ret;
+ 
+@@ -686,12 +685,12 @@ static void sk_psock_backlog(struct work_struct *work)
+ 	if (!sk_psock_test_state(psock, SK_PSOCK_TX_ENABLED))
+ 		return;
+ 
+-	/* Pin the psock owning this work, not a replacement in sk_user_data.
+-	 * Its destroy work waits for us before freeing psock or dropping sk.
+-	 * A live reference also makes sock_map_close() wait for this work
+-	 * before freeing sk_socket.
++	/* Increment the psock refcnt to synchronize with close(fd) path in
++	 * sock_map_close(), ensuring we wait for backlog thread completion
++	 * before sk_socket freed. If refcnt increment fails, it indicates
++	 * sock_map_close() completed with sk_socket potentially already freed.
+ 	 */
+-	if (!refcount_inc_not_zero(&psock->refcnt))
++	if (!sk_psock_get(psock->sk))
+ 		return;
+ 	mutex_lock(&psock->work_mutex);
+ 	while ((skb = skb_peek(&psock->ingress_skb))) {
+@@ -711,10 +710,6 @@ static void sk_psock_backlog(struct work_struct *work)
+ 		}
+ 
+ 		ingress = skb_bpf_ingress(skb);
+-		/* Egress acquires the socket lock in the send path. */
+-		locked = ingress && sk_is_tcp(psock->sk);
+-		if (locked)
+-			lock_sock(psock->sk);
+ 		skb_bpf_redirect_clear(skb);
+ 		do {
+ 			ret = -EIO;
+@@ -746,17 +741,8 @@ static void sk_psock_backlog(struct work_struct *work)
+ 		sk_psock_skb_state(psock, state, 0, 0);
+ 		skb = skb_dequeue(&psock->ingress_skb);
+ 		kfree_skb(skb);
+-		/* The last skb reference can run sock_rfree(), so keep TCP
+-		 * memory accounting serialized until after dropping it.
+-		 */
+-		if (locked) {
+-			release_sock(psock->sk);
+-			locked = false;
+-		}
+ 	}
+ end:
+-	if (locked)
+-		release_sock(psock->sk);
+ 	mutex_unlock(&psock->work_mutex);
+ 	sk_psock_put(psock->sk, psock);
+ }
+@@ -869,10 +855,8 @@ void sk_psock_stop(struct sk_psock *psock)
+ {
+ 	spin_lock_bh(&psock->ingress_lock);
+ 	sk_psock_clear_state(psock, SK_PSOCK_TX_ENABLED);
++	sk_psock_cork_free(psock);
+ 	spin_unlock_bh(&psock->ingress_lock);
+-	/* Callers holding the socket lock can reclaim cork memory here.
+-	 * Otherwise, sk_psock_destroy() reclaims it under the socket lock.
+-	 */
+ }
+ 
+ static void sk_psock_done_strp(struct sk_psock *psock);
+@@ -885,20 +869,14 @@ static void sk_psock_destroy(struct work_struct *work)
+ 
+ 	sk_psock_done_strp(psock);
+ 
+-	/* Cancel before taking the socket lock needed by the worker. */
+ 	cancel_delayed_work_sync(&psock->work);
+-	/* The socket may still be in use after the psock was detached. */
+-	if (sk_is_tcp(psock->sk))
+-		lock_sock(psock->sk);
+ 	__sk_psock_zap_ingress(psock);
+-	sk_psock_cork_free(psock);
+-	if (sk_is_tcp(psock->sk))
+-		release_sock(psock->sk);
+ 	mutex_destroy(&psock->work_mutex);
+ 
+ 	psock_progs_drop(&psock->progs);
+ 
+ 	sk_psock_link_destroy(psock);
++	sk_psock_cork_free(psock);
+ 
+ 	if (psock->sk_redir)
+ 		sock_put(psock->sk_redir);
+diff --git a/net/core/sock_map.c b/net/core/sock_map.c
+index 7f8524429594..ca49bc7f8687 100644
+--- a/net/core/sock_map.c
++++ b/net/core/sock_map.c
+@@ -1687,7 +1687,6 @@ void sock_map_destroy(struct sock *sk)
+ 		sock_map_remove_links(sk, psock);
+ 		rcu_read_unlock();
+ 		sk_psock_stop(psock);
+-		sk_psock_cork_free(psock);
+ 		sk_psock_put(sk, psock);
+ 
+ 		if (WARN_ON_ONCE(saved_destroy == sock_map_destroy))
+@@ -1713,7 +1712,6 @@ void sock_map_close(struct sock *sk, long timeout)
+ 		sock_map_remove_links(sk, psock);
+ 		rcu_read_unlock();
+ 		sk_psock_stop(psock);
+-		sk_psock_cork_free(psock);
+ 		release_sock(sk);
+ 		cancel_delayed_work_sync(&psock->work);
+ 		sk_psock_put(sk, psock);
+-- 
+2.43.0
+

@@ -1,0 +1,49 @@
+From 78713dd14046285b30656e34d4d7ee73c06fef61 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 15 Sep 2026 20:58:40 +0800
+Subject: [RFC PATCH 1/3] bpf, sockmap: Pin the psock owning the backlog work
+
+sk_psock_backlog() gets its psock from the delayed work, but takes a
+reference through the socket's current sk_user_data. After the initial
+TX_ENABLED check, map deletion and reinsertion can replace that psock.
+The worker then gets the replacement and puts its original work owner,
+underflowing the old reference count and leaking the new reference.
+
+Increment the work owner's reference count directly, unless it has
+already reached zero. The destroy work synchronously cancels the backlog
+before freeing that psock or dropping its socket reference, so this
+attempt cannot access a freed psock. Retain the reference handshake with
+sock_map_close() that keeps sk_socket alive while work is running.
+
+Fixes: 8259eb0e06d8 ("bpf, sockmap: Avoid using sk_socket after free when sending")
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/skmsg.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index 2521b643fa05..2d2217a60313 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -685,12 +685,12 @@ static void sk_psock_backlog(struct work_struct *work)
+ 	if (!sk_psock_test_state(psock, SK_PSOCK_TX_ENABLED))
+ 		return;
+ 
+-	/* Increment the psock refcnt to synchronize with close(fd) path in
+-	 * sock_map_close(), ensuring we wait for backlog thread completion
+-	 * before sk_socket freed. If refcnt increment fails, it indicates
+-	 * sock_map_close() completed with sk_socket potentially already freed.
++	/*
++	 * Pin the work owner; sk_user_data may already contain a new psock.
++	 * Destroy synchronously cancels this work before freeing the old one.
++	 * A live reference also makes close wait before freeing sk_socket.
+ 	 */
+-	if (!sk_psock_get(psock->sk))
++	if (!refcount_inc_not_zero(&psock->refcnt))
+ 		return;
+ 	mutex_lock(&psock->work_mutex);
+ 	while ((skb = skb_peek(&psock->ingress_skb))) {
+-- 
+2.43.0
+

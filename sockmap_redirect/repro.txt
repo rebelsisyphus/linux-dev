@@ -1,0 +1,500 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Kernel tree: bpf 94515f3a7d4256a5062176b7d6ed0471938cd51a
+ * 
+ * Relevant kernel config:
+ * CONFIG_BPF=y
+ * CONFIG_BPF_SYSCALL=y
+ * CONFIG_BPF_JIT=y
+ * CONFIG_BPF_JIT_DEFAULT_ON=y
+ * CONFIG_BPF_STREAM_PARSER=y
+ * CONFIG_STREAM_PARSER=y
+ * CONFIG_NET_SOCK_MSG=y
+ * 
+ * CONFIG_NET=y
+ * CONFIG_INET=y
+ * CONFIG_NET_NS=y
+ * CONFIG_NAMESPACES=y
+ * 
+ * CONFIG_CGROUPS=y
+ * CONFIG_MEMCG=y
+ * CONFIG_CGROUP_BPF=y
+ * CONFIG_SOCK_CGROUP_DATA=y
+ * 
+ * CONFIG_KASAN=y
+ * CONFIG_KASAN_GENERIC=y
+ * CONFIG_KASAN_INLINE=y
+ * CONFIG_KASAN_STACK=y
+ * CONFIG_KASAN_VMALLOC=y
+ * CONFIG_KASAN_EXTRA_INFO=y
+ * 
+ * CONFIG_DEBUG_KERNEL=y
+ * CONFIG_DEBUG_INFO=y
+ * CONFIG_DEBUG_INFO_BTF=y
+ * CONFIG_DEBUG_FS=y
+ * CONFIG_DEBUG_ATOMIC_SLEEP=y
+ * CONFIG_STACKTRACE=y
+ * CONFIG_KALLSYMS=y
+ * CONFIG_KALLSYMS_ALL=y
+ * CONFIG_PANIC_ON_OOPS=y
+ * 
+ * 
+ * Trace: 
+ * [   23.756203] page_counter underflow: -26 nr_pages=79
+ * [   23.756529] WARNING: mm/page_counter.c:60 at page_counter_uncharge+0x169/0x1e0, CPU#0: kworker/0:1/11
+ * [   23.757176] Modules linked in:
+ * [   23.757396] CPU: 0 UID: 0 PID: 11 Comm: kworker/0:1 Not tainted 7.2.0-rc3-00414-g94515f3a7d42 #32 PREEMPT(lazy) 
+ * [   23.758089] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+ * [   23.758717] Workqueue: events sk_psock_destroy
+ * [   23.759076] RIP: 0010:page_counter_uncharge+0x16f/0x1e0
+ * [   23.759443] Code: e8 f6 21 a0 ff 48 8b 5c 24 08 4c 8b 6c 24 20 48 83 c4 38 e9 be af 2c ff e8 de 21 a0 ff 48 8d 3d b7 d8 14 03 4c 89 ea 48 89 ee <67> 48 0f b9 3a be 08 00 00 00 48 89 df e8 1f 0c ff ff 48 89 da 48
+ * [   23.762131] RSP: 0018:ffffc900000bfac8 EFLAGS: 00010293
+ * [   23.762528] RAX: 0000000000000000 RBX: ffff8881002b4700 RCX: ffffffff81e39152
+ * [   23.763087] RDX: 000000000000004f RSI: ffffffffffffffe6 RDI: ffffffff84f86a10
+ * [   23.763608] RBP: ffffffffffffffe6 R08: ffffffff81e39093 R09: 1ffff110200568e0
+ * [   23.765307] R10: ffffed10200568e1 R11: ffffed10200568e1 R12: dffffc0000000000
+ * [   23.766361] R13: 000000000000004f R14: ffffffff82ee2463 R15: ffff8881032b4600
+ * [   23.768032] FS:  0000000000000000(0000) GS:ffff8881958af000(0000) knlGS:0000000000000000
+ * [   23.769229] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+ * [   23.770283] CR2: 0000200000080000 CR3: 00000001031d6000 CR4: 0000000000750ef0
+ * [   23.770776] PKRU: 55555554
+ * [   23.770968] Call Trace:
+ * [   23.771139]  <TASK>
+ * [   23.771291]  ? __sk_msg_free+0x203/0x360
+ * [   23.771575]  drain_stock+0x128/0x3a0
+ * [   23.771851]  refill_stock+0x269/0x6e0
+ * [   23.772118]  ? __sk_msg_free+0x203/0x360
+ * [   23.772401]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.772762]  ? mem_cgroup_sk_uncharge+0x54/0x90
+ * [   23.773075]  __sk_mem_reduce_allocated+0x1ce/0x4d0
+ * [   23.773416]  ? __sk_msg_free+0x203/0x360
+ * [   23.773699]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.774035]  sock_rfree+0x1e7/0x300
+ * [   23.774288]  ? __pfx_sock_rfree+0x10/0x10
+ * [   23.774577]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.774927]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.775256]  skb_release_head_state+0x37f/0x390
+ * [   23.775576]  ? __entry_text_end+0x102176/0x102179
+ * [   23.775936]  consume_skb+0x9b/0x280
+ * [   23.776191]  __sk_msg_free+0x203/0x360
+ * [   23.776466]  sk_psock_destroy+0x368/0xbb0
+ * [   23.776775]  process_one_work+0x677/0x1060
+ * [   23.777071]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.777414]  ? assign_work+0x167/0x340
+ * [   23.777706]  worker_thread+0x4d6/0xbc0
+ * [   23.777994]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.778331]  ? __kthread_parkme+0x171/0x220
+ * [   23.778660]  ? __pfx_worker_thread+0x10/0x10
+ * [   23.778987]  ? kthread+0x199/0x490
+ * [   23.779246]  ? __pfx_worker_thread+0x10/0x10
+ * [   23.779560]  kthread+0x394/0x490
+ * [   23.779822]  ? __pfx_kthread+0x10/0x10
+ * [   23.780096]  ret_from_fork+0x431/0x6f0
+ * [   23.780365]  ? __pfx_ret_from_fork+0x10/0x10
+ * [   23.780684]  ? srso_alias_return_thunk+0x5/0xfbef5
+ * [   23.781049]  ? __switch_to+0x76a/0xff0
+ * [   23.781322]  ? __pfx_kthread+0x10/0x10
+ * [   23.781611]  ret_from_fork_asm+0x1a/0x30
+ * [   23.781909]  </TASK>
+ */
+#define _GNU_SOURCE
+
+#include <linux/bpf.h>
+#include <linux/filter.h>
+#include <linux/in.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#define NR_CLOSE        3
+#define NR_MMAP         9
+#define NR_SOCKET       41
+#define NR_CONNECT      42
+#define NR_ACCEPT       43
+#define NR_SENDTO       44
+#define NR_SHUTDOWN     48
+#define NR_BIND         49
+#define NR_LISTEN       50
+#define NR_GETSOCKNAME  51
+#define NR_SOCKETPAIR   53
+#define NR_CLONE        56
+#define NR_EXIT         60
+#define NR_WAIT4        61
+#define NR_BPF          321
+
+#define AF_INET_        2
+#define SOCK_STREAM_    1
+#define IPPROTO_IP_     0
+#define SIGCHLD_        17
+#define SHUT_RDWR_      2
+
+#define PROT_READ_      1
+#define PROT_WRITE_     2
+#define MAP_PRIVATE_    2
+#define MAP_ANON_       0x20
+#define MAP_FIXED_      0x10
+#define MAP_NORESERVE_  0x4000
+
+#define BPF_CMD_MAP_CREATE       0
+#define BPF_CMD_MAP_UPDATE_ELEM  2
+#define BPF_CMD_PROG_LOAD        5
+#define BPF_CMD_PROG_ATTACH      8
+#define BPF_MAP_TYPE_SOCKMAP_    15
+#define BPF_PROG_TYPE_SK_SKB_    14
+#define BPF_ATTACH_STREAM_PARSER 4
+#define BPF_ATTACH_STREAM_VERDICT 5
+#define BPF_ANY_                 0
+#define SK_PASS_                 1
+
+#define SYZ_BASE_ADDR      0x200000000000UL
+#define SYZ_MAP_LEN        0x80000UL
+#define SYZ_MAP_CREATE     (SYZ_BASE_ADDR + 0x0000UL)
+#define SYZ_ATTACH_PARSER  (SYZ_BASE_ADDR + 0x0080UL)
+#define SYZ_PROG_LOAD_ARG  (SYZ_BASE_ADDR + 0x01c0UL)
+#define SYZ_ATTACH_VERDICT (SYZ_BASE_ADDR + 0x0200UL)
+#define SYZ_SOCKPAIR_OUT   (SYZ_BASE_ADDR + 0x0300UL)
+#define SYZ_MAP_UPDATE     (SYZ_BASE_ADDR + 0x0400UL)
+#define SYZ_MAP_KEY        (SYZ_BASE_ADDR + 0x0500UL)
+#define SYZ_MAP_VALUE      (SYZ_BASE_ADDR + 0x0600UL)
+#define SYZ_SEND_ADDR      (SYZ_BASE_ADDR + 0x0800UL)
+
+#define MAP_CREATE_SIZE    0x14UL
+#define PROG_ATTACH_SIZE   0x14UL
+#define MAP_UPDATE_SIZE    0x20UL
+#define PROG_LOAD_SIZE     sizeof(union bpf_attr)
+
+#define SOCKMAP_KEY_SIZE   4
+#define SOCKMAP_VAL_SIZE   4
+#define SOCKMAP_ENTRIES    8
+#define LOOPBACK_ADDR_BE   0x0100007fU
+#define RAW_SEND_LEN       0xfffffffffffffe83UL
+#define PROGRAM_REPEAT     4096
+#define PROGRAM_PROCS      2
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
+#define BPF_ALU64_IMM(OP, DST, IMM) \
+	((struct bpf_insn){ \
+		.code = BPF_ALU64 | BPF_OP(OP) | BPF_K, \
+		.dst_reg = DST, \
+		.src_reg = 0, \
+		.off = 0, \
+		.imm = IMM, \
+	})
+
+#define BPF_EXIT_INSN() \
+	((struct bpf_insn){ \
+		.code = BPF_JMP | BPF_EXIT, \
+		.dst_reg = 0, \
+		.src_reg = 0, \
+		.off = 0, \
+		.imm = 0, \
+	})
+
+static long xsys6(long nr, long a0, long a1, long a2,
+		  long a3, long a4, long a5)
+{
+	long ret;
+	register long r10 __asm__("r10") = a3;
+	register long r8 __asm__("r8") = a4;
+	register long r9 __asm__("r9") = a5;
+
+	__asm__ volatile (
+		"syscall"
+		: "=a"(ret)
+		: "a"(nr), "D"(a0), "S"(a1), "d"(a2),
+		  "r"(r10), "r"(r8), "r"(r9)
+		: "rcx", "r11", "memory");
+	return ret;
+}
+
+static long xsys3(long nr, long a0, long a1, long a2)
+{
+	return xsys6(nr, a0, a1, a2, 0, 0, 0);
+}
+
+static void memzero(void *ptr, size_t len)
+{
+	unsigned char *p = ptr;
+
+	while (len--)
+		*p++ = 0;
+}
+
+static void xclose(int fd)
+{
+	if (fd >= 0)
+		xsys3(NR_CLOSE, fd, 0, 0);
+}
+
+static void xshutdown(int fd)
+{
+	if (fd >= 0)
+		xsys3(NR_SHUTDOWN, fd, SHUT_RDWR_, 0);
+}
+
+static long xbpf(long cmd, union bpf_attr *attr, long size)
+{
+	return xsys3(NR_BPF, cmd, (long)attr, size);
+}
+
+static long xsocket(long family, long type, long proto)
+{
+	return xsys3(NR_SOCKET, family, type, proto);
+}
+
+static int map_syz_region(void)
+{
+	long ret;
+
+	ret = xsys6(NR_MMAP, SYZ_BASE_ADDR, SYZ_MAP_LEN,
+		    PROT_READ_ | PROT_WRITE_,
+		    MAP_PRIVATE_ | MAP_ANON_ | MAP_FIXED_ | MAP_NORESERVE_,
+		    -1, 0);
+	if (ret != (long)SYZ_BASE_ADDR)
+		return -1;
+
+	*(volatile unsigned char *)(uintptr_t)SYZ_SEND_ADDR = 0x01;
+	return 0;
+}
+
+static int create_sockmap(void)
+{
+	union bpf_attr *attr = (union bpf_attr *)(uintptr_t)SYZ_MAP_CREATE;
+
+	memzero(attr, sizeof(*attr));
+	attr->map_type = BPF_MAP_TYPE_SOCKMAP_;
+	attr->key_size = SOCKMAP_KEY_SIZE;
+	attr->value_size = SOCKMAP_VAL_SIZE;
+	attr->max_entries = SOCKMAP_ENTRIES;
+
+	return (int)xbpf(BPF_CMD_MAP_CREATE, attr, MAP_CREATE_SIZE);
+}
+
+static int load_sk_skb_pass_prog(void)
+{
+	static const char license[] = "GPL";
+	struct bpf_insn insns[] = {
+		BPF_ALU64_IMM(BPF_MOV, BPF_REG_0, SK_PASS_),
+		BPF_EXIT_INSN(),
+	};
+	union bpf_attr *attr = (union bpf_attr *)(uintptr_t)SYZ_PROG_LOAD_ARG;
+
+	memzero(attr, sizeof(*attr));
+	attr->prog_type = BPF_PROG_TYPE_SK_SKB_;
+	attr->insn_cnt = ARRAY_SIZE(insns);
+	attr->insns = (uint64_t)(uintptr_t)insns;
+	attr->license = (uint64_t)(uintptr_t)license;
+
+	return (int)xbpf(BPF_CMD_PROG_LOAD, attr, PROG_LOAD_SIZE);
+}
+
+static int attach_sockmap_prog(int map_fd, int prog_fd, int attach_type)
+{
+	uintptr_t addr = attach_type == BPF_ATTACH_STREAM_PARSER ?
+		SYZ_ATTACH_PARSER : SYZ_ATTACH_VERDICT;
+	union bpf_attr *attr = (union bpf_attr *)addr;
+
+	memzero(attr, sizeof(*attr));
+	attr->target_fd = map_fd;
+	attr->attach_bpf_fd = prog_fd;
+	attr->attach_type = attach_type;
+
+	return (int)xbpf(BPF_CMD_PROG_ATTACH, attr, PROG_ATTACH_SIZE);
+}
+
+static int update_sockmap(int map_fd, int sock_fd)
+{
+	union bpf_attr *attr = (union bpf_attr *)(uintptr_t)SYZ_MAP_UPDATE;
+	uint32_t *key = (uint32_t *)(uintptr_t)SYZ_MAP_KEY;
+	int *value = (int *)(uintptr_t)SYZ_MAP_VALUE;
+
+	memzero(attr, sizeof(*attr));
+	*key = 0;
+	*value = sock_fd;
+	attr->map_fd = map_fd;
+	attr->key = SYZ_MAP_KEY;
+	attr->value = SYZ_MAP_VALUE;
+	attr->flags = BPF_ANY_;
+
+	return (int)xbpf(BPF_CMD_MAP_UPDATE_ELEM, attr, MAP_UPDATE_SIZE);
+}
+
+static int create_tcp_pair(int *rx_fd, int *tx_fd)
+{
+	struct sockaddr_in addr = {};
+	uint32_t addr_len = sizeof(addr);
+	long listener;
+	long tx;
+	long rx;
+
+	listener = xsocket(AF_INET_, SOCK_STREAM_, IPPROTO_IP_);
+	if (listener < 0)
+		return -1;
+
+	addr.sin_family = AF_INET_;
+	addr.sin_port = 0;
+	addr.sin_addr.s_addr = LOOPBACK_ADDR_BE;
+
+	if (xsys3(NR_BIND, listener, (long)&addr, sizeof(addr)) < 0)
+		goto fail;
+	if (xsys3(NR_LISTEN, listener, 1, 0) < 0)
+		goto fail;
+	if (xsys3(NR_GETSOCKNAME, listener, (long)&addr, (long)&addr_len) < 0)
+		goto fail;
+
+	tx = xsocket(AF_INET_, SOCK_STREAM_, IPPROTO_IP_);
+	if (tx < 0)
+		goto fail;
+	if (xsys3(NR_CONNECT, tx, (long)&addr, sizeof(addr)) < 0) {
+		xclose((int)tx);
+		goto fail;
+	}
+
+	rx = xsys3(NR_ACCEPT, listener, 0, 0);
+	if (rx < 0) {
+		xclose((int)tx);
+		goto fail;
+	}
+
+	xclose((int)listener);
+	*rx_fd = (int)rx;
+	*tx_fd = (int)tx;
+	return 0;
+
+fail:
+	xclose((int)listener);
+	return -1;
+}
+
+static int syz_socket_pair(int family, int type, int proto, int *rx_fd, int *tx_fd)
+{
+	int *out = (int *)(uintptr_t)SYZ_SOCKPAIR_OUT;
+	long rc;
+
+	memzero(out, sizeof(int) * 2);
+	out[0] = -1;
+	out[1] = -1;
+
+	rc = xsys6(NR_SOCKETPAIR, family, type, proto, SYZ_SOCKPAIR_OUT, 0, 0);
+	if (rc == 0) {
+		*rx_fd = out[0];
+		*tx_fd = out[1];
+		return 0;
+	}
+
+	/*
+	 * syzkaller's syz_socket_pair pseudo-call creates a connected TCP pair.
+	 * Linux socketpair(AF_INET, SOCK_STREAM, 0) returns -EOPNOTSUPP.
+	 */
+	return create_tcp_pair(rx_fd, tx_fd);
+}
+
+static void teardown_fds(int iter, int map_fd, int prog_fd, int rx_fd, int tx_fd)
+{
+	switch (iter & 3) {
+	case 0:
+		xshutdown(tx_fd);
+		xshutdown(rx_fd);
+		xclose(tx_fd);
+		xclose(rx_fd);
+		xclose(prog_fd);
+		xclose(map_fd);
+		break;
+	case 1:
+		xshutdown(rx_fd);
+		xshutdown(tx_fd);
+		xclose(rx_fd);
+		xclose(tx_fd);
+		xclose(map_fd);
+		xclose(prog_fd);
+		break;
+	case 2:
+		xshutdown(tx_fd);
+		xclose(map_fd);
+		xclose(prog_fd);
+		xclose(tx_fd);
+		xshutdown(rx_fd);
+		xclose(rx_fd);
+		break;
+	default:
+		xshutdown(rx_fd);
+		xclose(rx_fd);
+		xclose(map_fd);
+		xshutdown(tx_fd);
+		xclose(tx_fd);
+		xclose(prog_fd);
+		break;
+	}
+}
+
+static int run_one_program(int iter)
+{
+	int map_fd = -1;
+	int prog_fd = -1;
+	int rx_fd = -1;
+	int tx_fd = -1;
+	int ret = 1;
+
+	map_fd = create_sockmap();
+	if (map_fd < 0)
+		goto out;
+
+	prog_fd = load_sk_skb_pass_prog();
+	if (prog_fd < 0)
+		goto out;
+
+	if (attach_sockmap_prog(map_fd, prog_fd, BPF_ATTACH_STREAM_VERDICT) < 0)
+		goto out;
+	if (attach_sockmap_prog(map_fd, prog_fd, BPF_ATTACH_STREAM_PARSER) < 0)
+		goto out;
+	if (syz_socket_pair(AF_INET_, SOCK_STREAM_, IPPROTO_IP_, &rx_fd, &tx_fd) < 0)
+		goto out;
+	if (update_sockmap(map_fd, rx_fd) < 0)
+		goto out;
+
+	xsys6(NR_SENDTO, tx_fd, SYZ_SEND_ADDR, RAW_SEND_LEN, 0, 0, 0);
+	ret = 0;
+
+out:
+	teardown_fds(iter, map_fd, prog_fd, rx_fd, tx_fd);
+	return ret;
+}
+
+static int run_loop(int worker)
+{
+	int i;
+
+	for (i = 0; i < PROGRAM_REPEAT; i++) {
+		if (run_one_program(i * PROGRAM_PROCS + worker) != 0)
+			return 1;
+	}
+
+	return 0;
+}
+
+int main(void)
+{
+	long pids[PROGRAM_PROCS - 1];
+	int i;
+	int status;
+
+	if (map_syz_region() < 0)
+		return 1;
+
+	for (i = 0; i < PROGRAM_PROCS - 1; i++) {
+		long pid = xsys6(NR_CLONE, SIGCHLD_, 0, 0, 0, 0, 0);
+
+		if (pid < 0)
+			return 1;
+		if (pid == 0)
+			xsys3(NR_EXIT, run_loop(i + 1), 0, 0);
+		pids[i] = pid;
+	}
+
+	status = run_loop(0);
+
+	for (i = 0; i < PROGRAM_PROCS - 1; i++)
+		xsys6(NR_WAIT4, pids[i], 0, 0, 0, 0, 0);
+
+	return status;
+}

@@ -1,0 +1,96 @@
+From fc379f91201c3192efc19e7ecc3f641b87833749 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 15 Sep 2026 20:58:40 +0800
+Subject: [RFC PATCH 2/3] bpf, sockmap: Fix strparser self-delivery accounting
+ and retries
+
+Strparser can split a receive skb into multiple unowned clones that
+retain its truesize. sk_psock_skb_ingress_self() charges each clone with
+skb_set_owner_r(), without scheduling more memory as forward allocation
+falls into deficit. Subsequent releases can reclaim pages that were not
+reserved for those additional charges.
+
+Preserve an skb already receive-accounted to the target socket. For an
+unowned strparser skb, use a zero-sized sk_rmem_schedule() before assigning
+ownership to settle the existing deficit. Return EAGAIN and free the new
+message if scheduling fails. This follows the deficit-settlement approach
+in Junseo Lim's strparser SK_PASS series; it does not guarantee a
+nonnegative balance after the next full-truesize charge.
+
+Keep the existing self helper and ingress dispatch. A direct attempt that
+fails before assigning ownership retries through ordinary ingress, which
+schedules the full truesize. If enqueue fails after assigning ownership,
+the retry reaches the self helper and preserves that accounting.
+
+Preserve the original skb->_sk_redir across backlog retries as well.
+Restoring only the target and ingress flag loses BPF_F_STRPARSER even
+though the skb still contains a parser message. The existing work_state
+preserves the remaining length and offset, but not this skb metadata.
+Keep the complete tagged value, including an absent target on SK_PASS.
+
+This change addresses strparser self delivery and its retry metadata.
+TCP psock execution and cleanup synchronization are handled separately.
+
+Fixes: 144748eb0c44 ("bpf, sockmap: Fix incorrect fwd_alloc accounting")
+Fixes: 7683167196bd ("bpf, sockmap: Fix data lost during EAGAIN retries")
+Link: https://lists.openwall.net/linux-kernel/2026/08/17/1597
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/skmsg.c | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/net/core/skmsg.c b/net/core/skmsg.c
+index 2d2217a60313..26b0a84332fb 100644
+--- a/net/core/skmsg.c
++++ b/net/core/skmsg.c
+@@ -618,9 +618,9 @@ static int sk_psock_skb_ingress(struct sk_psock *psock, struct sk_buff *skb,
+ 	return err;
+ }
+ 
+-/* Puts an skb on the ingress queue of the socket already assigned to the
+- * skb. In this case we do not need to check memory limits or skb_set_owner_r
+- * because the skb is already accounted for here.
++/*
++ * Preserve existing receive ownership. Unowned strparser clones need to
++ * settle any outstanding forward allocation deficit before being charged.
+  */
+ static int sk_psock_skb_ingress_self(struct sk_psock *psock, struct sk_buff *skb,
+ 				     u32 off, u32 len, bool take_ref)
+@@ -631,7 +631,14 @@ static int sk_psock_skb_ingress_self(struct sk_psock *psock, struct sk_buff *skb
+ 
+ 	if (unlikely(!msg))
+ 		return -EAGAIN;
+-	skb_set_owner_r(skb, sk);
++	if (skb->sk != sk || skb->destructor != sock_rfree) {
++		if (skb_bpf_strparser(skb) &&
++		    !sk_rmem_schedule(sk, skb, 0)) {
++			kfree(msg);
++			return -EAGAIN;
++		}
++		skb_set_owner_r(skb, sk);
++	}
+ 
+ 	/* This is used in tcp_bpf_recvmsg_parser() to determine whether the
+ 	 * data originates from the socket's own protocol stack. No need to
+@@ -694,6 +701,8 @@ static void sk_psock_backlog(struct work_struct *work)
+ 		return;
+ 	mutex_lock(&psock->work_mutex);
+ 	while ((skb = skb_peek(&psock->ingress_skb))) {
++		unsigned long saved_redir = skb->_sk_redir;
++
+ 		len = skb->len;
+ 		off = 0;
+ 		if (skb_bpf_strparser(skb)) {
+@@ -720,7 +729,7 @@ static void sk_psock_backlog(struct work_struct *work)
+ 				if (ret == -EAGAIN) {
+ 					sk_psock_skb_state(psock, state, len, off);
+ 					/* Restore redir info we cleared before */
+-					skb_bpf_set_redir(skb, psock->sk, ingress);
++					skb->_sk_redir = saved_redir;
+ 					/* Delay slightly to prioritize any
+ 					 * other work that might be here.
+ 					 */
+-- 
+2.43.0
+

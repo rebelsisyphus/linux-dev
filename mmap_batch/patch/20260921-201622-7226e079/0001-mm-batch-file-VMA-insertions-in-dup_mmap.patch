@@ -1,0 +1,368 @@
+From 70e635f3ae4175b06e543e0d0902f62f6ffe76b1 Mon Sep 17 00:00:00 2001
+Message-ID: <70e635f3ae4175b06e543e0d0902f62f6ffe76b1.1789993067.git.superdcc97@163.com>
+In-Reply-To: <cover.1789993067.git.superdcc97@163.com>
+References: <cover.1789993067.git.superdcc97@163.com>
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Mon, 21 Sep 2026 17:59:17 +0800
+Subject: [PATCH v4 1/2] mm: batch file VMA insertions in dup_mmap
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    Liam R. Howlett <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>,
+    Mateusz Guzik <mjguzik@gmail.com>,
+    Pedro Falcato <pfalcato@suse.de>,
+    Yibin Liu <liuyibin@hygon.cn>
+
+dup_mmap() acquires mapping->i_mmap_rwsem for every file-backed VMA
+copied into the child mm. Processes with multiple regions backed by the
+same address_space repeatedly acquire the same lock, even when the
+child's page tables can be populated on demand.
+
+Batch up to eight file VMA insertions for the same address_space under
+one acquisition of i_mmap_rwsem and the architecture's dcache mmap lock.
+Group by address_space so separate file descriptors for the same inode
+can share a batch. Preserve the existing shared-writable accounting and
+insert each child VMA immediately after its parent in the interval tree.
+
+Follow the init/add/process/final helper pattern introduced by commit
+3577dbb19241 ("mm: batch unlink_file_vma calls in free_pgd_range").
+Rename unlink_vma_file_batch to vma_file_batch and embed it in
+link_vma_file_batch alongside the source VMA pointers needed for
+insert_after(). This shares the counted VMA array and capacity without
+increasing the unlink batch's size or changing its grouping rules.
+
+Move vma_needs_copy() to mm/internal.h as an inline helper, preserving
+its checks of VM_COPY_ON_FORK on the destination and anon_vma on the
+source. Share this predicate with copy_page_range() so batching cannot
+leave a child VMA unlinked when its page tables are copied. Use the same
+dst_vma, src_vma argument names and order for the batch insertion
+helper.
+
+Both mmap write locks keep the queued VMAs alive, and each child VMA
+owns a file reference before it is queued. Flush before copying page
+tables so reverse mapping walks can find the child as soon as it has
+PTEs. Retain immediate insertion after open callbacks. Earlier pending
+VMAs can join that insertion batch without an extra flush before the
+callback.
+
+Flush remaining entries at the common loop exit, before arch_dup_mmap()
+on success or failed-fork teardown on error. Teardown expects the child
+VMAs to be linked into their file mapping trees. A full batch reduces
+eight insertion lock acquisitions to one at the cost of a bounded stack
+buffer. Mappings that require page table copying or an open callback
+retain immediate insertion.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/internal.h | 30 +++++++++++++++++
+ mm/memory.c   | 32 +-----------------
+ mm/mmap.c     | 90 +++++++++++++++++++++++++++++++++++++++++++--------
+ mm/vma.c      |  8 ++---
+ mm/vma.h      | 12 ++++---
+ 5 files changed, 118 insertions(+), 54 deletions(-)
+
+diff --git a/mm/internal.h b/mm/internal.h
+index 38b1165212c9..b2a2ac1ac2e8 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -273,6 +273,36 @@ void unmap_vmas(struct mmu_gather *tlb, struct unmap_desc *unmap);
+ 
+ #ifdef CONFIG_MMU
+ 
++/*
++ * Return true if the vma needs to copy the pgtable during this fork().  Return
++ * false when we can speed up fork() by allowing lazy page faults later until
++ * when the child accesses the memory range.
++ */
++static inline bool
++vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
++{
++	/*
++	 * We check against dst_vma as while sane VMA flags will have been
++	 * copied, VM_UFFD_WP may be set only on dst_vma.
++	 */
++	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
++		return true;
++	/*
++	 * The presence of an anon_vma indicates an anonymous VMA has page
++	 * tables which naturally cannot be reconstituted on page fault.
++	 */
++	if (src_vma->anon_vma)
++		return true;
++
++	/*
++	 * Don't copy ptes where a page fault will fill them correctly.  Fork
++	 * becomes much lighter when there are big shared or private readonly
++	 * mappings. The tradeoff is that copy_page_range is more efficient
++	 * than faulting.
++	 */
++	return false;
++}
++
+ bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
+ 		unsigned long addr, pte_t *ptep, pte_t pte,
+ 		unsigned long nr_ptes);
+diff --git a/mm/memory.c b/mm/memory.c
+index 8b0c2c735d3d..94d4f48160bb 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -372,7 +372,7 @@ void free_pgd_range(struct mmu_gather *tlb,
+  */
+ void free_pgtables(struct mmu_gather *tlb, struct unmap_desc *unmap)
+ {
+-	struct unlink_vma_file_batch vb;
++	struct vma_file_batch vb;
+ 	struct ma_state *mas = unmap->mas;
+ 	struct vm_area_struct *vma = unmap->first;
+ 
+@@ -1555,36 +1555,6 @@ copy_p4d_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+ 	return 0;
+ }
+ 
+-/*
+- * Return true if the vma needs to copy the pgtable during this fork().  Return
+- * false when we can speed up fork() by allowing lazy page faults later until
+- * when the child accesses the memory range.
+- */
+-static bool
+-vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+-{
+-	/*
+-	 * We check against dst_vma as while sane VMA flags will have been
+-	 * copied, VM_UFFD_WP may be set only on dst_vma.
+-	 */
+-	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
+-		return true;
+-	/*
+-	 * The presence of an anon_vma indicates an anonymous VMA has page
+-	 * tables which naturally cannot be reconstituted on page fault.
+-	 */
+-	if (src_vma->anon_vma)
+-		return true;
+-
+-	/*
+-	 * Don't copy ptes where a page fault will fill them correctly.  Fork
+-	 * becomes much lighter when there are big shared or private readonly
+-	 * mappings. The tradeoff is that copy_page_range is more efficient
+-	 * than faulting.
+-	 */
+-	return false;
+-}
+-
+ int
+ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+ {
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 4bf26b0f1e6e..26590f542b39 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1705,8 +1705,68 @@ bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+ 	return true;
+ }
+ 
++/*
++ * File VMAs without copied page tables can be linked into the rmap tree in
++ * batches. Both mmap write locks keep the parent and child VMAs alive, and
++ * each child VMA already owns a file reference. Flush before installing page
++ * tables or exposing the child mm, including to the failed-fork teardown.
++ */
++struct link_vma_file_batch {
++	struct vma_file_batch batch;
++	struct vm_area_struct *src_vmas[VMA_FILE_BATCH_SIZE];
++};
++
++static void link_file_vma_batch_init(struct link_vma_file_batch *lvb)
++{
++	lvb->batch.count = 0;
++}
++
++static void link_file_vma_batch_process(struct link_vma_file_batch *lvb)
++{
++	struct vma_file_batch *vb = &lvb->batch;
++	struct address_space *mapping;
++	int i;
++
++	mapping = vb->vmas[0]->vm_file->f_mapping;
++	i_mmap_lock_write(mapping);
++	flush_dcache_mmap_lock(mapping);
++	for (i = 0; i < vb->count; i++) {
++		struct vm_area_struct *dst_vma = vb->vmas[i];
++
++		if (vma_is_shared_maywrite(dst_vma))
++			mapping_allow_writable(mapping);
++		mapping_rmap_tree_insert_after(dst_vma, lvb->src_vmas[i], mapping);
++	}
++	flush_dcache_mmap_unlock(mapping);
++	i_mmap_unlock_write(mapping);
++
++	link_file_vma_batch_init(lvb);
++}
++
++static void link_file_vma_batch_add(struct link_vma_file_batch *lvb,
++				    struct vm_area_struct *dst_vma,
++				    struct vm_area_struct *src_vma)
++{
++	struct vma_file_batch *vb = &lvb->batch;
++
++	if ((vb->count > 0 && vb->vmas[0]->vm_file->f_mapping !=
++	     dst_vma->vm_file->f_mapping) || vb->count == ARRAY_SIZE(vb->vmas))
++		link_file_vma_batch_process(lvb);
++
++	vb->vmas[vb->count] = dst_vma;
++	lvb->src_vmas[vb->count] = src_vma;
++	vb->count++;
++}
++
++static void link_file_vma_batch_final(struct link_vma_file_batch *lvb)
++{
++	if (lvb->batch.count > 0)
++		link_file_vma_batch_process(lvb);
++}
++
+ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ {
++	struct link_vma_file_batch vb;
+ 	struct vm_area_struct *mpnt, *tmp;
+ 	int retval;
+ 	unsigned long charge = 0;
+@@ -1735,9 +1795,11 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 	if (unlikely(retval))
+ 		goto out;
+ 
++	link_file_vma_batch_init(&vb);
+ 	mt_clear_in_rcu(vmi.mas.tree);
+ 	for_each_vma(vmi, mpnt) {
+ 		struct file *file;
++		bool has_open;
+ 
+ 		retval = vma_start_write_killable(mpnt);
+ 		if (retval < 0)
+@@ -1797,35 +1859,35 @@ __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+ 
+ 		mm->map_count++;
+ 
+-		if (tmp->vm_ops && tmp->vm_ops->open)
++		has_open = tmp->vm_ops && tmp->vm_ops->open;
++		if (has_open)
+ 			tmp->vm_ops->open(tmp);
+ 
+ 		file = tmp->vm_file;
+ 		if (file) {
+-			struct address_space *mapping = file->f_mapping;
+-
+ 			get_file(file);
+-			i_mmap_lock_write(mapping);
+-			if (vma_is_shared_maywrite(tmp))
+-				mapping_allow_writable(mapping);
+-			flush_dcache_mmap_lock(mapping);
+-			/* insert tmp into the share list, just after mpnt */
+-			mapping_rmap_tree_insert_after(tmp, mpnt, mapping);
+-			flush_dcache_mmap_unlock(mapping);
+-			i_mmap_unlock_write(mapping);
++			link_file_vma_batch_add(&vb, tmp, mpnt);
++			/* Preserve immediate linking for callback-managed VMAs. */
++			if (has_open)
++				link_file_vma_batch_final(&vb);
+ 		}
+ 
+-		if (!vma_test(tmp, VMA_WIPEONFORK_BIT))
++		if (!vma_test(tmp, VMA_WIPEONFORK_BIT) &&
++		    vma_needs_copy(tmp, mpnt)) {
++			/* Rmap must find the child before it gains page tables. */
++			link_file_vma_batch_final(&vb);
+ 			retval = copy_page_range(tmp, mpnt);
++		}
+ 
+ 		if (retval) {
+ 			mpnt = vma_next(&vmi);
+ 			goto loop_out;
+ 		}
+ 	}
+-	/* a new mm has just been created */
+-	retval = arch_dup_mmap(oldmm, mm);
+ loop_out:
++	link_file_vma_batch_final(&vb);
++	if (!retval)
++		retval = arch_dup_mmap(oldmm, mm);
+ 	vma_iter_free(&vmi);
+ 	if (!retval) {
+ 		mt_set_in_rcu(vmi.mas.tree);
+diff --git a/mm/vma.c b/mm/vma.c
+index f29abb30956b..0c39055cff84 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -1866,12 +1866,12 @@ struct vm_area_struct *vma_merge_extend(struct vma_iterator *vmi,
+ 	return vma_merge_new_range(&vmg);
+ }
+ 
+-void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb)
++void unlink_file_vma_batch_init(struct vma_file_batch *vb)
+ {
+ 	vb->count = 0;
+ }
+ 
+-static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
++static void unlink_file_vma_batch_process(struct vma_file_batch *vb)
+ {
+ 	struct address_space *mapping;
+ 	int i;
+@@ -1887,7 +1887,7 @@ static void unlink_file_vma_batch_process(struct unlink_vma_file_batch *vb)
+ 	unlink_file_vma_batch_init(vb);
+ }
+ 
+-void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
++void unlink_file_vma_batch_add(struct vma_file_batch *vb,
+ 			       struct vm_area_struct *vma)
+ {
+ 	if (vma->vm_file == NULL)
+@@ -1901,7 +1901,7 @@ void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
+ 	vb->count++;
+ }
+ 
+-void unlink_file_vma_batch_final(struct unlink_vma_file_batch *vb)
++void unlink_file_vma_batch_final(struct vma_file_batch *vb)
+ {
+ 	if (vb->count > 0)
+ 		unlink_file_vma_batch_process(vb);
+diff --git a/mm/vma.h b/mm/vma.h
+index 024fabe63560..2fd9e1555299 100644
+--- a/mm/vma.h
++++ b/mm/vma.h
+@@ -30,9 +30,11 @@ struct vma_prepare {
+ 	bool skip_vma_uprobe :1;
+ };
+ 
+-struct unlink_vma_file_batch {
++#define VMA_FILE_BATCH_SIZE 8
++
++struct vma_file_batch {
+ 	int count;
+-	struct vm_area_struct *vmas[8];
++	struct vm_area_struct *vmas[VMA_FILE_BATCH_SIZE];
+ };
+ 
+ /*
+@@ -526,11 +528,11 @@ __must_check struct vm_area_struct *vma_merge_new_range(struct vma_merge_struct
+ __must_check struct vm_area_struct *vma_merge_extend(struct vma_iterator *vmi,
+ 		  struct vm_area_struct *vma, unsigned long delta);
+ 
+-void unlink_file_vma_batch_init(struct unlink_vma_file_batch *vb);
++void unlink_file_vma_batch_init(struct vma_file_batch *vb);
+ 
+-void unlink_file_vma_batch_final(struct unlink_vma_file_batch *vb);
++void unlink_file_vma_batch_final(struct vma_file_batch *vb);
+ 
+-void unlink_file_vma_batch_add(struct unlink_vma_file_batch *vb,
++void unlink_file_vma_batch_add(struct vma_file_batch *vb,
+ 			       struct vm_area_struct *vma);
+ 
+ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
+-- 
+2.43.0
+

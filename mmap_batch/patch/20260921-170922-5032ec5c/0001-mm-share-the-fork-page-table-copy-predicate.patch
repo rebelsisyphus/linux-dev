@@ -1,0 +1,117 @@
+From 84c5a7a295291697f6f74879ecbf69dfaaf45e3e Mon Sep 17 00:00:00 2001
+Message-ID: <84c5a7a295291697f6f74879ecbf69dfaaf45e3e.1789981795.git.superdcc97@163.com>
+In-Reply-To: <cover.1789981795.git.superdcc97@163.com>
+References: <cover.1789981795.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 21 Sep 2026 17:09:21 +0800
+Subject: [PATCH 1/3] mm: share the fork page-table copy predicate
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    Liam R. Howlett <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>
+
+dup_mmap() needs to know whether a VMA will receive copied page tables
+before it can defer linking the child VMA into the file mapping's reverse
+mapping tree. Duplicating the checks in copy_page_range() would allow the
+two paths to disagree when the conditions for copying page tables change.
+
+Move vma_needs_copy() to mm/internal.h as an inline helper. Keep its
+checks unchanged, including VM_COPY_ON_FORK on the destination VMA and
+anon_vma on the source VMA.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ mm/internal.h | 30 ++++++++++++++++++++++++++++++
+ mm/memory.c   | 30 ------------------------------
+ 2 files changed, 30 insertions(+), 30 deletions(-)
+
+diff --git a/mm/internal.h b/mm/internal.h
+index 38b1165212c9..b2a2ac1ac2e8 100644
+--- a/mm/internal.h
++++ b/mm/internal.h
+@@ -273,6 +273,36 @@ void unmap_vmas(struct mmu_gather *tlb, struct unmap_desc *unmap);
+ 
+ #ifdef CONFIG_MMU
+ 
++/*
++ * Return true if the vma needs to copy the pgtable during this fork().  Return
++ * false when we can speed up fork() by allowing lazy page faults later until
++ * when the child accesses the memory range.
++ */
++static inline bool
++vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
++{
++	/*
++	 * We check against dst_vma as while sane VMA flags will have been
++	 * copied, VM_UFFD_WP may be set only on dst_vma.
++	 */
++	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
++		return true;
++	/*
++	 * The presence of an anon_vma indicates an anonymous VMA has page
++	 * tables which naturally cannot be reconstituted on page fault.
++	 */
++	if (src_vma->anon_vma)
++		return true;
++
++	/*
++	 * Don't copy ptes where a page fault will fill them correctly.  Fork
++	 * becomes much lighter when there are big shared or private readonly
++	 * mappings. The tradeoff is that copy_page_range is more efficient
++	 * than faulting.
++	 */
++	return false;
++}
++
+ bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
+ 		unsigned long addr, pte_t *ptep, pte_t pte,
+ 		unsigned long nr_ptes);
+diff --git a/mm/memory.c b/mm/memory.c
+index 8b0c2c735d3d..afe92201e2fa 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -1555,36 +1555,6 @@ copy_p4d_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+ 	return 0;
+ }
+ 
+-/*
+- * Return true if the vma needs to copy the pgtable during this fork().  Return
+- * false when we can speed up fork() by allowing lazy page faults later until
+- * when the child accesses the memory range.
+- */
+-static bool
+-vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+-{
+-	/*
+-	 * We check against dst_vma as while sane VMA flags will have been
+-	 * copied, VM_UFFD_WP may be set only on dst_vma.
+-	 */
+-	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
+-		return true;
+-	/*
+-	 * The presence of an anon_vma indicates an anonymous VMA has page
+-	 * tables which naturally cannot be reconstituted on page fault.
+-	 */
+-	if (src_vma->anon_vma)
+-		return true;
+-
+-	/*
+-	 * Don't copy ptes where a page fault will fill them correctly.  Fork
+-	 * becomes much lighter when there are big shared or private readonly
+-	 * mappings. The tradeoff is that copy_page_range is more efficient
+-	 * than faulting.
+-	 */
+-	return false;
+-}
+-
+ int
+ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+ {
+-- 
+2.43.0
+

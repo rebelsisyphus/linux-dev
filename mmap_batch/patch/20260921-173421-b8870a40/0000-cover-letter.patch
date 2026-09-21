@@ -1,0 +1,35 @@
+From bd4dd70ca8f2437af3619e243d9a32f51c73fd10 Mon Sep 17 00:00:00 2001
+Message-ID: <cover.1789983285.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 21 Sep 2026 17:34:45 +0800
+Subject: [PATCH v2 0/3] *** SUBJECT HERE ***
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    Liam R. Howlett <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>,
+    Mateusz Guzik <mjguzik@gmail.com>
+
+*** BLURB HERE ***
+
+Dong Chenchen (3):
+  mm: share the fork page-table copy predicate
+  mm: batch file VMA insertions in dup_mmap
+  selftests/mm: cover file VMA lifetime across fork
+
+ mm/internal.h                     |  30 +++++
+ mm/memory.c                       |  32 +-----
+ mm/mmap.c                         |  89 +++++++++++++--
+ mm/vma.c                          |   8 +-
+ mm/vma.h                          |  12 +-
+ tools/testing/selftests/mm/rmap.c | 184 ++++++++++++++++++++++++++++++
+ 6 files changed, 303 insertions(+), 52 deletions(-)
+
+
+base-commit: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+-- 
+2.43.0
+

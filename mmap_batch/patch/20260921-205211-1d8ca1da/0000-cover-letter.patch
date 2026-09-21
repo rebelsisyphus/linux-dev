@@ -1,0 +1,87 @@
+From c3bdfa308189f4c91f0dff8f93373b9c4183a9f3 Mon Sep 17 00:00:00 2001
+Message-ID: <cover.1789995131.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 21 Sep 2026 20:52:11 +0800
+Subject: [PATCH v5 0/2] mm: batch file VMA insertions during fork
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    "Liam R. Howlett" <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>,
+    Mateusz Guzik <mjguzik@gmail.com>,
+    Pedro Falcato <pfalcato@suse.de>,
+    Yibin Liu <liuyibin@hygon.cn>
+
+dup_mmap() acquires the file mapping's i_mmap_rwsem separately for each
+inherited VMA. This series groups up to eight eligible VMAs for the same
+address_space into one insertion critical section. A full batch therefore
+uses one lock acquisition instead of eight.
+
+The first patch shares the existing page-table copy predicate and adds
+batching. Pending entries are inserted before copying a file VMA's page
+tables, and any remainder is drained at loop_out before successful
+completion or failed-fork teardown. The second patch adds rmap tests for
+fork, truncation and write sealing.
+
+A related RFC proposed batching file VMA insertions:
+https://lore.kernel.org/all/20260616091302.2725675-1-liuyibin@hygon.cn/
+Pedro Falcato pointed out the race between copying file PTEs and delayed
+rmap insertion:
+https://lore.kernel.org/all/ajEfJyYRbhVo4dFK@pedro-suse.lan/
+This series flushes before copying file page tables, using the same
+vma_needs_copy() predicate as copy_page_range().
+
+Changes since v4:
+  - Remove the has_open flag and its extra batch flush. Preserve the open
+    callback itself, before the current file VMA is queued.
+  - Only flush before page-table copying when the current VMA has a file.
+    Copying a VMA without a file does not need to interrupt the batch.
+  - Restore arch_dup_mmap() to its original position before loop_out.
+    Drain the remaining batch at loop_out on success and on either an
+    iteration error or an architecture initialization error.
+  - Keep the upstream selftest patch unchanged. Add a project diagnostic
+    for the data and attachment lifetime of 33 SysV SHM mappings, and
+    trace callback execution and batch processing during fork.
+
+Validation on x86_64 QEMU TCG with KASAN and PROVE_LOCKING:
+  - Full kernel build and strict checkpatch: passed.
+  - Fork/rmap tests: 10 passed.
+  - Guard-region fork cases: 5 passed, 4 inapplicable variants skipped.
+  - 32 forced fork ENOMEM failures: cleanup and write sealing passed.
+  - Trace of 30 forks: all 202 observed file VMA copy_page_range() calls
+    followed completed insertion of the same destination VMA.
+  - Batch tracing: four full batches for 33 same-file VMAs and 32
+    seven-entry tail batches during forced fork failures.
+  - SysV SHM: data and attachment lifetime passed; the trace recorded
+    33 shm_open() calls and four full eight-entry batches.
+  - No KASAN, lockdep or other kernel diagnostics were observed.
+
+These functional and ordering checks do not establish a latency benefit.
+The architecture hook review includes the generic, arm64, powerpc and
+x86 implementations, including Xen page-table pinning; runtime testing
+was limited to native x86_64. USERFAULTFD was disabled in the test config.
+
+The batching change is based on Dong Chenchen's supplied prototype.
+Codex assisted with adaptation, tests and descriptions, as recorded by
+the Assisted-by tags.
+
+Dong Chenchen (2):
+  mm: batch file VMA insertions in dup_mmap
+  selftests/mm: cover file VMA lifetime across fork
+
+ mm/internal.h                     |  30 +++++
+ mm/memory.c                       |  32 +----
+ mm/mmap.c                         |  81 +++++++++++--
+ mm/vma.c                          |   8 +-
+ mm/vma.h                          |  12 +-
+ tools/testing/selftests/mm/rmap.c | 195 ++++++++++++++++++++++++++++++
+ 6 files changed, 307 insertions(+), 51 deletions(-)
+
+
+base-commit: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+-- 
+2.43.0
+

@@ -1,0 +1,235 @@
+From bd4dd70ca8f2437af3619e243d9a32f51c73fd10 Mon Sep 17 00:00:00 2001
+Message-ID: <bd4dd70ca8f2437af3619e243d9a32f51c73fd10.1789983285.git.superdcc97@163.com>
+In-Reply-To: <cover.1789983285.git.superdcc97@163.com>
+References: <cover.1789983285.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 21 Sep 2026 17:09:22 +0800
+Subject: [PATCH v2 3/3] selftests/mm: cover file VMA lifetime across fork
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    Liam R. Howlett <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>,
+    Mateusz Guzik <mjguzik@gmail.com>
+
+File VMAs inherited by a child must remain visible to truncation and
+must keep the mapping's shared-writable count balanced after the parent
+unmaps them. Exercise these properties with multiple disjoint mappings
+in the existing rmap selftest.
+
+Add shared, private, private COW, alternating-file and read-only variants.
+Reopen the same memfd to also cover distinct file objects sharing one
+address_space. Populate the child mappings before truncating and growing
+the backing file, then check that the child observes the replacement
+data, including for pages that were privately copied before fork.
+
+Unmap the parent's regions while the child is alive and verify that
+writable shared mappings still prevent F_SEAL_WRITE. Check that the seal
+can be added after the child exits, and that private or read-only file
+mappings do not block it.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ tools/testing/selftests/mm/rmap.c | 184 ++++++++++++++++++++++++++++++
+ 1 file changed, 184 insertions(+)
+
+diff --git a/tools/testing/selftests/mm/rmap.c b/tools/testing/selftests/mm/rmap.c
+index 1c293ad3f8b8..699b5f974c7b 100644
+--- a/tools/testing/selftests/mm/rmap.c
++++ b/tools/testing/selftests/mm/rmap.c
+@@ -511,4 +511,188 @@ TEST_F(migrate, ksm_and_mremap)
+ }
+ 
+ 
++/* Forked file VMAs must remain visible to truncate and write sealing. */
++#define FORK_FILE_VMAS 33
++
++FIXTURE(fork_file)
++{
++	int fd[2];
++	char *region;
++	size_t page_size;
++};
++
++FIXTURE_VARIANT(fork_file)
++{
++	bool shared;
++	bool cow;
++	bool separate_files;
++	bool readonly;
++};
++
++FIXTURE_VARIANT_ADD(fork_file, shared)
++{
++	.shared = true,
++};
++
++FIXTURE_VARIANT_ADD(fork_file, private)
++{
++};
++
++FIXTURE_VARIANT_ADD(fork_file, private_cow)
++{
++	.cow = true,
++};
++
++FIXTURE_VARIANT_ADD(fork_file, different_files)
++{
++	.shared = true,
++	.separate_files = true,
++};
++
++FIXTURE_VARIANT_ADD(fork_file, readonly)
++{
++	.shared = true,
++	.readonly = true,
++};
++
++FIXTURE_SETUP(fork_file)
++{
++	int prot = PROT_READ | (variant->readonly ? 0 : PROT_WRITE);
++	int flags = MAP_FIXED | (variant->shared ? MAP_SHARED : MAP_PRIVATE);
++	char path[64];
++	char value = 'a';
++	int i;
++
++	self->fd[0] = -1;
++	self->fd[1] = -1;
++	self->region = MAP_FAILED;
++	self->page_size = getpagesize();
++	self->fd[0] = memfd_create("fork-file", MFD_ALLOW_SEALING);
++	ASSERT_GE(self->fd[0], 0);
++	ASSERT_EQ(ftruncate(self->fd[0], self->page_size), 0);
++	ASSERT_EQ(pwrite(self->fd[0], &value, 1, 0), 1);
++
++	if (variant->separate_files) {
++		self->fd[1] = memfd_create("fork-file-other", MFD_ALLOW_SEALING);
++		ASSERT_GE(self->fd[1], 0);
++		ASSERT_EQ(ftruncate(self->fd[1], self->page_size), 0);
++		value = 'b';
++		ASSERT_EQ(pwrite(self->fd[1], &value, 1, 0), 1);
++	} else {
++		/* Different struct files, but the same address_space. */
++		snprintf(path, sizeof(path), "/proc/self/fd/%d", self->fd[0]);
++		self->fd[1] = open(path, variant->readonly ? O_RDONLY : O_RDWR);
++		ASSERT_GE(self->fd[1], 0);
++	}
++
++	/* Gaps keep the file mappings as distinct VMAs. */
++	self->region = mmap(NULL, 2 * FORK_FILE_VMAS * self->page_size,
++			    PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++	ASSERT_NE(self->region, MAP_FAILED);
++	for (i = 0; i < FORK_FILE_VMAS; i++) {
++		char *addr = self->region + 2 * i * self->page_size;
++		int fd = self->fd[variant->readonly ? 1 : i % 2];
++
++		ASSERT_EQ(mmap(addr, self->page_size, prot, flags, fd, 0), addr);
++		if (variant->cow && i % 3 == 1)
++			*addr = 'c';
++	}
++}
++
++FIXTURE_TEARDOWN(fork_file)
++{
++	if (self->region != MAP_FAILED)
++		munmap(self->region, 2 * FORK_FILE_VMAS * self->page_size);
++	if (self->fd[0] >= 0)
++		close(self->fd[0]);
++	if (self->fd[1] >= 0)
++		close(self->fd[1]);
++}
++
++TEST_F(fork_file, truncate)
++{
++	int ready[2], resume[2], status, i;
++	char byte = 0;
++	pid_t pid;
++
++	ASSERT_EQ(pipe(ready), 0);
++	ASSERT_EQ(pipe(resume), 0);
++	pid = fork();
++	ASSERT_GE(pid, 0);
++	if (!pid) {
++		close(ready[0]);
++		close(resume[1]);
++		alarm(10);
++		for (i = 0; i < FORK_FILE_VMAS; i++) {
++			char expected = variant->separate_files && i % 2 ? 'b' : 'a';
++			char *addr = self->region + 2 * i * self->page_size;
++
++			if (variant->cow && i % 3 == 1)
++				expected = 'c';
++			ASSERT_EQ(*addr, expected);
++		}
++		ASSERT_EQ(write(ready[1], &byte, 1), 1);
++		ASSERT_EQ(read(resume[0], &byte, 1), 1);
++		for (i = 0; i < FORK_FILE_VMAS; i++) {
++			char expected = variant->separate_files && i % 2 ? 'y' : 'x';
++			char *addr = self->region + 2 * i * self->page_size;
++
++			ASSERT_EQ(*addr, expected);
++		}
++		_exit(EXIT_SUCCESS);
++	}
++	close(ready[1]);
++	close(resume[0]);
++	ASSERT_EQ(read(ready[0], &byte, 1), 1);
++	/* Truncation must zap even the child's private COW pages. */
++	for (i = 0; i < (variant->separate_files ? 2 : 1); i++) {
++		byte = i ? 'y' : 'x';
++		ASSERT_EQ(ftruncate(self->fd[i], 0), 0);
++		ASSERT_EQ(ftruncate(self->fd[i], self->page_size), 0);
++		ASSERT_EQ(pwrite(self->fd[i], &byte, 1, 0), 1);
++	}
++	ASSERT_EQ(write(resume[1], &byte, 1), 1);
++	ASSERT_EQ(waitpid(pid, &status, 0), pid);
++	ASSERT_TRUE(WIFEXITED(status));
++	ASSERT_EQ(WEXITSTATUS(status), EXIT_SUCCESS);
++	close(ready[0]);
++	close(resume[1]);
++}
++
++TEST_F(fork_file, write_seal)
++{
++	int resume[2], status, i, ret;
++	char byte = 0;
++	pid_t pid;
++
++	ASSERT_EQ(pipe(resume), 0);
++	pid = fork();
++	ASSERT_GE(pid, 0);
++	if (!pid) {
++		close(resume[1]);
++		alarm(10);
++		ASSERT_EQ(read(resume[0], &byte, 1), 1);
++		_exit(EXIT_SUCCESS);
++	}
++	close(resume[0]);
++	ASSERT_EQ(munmap(self->region, 2 * FORK_FILE_VMAS * self->page_size), 0);
++	self->region = MAP_FAILED;
++	for (i = 0; i < (variant->separate_files ? 2 : 1); i++) {
++		ret = fcntl(self->fd[i], F_ADD_SEALS, F_SEAL_WRITE);
++		if (variant->shared && !variant->readonly) {
++			ASSERT_EQ(ret, -1);
++			ASSERT_EQ(errno, EBUSY);
++		} else {
++			ASSERT_EQ(ret, 0);
++		}
++	}
++	ASSERT_EQ(write(resume[1], &byte, 1), 1);
++	ASSERT_EQ(waitpid(pid, &status, 0), pid);
++	ASSERT_TRUE(WIFEXITED(status));
++	ASSERT_EQ(WEXITSTATUS(status), EXIT_SUCCESS);
++	for (i = 0; i < (variant->separate_files ? 2 : 1); i++)
++		ASSERT_EQ(fcntl(self->fd[i], F_ADD_SEALS, F_SEAL_WRITE), 0);
++	close(resume[1]);
++}
++
+ TEST_HARNESS_MAIN
+-- 
+2.43.0
+

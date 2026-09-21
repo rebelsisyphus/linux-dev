@@ -1,0 +1,85 @@
+From 1796d45180f56c5634cccbbed54869eb8a21cb86 Mon Sep 17 00:00:00 2001
+Message-ID: <cover.1789998170.git.superdcc97@163.com>
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 21 Sep 2026 21:42:50 +0800
+Subject: [PATCH v6 0/2] mm: batch file VMA insertions during fork
+To: linux-mm@kvack.org
+Cc: linux-kernel@vger.kernel.org,
+    linux-kselftest@vger.kernel.org,
+    Andrew Morton <akpm@linux-foundation.org>,
+    David Hildenbrand <david@kernel.org>,
+    "Liam R. Howlett" <liam@infradead.org>,
+    Lorenzo Stoakes <ljs@kernel.org>,
+    Shuah Khan <shuah@kernel.org>,
+    Mateusz Guzik <mjguzik@gmail.com>,
+    Pedro Falcato <pfalcato@suse.de>,
+    Yibin Liu <liuyibin@hygon.cn>
+
+dup_mmap() acquires the file mapping's i_mmap_rwsem separately for each
+inherited VMA. This series groups up to eight eligible VMAs for the same
+address_space into one insertion critical section. A full batch therefore
+uses one lock acquisition instead of eight.
+
+The first patch shares the existing page-table copy predicate and adds
+batching. Pending entries are inserted before copying a file VMA's page
+tables, and any remainder is drained at loop_out before successful
+completion or failed-fork teardown. The second patch adds rmap tests for
+fork, truncation and write sealing.
+
+A related RFC proposed batching file VMA insertions:
+https://lore.kernel.org/all/20260616091302.2725675-1-liuyibin@hygon.cn/
+Pedro Falcato pointed out the race between copying file PTEs and delayed
+rmap insertion:
+https://lore.kernel.org/all/ajEfJyYRbhVo4dFK@pedro-suse.lan/
+This series flushes before copying file page tables, using the same
+vma_needs_copy() predicate as copy_page_range().
+
+Changes since v5:
+  - Use file && vma_needs_copy() only to decide whether to flush the
+    batch. Restore the original copy_page_range() call condition and
+    leave its internal early-return check in control of copying.
+  - Keep the upstream selftest patch unchanged. Update the project
+    ordering diagnostic to distinguish calls requiring a copy from
+    those returning immediately, using the build's VM_COPY_ON_FORK
+    mask, destination flags and source anon_vma.
+
+Validation on x86_64 QEMU TCG with KASAN and PROVE_LOCKING:
+  - Full kernel build, strict checkpatch and sequential application: passed.
+  - Fork/rmap tests: 10 passed.
+  - Guard-region fork cases: 5 passed, 4 inapplicable variants skipped.
+  - Two 32-iteration fork ENOMEM runs: cleanup and write sealing passed.
+  - Trace of 30 forks: 1040 file VMA copy_page_range() calls.
+    All 202 calls requiring a copy followed completed insertion;
+    838 early-return calls safely preceded insertion. No lost events.
+  - Batch tracing: four full batches for 33 same-file VMAs and 32
+    seven-entry tail batches during the traced fork failure run.
+  - SysV SHM: data and attachment lifetime passed; the trace recorded
+    33 shm_open() calls and four full eight-entry batches.
+  - No KASAN, lockdep or other kernel diagnostics were observed.
+
+These functional and ordering checks do not establish a latency benefit.
+The architecture hook review includes the generic, arm64, powerpc and
+x86 implementations, including Xen page-table pinning; runtime testing
+was limited to native x86_64. USERFAULTFD was disabled in the test config.
+
+The batching change is based on Dong Chenchen's supplied prototype.
+Codex assisted with adaptation, tests and descriptions, as recorded by
+the Assisted-by tags.
+
+Dong Chenchen (2):
+  mm: batch file VMA insertions in dup_mmap
+  selftests/mm: cover file VMA lifetime across fork
+
+ mm/internal.h                     |  30 +++++
+ mm/memory.c                       |  32 +----
+ mm/mmap.c                         |  80 ++++++++++--
+ mm/vma.c                          |   8 +-
+ mm/vma.h                          |  12 +-
+ tools/testing/selftests/mm/rmap.c | 195 ++++++++++++++++++++++++++++++
+ 6 files changed, 306 insertions(+), 51 deletions(-)
+
+
+base-commit: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+-- 
+2.43.0
+

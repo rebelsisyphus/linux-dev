@@ -1,0 +1,24 @@
+1:  0b55aa6bd7a9 ! 1:  dc7c9c045bab mm: batch file VMA insertions in dup_mmap
+    @@ Commit message
+         source. Share this predicate with copy_page_range() so batching cannot
+         leave a child VMA unlinked when its file page tables are copied. Use the
+         same dst_vma, src_vma argument names and order for the insertion helper.
+    +    The shared predicate controls only the batch flush. Keep the original
+    +    copy_page_range() call condition; its own predicate handles early returns.
+     
+         Both mmap write locks keep the queued VMAs alive, and each child VMA
+         owns a file reference before it is queued. Flush before copying file
+    @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct
+      		}
+      
+     -		if (!vma_test(tmp, VMA_WIPEONFORK_BIT))
+    -+		if (!vma_test(tmp, VMA_WIPEONFORK_BIT) &&
+    -+		    vma_needs_copy(tmp, mpnt)) {
+    ++		if (!vma_test(tmp, VMA_WIPEONFORK_BIT)) {
+     +			/* Rmap must find the child before it gains page tables. */
+    -+			if (file)
+    ++			if (file && vma_needs_copy(tmp, mpnt))
+     +				link_file_vma_batch_final(&vb);
+      			retval = copy_page_range(tmp, mpnt);
+     +		}
+2:  c3bdfa308189 = 2:  1796d45180f5 selftests/mm: cover file VMA lifetime across fork

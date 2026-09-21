@@ -1,0 +1,106 @@
+1:  70e635f3ae41 ! 1:  0b55aa6bd7a9 mm: batch file VMA insertions in dup_mmap
+    @@ Commit message
+         Move vma_needs_copy() to mm/internal.h as an inline helper, preserving
+         its checks of VM_COPY_ON_FORK on the destination and anon_vma on the
+         source. Share this predicate with copy_page_range() so batching cannot
+    -    leave a child VMA unlinked when its page tables are copied. Use the same
+    -    dst_vma, src_vma argument names and order for the batch insertion
+    -    helper.
+    +    leave a child VMA unlinked when its file page tables are copied. Use the
+    +    same dst_vma, src_vma argument names and order for the insertion helper.
+     
+         Both mmap write locks keep the queued VMAs alive, and each child VMA
+    -    owns a file reference before it is queued. Flush before copying page
+    -    tables so reverse mapping walks can find the child as soon as it has
+    -    PTEs. Retain immediate insertion after open callbacks. Earlier pending
+    -    VMAs can join that insertion batch without an extra flush before the
+    -    callback.
+    +    owns a file reference before it is queued. Flush before copying file
+    +    page tables so reverse mapping walks can find the child as soon as it
+    +    has file PTEs. Copying an anonymous VMA need not interrupt a file batch.
+    +    Retain the existing open callback before queueing the current VMA.
+     
+    -    Flush remaining entries at the common loop exit, before arch_dup_mmap()
+    -    on success or failed-fork teardown on error. Teardown expects the child
+    -    VMAs to be linked into their file mapping trees. A full batch reduces
+    -    eight insertion lock acquisitions to one at the cost of a bounded stack
+    -    buffer. Mappings that require page table copying or an open callback
+    -    retain immediate insertion.
+    +    Drain remaining entries at loop_out on both success and failure, before
+    +    registration with KSM/khugepaged or failed-fork teardown. Teardown expects
+    +    the child VMAs to be linked into their file mapping trees. Keep the
+    +    existing placement of arch_dup_mmap(); its context setup does not need
+    +    pending file VMAs to have been inserted. A full batch reduces eight
+    +    insertion lock acquisitions to one at the cost of a bounded stack buffer.
+     
+         Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+         Assisted-by: LLM
+    @@ mm/mmap.c: bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+     +/*
+     + * File VMAs without copied page tables can be linked into the rmap tree in
+     + * batches. Both mmap write locks keep the parent and child VMAs alive, and
+    -+ * each child VMA already owns a file reference. Flush before installing page
+    -+ * tables or exposing the child mm, including to the failed-fork teardown.
+    ++ * each child VMA already owns a file reference. Flush before copying file
+    ++ * page tables, and drain remaining entries before finishing dup_mmap() or
+    ++ * tearing down a failed fork.
+     + */
+     +struct link_vma_file_batch {
+     +	struct vma_file_batch batch;
+    @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct
+      	mt_clear_in_rcu(vmi.mas.tree);
+      	for_each_vma(vmi, mpnt) {
+      		struct file *file;
+    -+		bool has_open;
+    - 
+    - 		retval = vma_start_write_killable(mpnt);
+    - 		if (retval < 0)
+     @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+      
+    - 		mm->map_count++;
+    - 
+    --		if (tmp->vm_ops && tmp->vm_ops->open)
+    -+		has_open = tmp->vm_ops && tmp->vm_ops->open;
+    -+		if (has_open)
+    - 			tmp->vm_ops->open(tmp);
+    - 
+      		file = tmp->vm_file;
+      		if (file) {
+     -			struct address_space *mapping = file->f_mapping;
+    @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct
+     -			flush_dcache_mmap_unlock(mapping);
+     -			i_mmap_unlock_write(mapping);
+     +			link_file_vma_batch_add(&vb, tmp, mpnt);
+    -+			/* Preserve immediate linking for callback-managed VMAs. */
+    -+			if (has_open)
+    -+				link_file_vma_batch_final(&vb);
+      		}
+      
+     -		if (!vma_test(tmp, VMA_WIPEONFORK_BIT))
+     +		if (!vma_test(tmp, VMA_WIPEONFORK_BIT) &&
+     +		    vma_needs_copy(tmp, mpnt)) {
+     +			/* Rmap must find the child before it gains page tables. */
+    -+			link_file_vma_batch_final(&vb);
+    ++			if (file)
+    ++				link_file_vma_batch_final(&vb);
+      			retval = copy_page_range(tmp, mpnt);
+     +		}
+      
+      		if (retval) {
+      			mpnt = vma_next(&vmi);
+    - 			goto loop_out;
+    - 		}
+    - 	}
+    --	/* a new mm has just been created */
+    --	retval = arch_dup_mmap(oldmm, mm);
+    +@@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+    + 	/* a new mm has just been created */
+    + 	retval = arch_dup_mmap(oldmm, mm);
+      loop_out:
+     +	link_file_vma_batch_final(&vb);
+    -+	if (!retval)
+    -+		retval = arch_dup_mmap(oldmm, mm);
+      	vma_iter_free(&vmi);
+      	if (!retval) {
+      		mt_set_in_rcu(vmi.mas.tree);
+2:  28a841781404 = 2:  c3bdfa308189 selftests/mm: cover file VMA lifetime across fork

@@ -1,0 +1,31 @@
+['make', '-C', '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf', '-f', '/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/Makefile', 'OUTPUT=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/', 'VMLINUX_BTF=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/kernel-btf-image', 'LSKELS=', 'LSKELS_EXTRA=', 'LSKELS_SIGNED=', 'LINKED_SKELS=', 'LIBARENA_SKEL=', 'LIBARENA_ASAN_SKEL=', 'TRUNNER_EXTRA_FILES=ima_setup.sh', 'SKIP_DOCS=1', 'SKIP_LLVM=1', 'SKIP_LIBBFD=1', 'BPF_STRICT_BUILD=1', '../../../../../../kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/progs/test_xdp_rfs.c-CFLAGS=-I/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/progs', 'LLVM_STRIP=llvm-strip-18', 'LLVM_OBJCOPY=llvm-objcopy-18', '-j8', 'test_progs']
+make: Entering directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'
+
+Auto-detecting system features:
+...                                    llvm: [ [31mOFF[m ]
+
+  TEST-OBJ [test_progs] xdp_rfs.test.o
+  TEST-HDR [test_progs] tests.h
+  EXT-COPY [test_progs] ima_setup.sh
+  EXT-OBJ  [test_progs] test_progs.o
+  EXT-OBJ  [test_progs] cgroup_helpers.o
+  EXT-OBJ  [test_progs] trace_helpers.o
+  EXT-OBJ  [test_progs] network_helpers.o
+  EXT-OBJ  [test_progs] testing_helpers.o
+  EXT-OBJ  [test_progs] btf_helpers.o
+  EXT-OBJ  [test_progs] cap_helpers.o
+  EXT-OBJ  [test_progs] unpriv_helpers.o
+  EXT-OBJ  [test_progs] sysctl_helpers.o
+  EXT-OBJ  [test_progs] netlink_helpers.o
+  EXT-OBJ  [test_progs] jit_disasm_helpers.o
+  EXT-OBJ  [test_progs] io_helpers.o
+  EXT-OBJ  [test_progs] test_loader.o
+  EXT-OBJ  [test_progs] xsk.o
+  EXT-OBJ  [test_progs] disasm.o
+  EXT-OBJ  [test_progs] disasm_helpers.o
+  EXT-OBJ  [test_progs] json_writer.o
+  EXT-OBJ  [test_progs] bpftool_helpers.o
+  EXT-OBJ  [test_progs] usdt_1.o
+  EXT-OBJ  [test_progs] usdt_2.o
+  BINARY   test_progs
+make: Leaving directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'

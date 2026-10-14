@@ -1,0 +1,789 @@
+From 94fe954cada5199ae754054090c659c894d75da7 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 23 Sep 2026 23:42:40 +0800
+Subject: [PATCH 3/4] selftests/bpf: cover ordered CPUMAP steering
+
+Use live XDP test frames and generic XDP on loopback to exercise ordered
+CPUMAP domains. A bounded TC receive gate holds the old target inside stack
+delivery while another candidate is requested. Check that dequeue alone
+cannot complete the old prefix and that full-queue drops return pending
+reservations. Use single-packet test runs while gated: repeat > 1 changes
+the XDP dispatcher and waits for an RCU grace period.
+
+Cover discarded redirect requests, invalid interfaces, remote PASS/DROP,
+rejection of second remote redirects, mixed native/generic batches,
+parallel producers, entry replacement/deletion/recreation, missing targets,
+and CPU offline/online with and without a concurrent producer. Recreate an
+entry after CPU online to restore the worker's original CPU affinity.
+
+Run serially because the fixture changes CPU online state. At least three
+available CPUs are required. The 13 ordered subtests pass on a four-vCPU
+x86-64 QEMU guest with CONFIG_RPS=n, KASAN and lockdep.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ .../bpf/prog_tests/xdp_cpumap_ordered.c       | 563 ++++++++++++++++++
+ .../bpf/progs/test_xdp_cpumap_ordered.c       | 143 +++++
+ .../selftests/bpf/xdp_cpumap_ordered.h        |  29 +
+ 3 files changed, 735 insertions(+)
+ create mode 100644 tools/testing/selftests/bpf/prog_tests/xdp_cpumap_ordered.c
+ create mode 100644 tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c
+ create mode 100644 tools/testing/selftests/bpf/xdp_cpumap_ordered.h
+
+diff --git a/tools/testing/selftests/bpf/prog_tests/xdp_cpumap_ordered.c b/tools/testing/selftests/bpf/prog_tests/xdp_cpumap_ordered.c
+new file mode 100644
+index 000000000000..fae08f376b36
+--- /dev/null
++++ b/tools/testing/selftests/bpf/prog_tests/xdp_cpumap_ordered.c
+@@ -0,0 +1,563 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <pthread.h>
++#include <sched.h>
++#include <net/if.h>
++#include <linux/if_link.h>
++#include <linux/if_packet.h>
++#include <test_progs.h>
++#include <network_helpers.h>
++#include "xdp_cpumap_ordered.h"
++#include "test_xdp_cpumap_ordered.skel.h"
++
++struct cpumap_fixture {
++	struct test_xdp_cpumap_ordered *skel;
++	struct nstoken *ns;
++	struct bpf_tc_hook tc;
++	cpu_set_t affinity;
++	char ns_name[64];
++	int ifindex, source_cpu, cpu_a, cpu_b, packet_fd;
++	bool generic, attached, affinity_saved;
++};
++
++static bool wait_count(__u32 *value, __u32 count)
++{
++	int i;
++
++	for (i = 0; i < 10000; i++) {
++		if (__atomic_load_n(value, __ATOMIC_RELAXED) >= count)
++			return true;
++		usleep(1000);
++	}
++	return false;
++}
++
++static int run_query(struct cpumap_fixture *f, __u32 domain)
++{
++	char packet[ETH_HLEN] = {};
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet,
++		    .data_size_in = sizeof(packet),
++	);
++	int err;
++
++	f->skel->bss->query_domain = domain;
++	err = bpf_prog_test_run_opts(bpf_program__fd(f->skel->progs.query_state), &opts);
++	return err ?: f->skel->bss->state_error;
++}
++
++static bool wait_idle(struct cpumap_fixture *f, __u32 domain)
++{
++	int i;
++
++	for (i = 0; i < 10000; i++) {
++		if (run_query(f, domain))
++			return false;
++		if (!f->skel->bss->state.pending &&
++		    (__s64)(f->skel->bss->state.completed -
++			    f->skel->bss->state.last_tail) >= 0)
++			return true;
++		usleep(1000);
++	}
++	return false;
++}
++
++static int run_packets(struct cpumap_fixture *f, __u32 domain, __u32 count)
++{
++	struct cpumap_test_packet packet = {
++		.proto = htons(CPUMAP_TEST_PROTO),
++		.magic = CPUMAP_TEST_MAGIC,
++		.domain = domain,
++	};
++	struct xdp_md ctx = {
++		.data_end = sizeof(packet),
++		.ingress_ifindex = f->ifindex,
++	};
++	struct sockaddr_ll addr = {
++		.sll_family = AF_PACKET,
++		.sll_ifindex = f->ifindex,
++		.sll_protocol = htons(CPUMAP_TEST_PROTO),
++	};
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = &packet,
++		    .data_size_in = sizeof(packet),
++		    .ctx_in = &ctx,
++		    .ctx_size_in = sizeof(ctx),
++		    .flags = BPF_F_TEST_XDP_LIVE_FRAMES,
++		    .repeat = count,
++		    .batch_size = 64,
++	);
++	__u32 i;
++
++	if (!f->generic)
++		return bpf_prog_test_run_opts(bpf_program__fd(f->skel->progs.ordered_redirect),
++					      &opts);
++	for (i = 0; i < count; i++) {
++		if (sendto(f->packet_fd, &packet, sizeof(packet), 0,
++			   (void *)&addr, sizeof(addr)) != sizeof(packet))
++			return -errno;
++	}
++	return 0;
++}
++
++static void cleanup(struct cpumap_fixture *f)
++{
++	if (f->skel) {
++		f->skel->bss->release_gate = 1;
++		wait_idle(f, 0);
++	}
++	if (f->attached)
++		bpf_xdp_detach(f->ifindex, XDP_FLAGS_SKB_MODE, NULL);
++	if (f->packet_fd >= 0)
++		close(f->packet_fd);
++	if (f->tc.ifindex)
++		bpf_tc_hook_destroy(&f->tc);
++	test_xdp_cpumap_ordered__destroy(f->skel);
++	close_netns(f->ns);
++	if (f->ns_name[0])
++		SYS_NOFAIL("ip netns del %s", f->ns_name);
++	if (f->affinity_saved)
++		sched_setaffinity(0, sizeof(f->affinity), &f->affinity);
++}
++
++static bool setup(struct cpumap_fixture *f, bool generic, __u32 qsize, bool remote)
++{
++	struct bpf_cpumap_val value = { .qsize = qsize };
++
++	LIBBPF_OPTS(bpf_tc_opts, tc_opts,
++		    .handle = 1,
++		    .priority = 1,
++	);
++	cpu_set_t single;
++	int cpus[3], nr = 0, cpu, err, possible;
++	__u32 key;
++
++	memset(f, 0, sizeof(*f));
++	f->packet_fd = -1;
++	f->generic = generic;
++	err = sched_getaffinity(0, sizeof(f->affinity), &f->affinity);
++	if (!ASSERT_OK(err, "get_affinity"))
++		return false;
++	f->affinity_saved = true;
++	for (cpu = 0; cpu < CPU_SETSIZE && nr < 3; cpu++) {
++		if (CPU_ISSET(cpu, &f->affinity))
++			cpus[nr++] = cpu;
++	}
++	if (nr < 3) {
++		test__skip();
++		return false;
++	}
++	f->source_cpu = cpus[0];
++	f->cpu_a = cpus[1];
++	f->cpu_b = cpus[2];
++	CPU_ZERO(&single);
++	CPU_SET(f->source_cpu, &single);
++	if (!ASSERT_OK(sched_setaffinity(0, sizeof(single), &single), "pin_source"))
++		goto fail;
++	snprintf(f->ns_name, sizeof(f->ns_name), "cpumap_ordered_%d", getpid());
++	SYS(fail, "ip netns add %s", f->ns_name);
++	f->ns = open_netns(f->ns_name);
++	if (!ASSERT_OK_PTR(f->ns, "open_netns"))
++		goto fail;
++	SYS(fail, "ip link set lo up");
++	f->ifindex = if_nametoindex("lo");
++	f->skel = test_xdp_cpumap_ordered__open();
++	if (!ASSERT_OK_PTR(f->skel, "open"))
++		goto fail;
++	possible = libbpf_num_possible_cpus();
++	if (!ASSERT_GT(possible, 0, "possible_cpus"))
++		goto fail;
++	bpf_map__set_max_entries(f->skel->maps.cpu_map, possible);
++	bpf_map__set_max_entries(f->skel->maps.plain_map, possible);
++	f->skel->bss->cpu_a = f->cpu_a;
++	f->skel->bss->cpu_b = f->cpu_b;
++	f->skel->bss->desired_cpu = f->cpu_a;
++	err = test_xdp_cpumap_ordered__load(f->skel);
++	if (!ASSERT_OK(err, "load"))
++		goto fail;
++	if (remote)
++		value.bpf_prog.fd = bpf_program__fd(f->skel->progs.ordered_remote);
++	key = f->cpu_a;
++	err = bpf_map_update_elem(bpf_map__fd(f->skel->maps.cpu_map), &key, &value, BPF_ANY);
++	if (!ASSERT_OK(err, "create_cpu_a"))
++		goto fail;
++	key = f->cpu_b;
++	err = bpf_map_update_elem(bpf_map__fd(f->skel->maps.cpu_map), &key, &value, BPF_ANY);
++	if (!ASSERT_OK(err, "create_cpu_b"))
++		goto fail;
++	value.bpf_prog.fd = 0;
++	err = bpf_map_update_elem(bpf_map__fd(f->skel->maps.plain_map), &key, &value, BPF_ANY);
++	if (!ASSERT_OK(err, "create_plain_cpu"))
++		goto fail;
++	f->tc.sz = sizeof(f->tc);
++	f->tc.ifindex = f->ifindex;
++	f->tc.attach_point = BPF_TC_INGRESS;
++	err = bpf_tc_hook_create(&f->tc);
++	if (!ASSERT_OK(err, "tc_create"))
++		goto fail;
++	tc_opts.prog_fd = bpf_program__fd(f->skel->progs.ordered_receive);
++	if (!ASSERT_OK(bpf_tc_attach(&f->tc, &tc_opts), "tc_attach"))
++		goto fail;
++	if (generic) {
++		err = bpf_xdp_attach(f->ifindex,
++				     bpf_program__fd(f->skel->progs.ordered_redirect),
++				     XDP_FLAGS_SKB_MODE, NULL);
++		if (!ASSERT_OK(err, "generic_attach"))
++			goto fail;
++		f->attached = true;
++		f->packet_fd = socket(AF_PACKET, SOCK_RAW, htons(CPUMAP_TEST_PROTO));
++		if (!ASSERT_OK_FD(f->packet_fd, "packet_socket"))
++			goto fail;
++	}
++	return true;
++fail:
++	cleanup(f);
++	return false;
++}
++
++static void test_interface(void)
++{
++	struct cpumap_fixture f;
++	char packet[ETH_HLEN] = {};
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet,
++		    .data_size_in = sizeof(packet),
++	);
++	int i, err;
++
++	if (!setup(&f, false, 64, false))
++		return;
++	for (i = 0; i < 7; i++) {
++		f.skel->bss->invalid_mode = i;
++		err = bpf_prog_test_run_opts(bpf_program__fd(f.skel->progs.invalid_request), &opts);
++		if (!ASSERT_OK(err, "invalid_request_run"))
++			goto out;
++		if (i < 4)
++			ASSERT_EQ(opts.retval, XDP_ABORTED, "invalid_redirect");
++		else
++			ASSERT_EQ(f.skel->bss->state_error, -EINVAL, "invalid_query");
++	}
++	f.skel->bss->discard_request = 1;
++	ASSERT_OK(run_packets(&f, 0, 16), "discard_requests");
++	ASSERT_OK(run_query(&f, 0), "query_unused_domain");
++	ASSERT_EQ(f.skel->bss->state.cpu, UINT32_MAX, "no_target_reserved");
++	ASSERT_EQ(f.skel->bss->state.pending, 0, "no_pending_reservation");
++out:
++	cleanup(&f);
++}
++
++static void test_migration(bool generic, bool full)
++{
++	struct cpumap_fixture f;
++
++	if (!setup(&f, generic, full ? 1 : 64, false))
++		return;
++	f.skel->bss->hold_sequence = 1;
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "first_packet") ||
++	    !ASSERT_TRUE(wait_count(&f.skel->bss->blocked, 1), "old_cpu_processing"))
++		goto out;
++	f.skel->bss->desired_cpu = f.cpu_b;
++	/* repeat > 1 updates the XDP dispatcher and waits for the gated CPU. */
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "pending_packet"))
++		goto out;
++	if (full && !ASSERT_OK(run_packets(&f, 0, 1), "overflow_packet"))
++		goto out;
++	if (!ASSERT_OK(run_query(&f, 0), "query_busy_domain"))
++		goto out;
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_a, "migration_deferred");
++	ASSERT_EQ(f.skel->bss->state.completed, 0, "not_complete_at_dequeue");
++	ASSERT_EQ(f.skel->bss->state.pending, 0, "bulk_and_drops_accounted");
++	ASSERT_EQ(f.skel->bss->state.last_tail, 2, "successful_submissions_only");
++	f.skel->bss->release_gate = 1;
++	if (!ASSERT_TRUE(wait_count(&f.skel->bss->received, 2), "old_packets_received") ||
++	    !ASSERT_TRUE(wait_idle(&f, 0), "old_domain_idle"))
++		goto out;
++	ASSERT_EQ(f.skel->bss->gate_timeout, 0, "gate_released_by_test");
++	ASSERT_EQ(f.skel->bss->received_b, 0, "no_early_delivery");
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "new_packet") ||
++	    !ASSERT_TRUE(wait_count(&f.skel->bss->received, 3), "new_packet_received"))
++		goto out;
++	ASSERT_TRUE(wait_idle(&f, 0), "new_domain_idle");
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_b, "migration_completed");
++	ASSERT_EQ(f.skel->bss->received_b, 1, "new_cpu_delivery");
++	ASSERT_EQ(f.skel->bss->reordered, 0, "packet_order");
++out:
++	cleanup(&f);
++}
++
++static void test_remote(bool generic)
++{
++	struct cpumap_fixture f;
++
++	if (!setup(&f, generic, 64, true))
++		return;
++	ASSERT_OK(run_packets(&f, 0, 1), "remote_pass");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 1), "remote_pass_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "remote_pass_idle");
++	f.skel->data->remote_action = XDP_DROP;
++	ASSERT_OK(run_packets(&f, 0, 1), "remote_drop");
++	ASSERT_TRUE(wait_count(&f.skel->bss->remote_received, 2), "remote_drop_executed");
++	ASSERT_TRUE(wait_idle(&f, 0), "remote_drop_complete");
++	f.skel->data->remote_action = XDP_REDIRECT;
++	ASSERT_OK(run_packets(&f, 0, 1), "remote_redirect");
++	ASSERT_TRUE(wait_count(&f.skel->bss->remote_received, 3), "remote_redirect_executed");
++	ASSERT_TRUE(wait_idle(&f, 0), "remote_redirect_complete");
++	ASSERT_EQ(f.skel->bss->received, 1, "no_untracked_second_redirect");
++	f.skel->data->remote_action = XDP_PASS;
++	f.skel->bss->desired_cpu = f.cpu_b;
++	ASSERT_OK(run_packets(&f, 0, 1), "recover_after_drop");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 2), "recovery_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "recovery_idle");
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_b, "drops_do_not_pin_old_cpu");
++	cleanup(&f);
++}
++
++static void test_mixed(void)
++{
++	struct cpumap_fixture f;
++
++	if (!setup(&f, true, 64, false))
++		return;
++	f.skel->bss->skip_assigned = 1;
++	f.skel->bss->hold_sequence = 1;
++	f.generic = false;
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "first_native") ||
++	    !ASSERT_TRUE(wait_count(&f.skel->bss->blocked, 1), "mixed_gate"))
++		goto out;
++	f.skel->bss->desired_cpu = f.cpu_b;
++	f.generic = true;
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "queued_generic"))
++		goto out;
++	f.generic = false;
++	if (!ASSERT_OK(run_packets(&f, 0, 1), "queued_native"))
++		goto out;
++	f.skel->bss->release_gate = 1;
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 3), "mixed_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "mixed_idle");
++	ASSERT_EQ(f.skel->bss->gate_timeout, 0, "mixed_gate_released");
++	ASSERT_EQ(f.skel->bss->received_a, 3, "mixed_stayed_on_old_cpu");
++	ASSERT_EQ(f.skel->bss->reordered, 0, "generic_precedes_native");
++out:
++	cleanup(&f);
++}
++
++struct producer {
++	struct cpumap_fixture *fixture;
++	__u32 domain;
++	int cpu, error;
++};
++
++static void *produce(void *arg)
++{
++	struct producer *p = arg;
++	cpu_set_t mask;
++
++	CPU_ZERO(&mask);
++	CPU_SET(p->cpu, &mask);
++	p->error = pthread_setaffinity_np(pthread_self(), sizeof(mask), &mask);
++	if (!p->error)
++		p->error = run_packets(p->fixture, p->domain, 4096);
++	return NULL;
++}
++
++static void test_parallel(void)
++{
++	struct cpumap_fixture f;
++	struct producer p[2];
++	pthread_t threads[2];
++	int i, started = 0;
++
++	if (!setup(&f, false, 64, false))
++		return;
++	f.skel->bss->alternate = 1;
++	for (i = 0; i < 2; i++) {
++		p[i] = (struct producer) { &f, i + 1, i ? f.cpu_b : f.source_cpu, 0 };
++		if (!ASSERT_OK(pthread_create(&threads[i], NULL, produce, &p[i]),
++			       "producer_create"))
++			break;
++		started++;
++	}
++	for (i = 0; i < started; i++) {
++		ASSERT_OK(pthread_join(threads[i], NULL), "producer_join");
++		ASSERT_OK(p[i].error, "producer_run");
++		ASSERT_TRUE(wait_idle(&f, i + 1), "producer_domain_idle");
++		ASSERT_GT(f.skel->bss->last_sequence[i + 1], 0, "producer_delivered");
++	}
++	ASSERT_EQ(f.skel->bss->reordered, 0, "parallel_domain_order");
++	cleanup(&f);
++}
++
++static void test_replace(void)
++{
++	struct cpumap_fixture f;
++	struct bpf_cpumap_val value = { .qsize = 128 };
++	struct producer p;
++	pthread_t thread;
++	__u32 key;
++	int i, err, fd;
++
++	if (!setup(&f, false, 64, false))
++		return;
++	key = f.cpu_a;
++	fd = bpf_map__fd(f.skel->maps.cpu_map);
++	p = (struct producer) { &f, 0, f.source_cpu, 0 };
++	if (!ASSERT_OK(pthread_create(&thread, NULL, produce, &p), "producer_create"))
++		goto out;
++	for (i = 0; i < 16; i++) {
++		value.qsize = 64 + i;
++		err = bpf_map_update_elem(fd, &key, &value, BPF_ANY);
++		if (!ASSERT_OK(err, "replace_active_entry"))
++			break;
++	}
++	ASSERT_OK(pthread_join(thread, NULL), "producer_join");
++	ASSERT_OK(p.error, "producer_run");
++	ASSERT_TRUE(wait_idle(&f, 0), "replaced_domain_idle");
++	ASSERT_EQ(f.skel->bss->reordered, 0, "replacement_order");
++	ASSERT_OK(bpf_map_delete_elem(fd, &key), "delete_entry");
++	kern_sync_rcu();
++	ASSERT_OK(run_query(&f, 0), "retired_entry_progress");
++	ASSERT_OK(bpf_map_update_elem(fd, &key, &value, BPF_ANY), "recreate_entry");
++	i = f.skel->bss->received;
++	ASSERT_OK(run_packets(&f, 0, 1), "send_after_recreate");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, i + 1), "receive_after_recreate");
++	ASSERT_TRUE(wait_idle(&f, 0), "recreated_domain_idle");
++	ASSERT_EQ(f.skel->bss->reordered, 0, "recreated_order");
++out:
++	cleanup(&f);
++}
++
++static void test_missing_target(void)
++{
++	struct cpumap_fixture f;
++	__u32 key;
++	int fd;
++
++	if (!setup(&f, false, 64, false))
++		return;
++	fd = bpf_map__fd(f.skel->maps.cpu_map);
++	key = f.cpu_a;
++	ASSERT_OK(bpf_map_delete_elem(fd, &key), "delete_initial_candidate");
++	ASSERT_OK(run_packets(&f, 0, 1), "no_initial_target");
++	ASSERT_OK(run_query(&f, 0), "query_unassigned_domain");
++	ASSERT_EQ(f.skel->bss->state.cpu, UINT32_MAX, "no_target");
++	ASSERT_EQ(f.skel->bss->state.pending, 0, "no_reservation_leak");
++	f.skel->bss->desired_cpu = f.cpu_b;
++	ASSERT_OK(run_packets(&f, 0, 1), "available_target");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 1), "available_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "available_idle");
++	f.skel->bss->desired_cpu = f.cpu_a;
++	ASSERT_OK(run_packets(&f, 0, 1), "missing_candidate");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 2), "old_target_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "old_target_idle");
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_b, "keep_usable_old_target");
++	key = f.cpu_b;
++	ASSERT_OK(bpf_map_delete_elem(fd, &key), "delete_old_target");
++	ASSERT_OK(run_packets(&f, 0, 1), "all_targets_absent");
++	ASSERT_TRUE(wait_idle(&f, 0), "absent_does_not_leak");
++	ASSERT_EQ(f.skel->bss->received, 2, "absent_not_delivered");
++	cleanup(&f);
++}
++
++static int set_cpu_online(const char *path, bool online)
++{
++	const char *value = online ? "1" : "0";
++	int fd, err;
++
++	fd = open(path, O_WRONLY);
++	if (fd < 0)
++		return -errno;
++	err = write(fd, value, 1) == 1 ? 0 : -errno;
++	close(fd);
++	return err;
++}
++
++static void test_hotplug(bool busy)
++{
++	struct bpf_cpumap_val value = { .qsize = 64 };
++	struct cpumap_fixture f;
++	struct producer p;
++	pthread_t thread;
++	char path[128];
++	__u32 key, received, received_a;
++	int err;
++
++	if (!setup(&f, false, 64, false))
++		return;
++	snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/online", f.cpu_a);
++	if (access(path, W_OK)) {
++		test__skip();
++		goto out;
++	}
++	ASSERT_OK(run_packets(&f, 0, 1), "before_offline");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, 1), "before_offline_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "before_offline_idle");
++	if (busy) {
++		p = (struct producer) { &f, 0, f.source_cpu, 0 };
++		if (!ASSERT_OK(pthread_create(&thread, NULL, produce, &p), "hotplug_producer"))
++			goto out;
++	}
++	err = set_cpu_online(path, false);
++	if (busy) {
++		ASSERT_OK(pthread_join(thread, NULL), "hotplug_producer_join");
++		ASSERT_OK(p.error, "hotplug_producer_run");
++	}
++	if (!ASSERT_OK(err, "offline_target"))
++		goto out;
++	ASSERT_TRUE(wait_idle(&f, 0), "offline_worker_drained");
++	received = f.skel->bss->received;
++	received_a = f.skel->bss->received_a;
++	f.skel->bss->desired_cpu = f.cpu_b;
++	ASSERT_OK(run_packets(&f, 0, 1), "move_from_offline");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, received + 1), "online_target_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "online_target_idle");
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_b, "online_target_selected");
++	f.skel->bss->desired_cpu = f.cpu_a;
++	ASSERT_OK(run_packets(&f, 0, 1), "offline_candidate");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, received + 2), "retain_online_target");
++	ASSERT_TRUE(wait_idle(&f, 0), "offline_candidate_idle");
++	ASSERT_EQ(f.skel->bss->state.cpu, f.cpu_b, "offline_candidate_rejected");
++	if (!ASSERT_OK(set_cpu_online(path, true), "restore_cpu"))
++		goto out;
++	/* The scheduler may have relaxed the old worker's CPU affinity. */
++	key = f.cpu_a;
++	ASSERT_OK(bpf_map_update_elem(bpf_map__fd(f.skel->maps.cpu_map),
++				      &key, &value, BPF_ANY), "replace_online_entry");
++	ASSERT_OK(run_packets(&f, 0, 1), "return_to_online_cpu");
++	ASSERT_TRUE(wait_count(&f.skel->bss->received, received + 3), "restored_cpu_received");
++	ASSERT_TRUE(wait_idle(&f, 0), "restored_cpu_idle");
++	ASSERT_EQ(f.skel->bss->received_a, received_a + 1, "restored_cpu_affinity");
++out:
++	cleanup(&f);
++}
++
++void serial_test_xdp_cpumap_ordered(void)
++{
++	if (test__start_subtest("interface"))
++		test_interface();
++	if (test__start_subtest("native_migration"))
++		test_migration(false, false);
++	if (test__start_subtest("generic_migration"))
++		test_migration(true, false);
++	if (test__start_subtest("native_queue_full"))
++		test_migration(false, true);
++	if (test__start_subtest("generic_queue_full"))
++		test_migration(true, true);
++	if (test__start_subtest("native_remote"))
++		test_remote(false);
++	if (test__start_subtest("generic_remote"))
++		test_remote(true);
++	if (test__start_subtest("mixed_native_generic"))
++		test_mixed();
++	if (test__start_subtest("parallel_producers"))
++		test_parallel();
++	if (test__start_subtest("entry_replacement"))
++		test_replace();
++	if (test__start_subtest("missing_target"))
++		test_missing_target();
++	if (test__start_subtest("cpu_hotplug"))
++		test_hotplug(false);
++	if (test__start_subtest("cpu_hotplug_with_producer"))
++		test_hotplug(true);
++}
+diff --git a/tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c b/tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c
+new file mode 100644
+index 000000000000..d11909fdbf6f
+--- /dev/null
++++ b/tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c
+@@ -0,0 +1,143 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <vmlinux.h>
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_endian.h>
++#include "xdp_cpumap_ordered.h"
++
++extern int bpf_cpumap_redirect(void *map, __u32 cpu, __u32 domain) __ksym;
++extern int bpf_cpumap_get_state(void *map, __u32 domain, void *state,
++				__u32 size) __ksym;
++
++struct {
++	__uint(type, BPF_MAP_TYPE_CPUMAP);
++	__uint(max_entries, 64);
++	__uint(map_extra, CPUMAP_TEST_DOMAINS);
++	__type(key, __u32);
++	__type(value, struct bpf_cpumap_val);
++} cpu_map SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_CPUMAP);
++	__uint(max_entries, 64);
++	__type(key, __u32);
++	__type(value, struct bpf_cpumap_val);
++} plain_map SEC(".maps");
++
++__u32 cpu_a, cpu_b, desired_cpu, query_domain;
++__u32 sequence[CPUMAP_TEST_DOMAINS];
++__u32 last_sequence[CPUMAP_TEST_DOMAINS];
++__u32 received, reordered, received_a, received_b;
++__u32 remote_received, remote_action = XDP_PASS;
++__u32 alternate, discard_request, invalid_mode, skip_assigned;
++__u32 hold_sequence, blocked, gate_timeout;
++/* Userspace releases the bounded callback while it is executing. */
++volatile __u32 release_gate;
++struct bpf_cpumap_state state;
++int state_error;
++
++SEC("xdp")
++int ordered_redirect(struct xdp_md *ctx)
++{
++	struct cpumap_test_packet *packet = (void *)(long)ctx->data;
++	void *end = (void *)(long)ctx->data_end;
++	__u32 cpu, seq, domain;
++	int action;
++
++	if ((void *)(packet + 1) > end ||
++	    packet->proto != bpf_htons(CPUMAP_TEST_PROTO) ||
++	    packet->magic != CPUMAP_TEST_MAGIC)
++		return XDP_PASS;
++	/* Native test frames can re-enter generic XDP on the same loopback. */
++	if (skip_assigned && packet->seq)
++		return XDP_PASS;
++	domain = packet->domain;
++	if (domain >= CPUMAP_TEST_DOMAINS)
++		return XDP_DROP;
++	seq = __sync_add_and_fetch(&sequence[domain], 1);
++	packet->seq = seq;
++	cpu = alternate ? ((seq & 1) ? cpu_a : cpu_b) : desired_cpu;
++	action = bpf_cpumap_redirect(&cpu_map, cpu, domain);
++	return discard_request ? XDP_DROP : action;
++}
++
++SEC("xdp")
++int query_state(struct xdp_md *ctx)
++{
++	state_error = bpf_cpumap_get_state(&cpu_map, query_domain,
++					   &state, sizeof(state));
++	return XDP_PASS;
++}
++
++SEC("xdp")
++int invalid_request(struct xdp_md *ctx)
++{
++	switch (invalid_mode) {
++	case 0:
++		return bpf_cpumap_redirect(&plain_map, cpu_a, 0);
++	case 1:
++		return bpf_cpumap_redirect(&cpu_map, cpu_a, CPUMAP_TEST_DOMAINS);
++	case 2:
++		return bpf_cpumap_redirect(&cpu_map, ~0U, 0);
++	case 3:
++		return bpf_redirect_map(&cpu_map, cpu_a, XDP_PASS);
++	case 4:
++		state_error = bpf_cpumap_get_state(&plain_map, 0, &state, sizeof(state));
++		break;
++	case 5:
++		state_error = bpf_cpumap_get_state(&cpu_map, 0, &state, sizeof(state) - 1);
++		break;
++	default:
++		state_error = bpf_cpumap_get_state(&cpu_map, CPUMAP_TEST_DOMAINS,
++						   &state, sizeof(state));
++	}
++	return XDP_PASS;
++}
++
++SEC("xdp/cpumap")
++int ordered_remote(struct xdp_md *ctx)
++{
++	__sync_fetch_and_add(&remote_received, 1);
++	if (remote_action == XDP_REDIRECT)
++		return bpf_redirect_map(&plain_map, cpu_b, 0);
++	return remote_action;
++}
++
++static int wait_gate(__u32 index, void *ctx)
++{
++	return release_gate != 0;
++}
++
++SEC("tc")
++int ordered_receive(struct __sk_buff *skb)
++{
++	struct cpumap_test_packet *packet = (void *)(long)skb->data;
++	void *end = (void *)(long)skb->data_end;
++	__u32 domain, seq, last, cpu;
++
++	if ((void *)(packet + 1) > end ||
++	    packet->proto != bpf_htons(CPUMAP_TEST_PROTO) ||
++	    packet->magic != CPUMAP_TEST_MAGIC)
++		return 0;
++	domain = packet->domain;
++	if (domain >= CPUMAP_TEST_DOMAINS)
++		return 2;
++	seq = packet->seq;
++	if (!domain && hold_sequence && seq == hold_sequence) {
++		__sync_fetch_and_add(&blocked, 1);
++		bpf_loop(1U << 23, wait_gate, NULL, 0);
++		if (!release_gate)
++			__sync_fetch_and_add(&gate_timeout, 1);
++	}
++	last = __sync_lock_test_and_set(&last_sequence[domain], seq);
++	if (seq <= last)
++		__sync_fetch_and_add(&reordered, 1);
++	cpu = bpf_get_smp_processor_id();
++	if (cpu == cpu_a)
++		__sync_fetch_and_add(&received_a, 1);
++	if (cpu == cpu_b)
++		__sync_fetch_and_add(&received_b, 1);
++	__sync_fetch_and_add(&received, 1);
++	return 2;
++}
++
++char LICENSE[] SEC("license") = "GPL";
+diff --git a/tools/testing/selftests/bpf/xdp_cpumap_ordered.h b/tools/testing/selftests/bpf/xdp_cpumap_ordered.h
+new file mode 100644
+index 000000000000..7d655db3c53b
+--- /dev/null
++++ b/tools/testing/selftests/bpf/xdp_cpumap_ordered.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __XDP_CPUMAP_ORDERED_H
++#define __XDP_CPUMAP_ORDERED_H
++
++#define CPUMAP_TEST_DOMAINS 16
++#define CPUMAP_TEST_MAGIC 0x4350554d
++#define CPUMAP_TEST_PROTO 0x88b5
++
++#ifndef __VMLINUX_H__
++struct bpf_cpumap_state {
++	__u64 last_tail;
++	__u64 completed;
++	__u32 cpu;
++	__u32 pending;
++};
++#endif
++
++struct cpumap_test_packet {
++	__u8 dest[6];
++	__u8 source[6];
++	__be16 proto;
++	__u16 reserved;
++	__u32 magic;
++	__u32 domain;
++	__u32 seq;
++	__u8 padding[32];
++};
++
++#endif
+-- 
+2.43.0
+

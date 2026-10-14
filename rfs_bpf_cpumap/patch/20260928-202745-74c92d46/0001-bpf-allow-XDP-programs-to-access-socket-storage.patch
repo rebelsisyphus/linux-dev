@@ -1,0 +1,135 @@
+From 998b3d82d1e13b06e3fb26b075fbffca8b8c172b Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 23 Sep 2026 23:42:40 +0800
+Subject: [PATCH 1/7] bpf: allow XDP programs to access socket storage
+
+XDP can look up a socket and release its reference, but cannot read socket
+local storage through its helper dispatch table. This prevents an ingress
+policy from using state already recorded by a socket or tracing program.
+
+Expose the existing sk_storage_get helper to XDP with its existing socket
+type checks and lifetime rules. No socket lookup or storage implementation
+changes are needed. Extend sk_storage_tracing to look up an established
+IPv6 TCP socket from XDP and read the state created by the tracing program.
+
+Validated with the sk_storage_tracing selftest on an x86-64 QEMU kernel
+with CONFIG_RPS disabled, KASAN and lockdep enabled.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ net/core/filter.c                             |  2 ++
+ .../bpf/prog_tests/sk_storage_tracing.c       | 35 +++++++++++++++++++
+ .../bpf/progs/test_sk_storage_tracing.c       | 23 ++++++++++++
+ 3 files changed, 60 insertions(+)
+
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 61940e753552..1751f57b4cca 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -8759,6 +8759,8 @@ static const struct bpf_func_proto *
+ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
+ {
+ 	switch (func_id) {
++	case BPF_FUNC_sk_storage_get:
++		return &bpf_sk_storage_get_proto;
+ 	case BPF_FUNC_perf_event_output:
+ 		return &bpf_xdp_event_output_proto;
+ 	case BPF_FUNC_get_smp_processor_id:
+diff --git a/tools/testing/selftests/bpf/prog_tests/sk_storage_tracing.c b/tools/testing/selftests/bpf/prog_tests/sk_storage_tracing.c
+index 547ae53cde74..0a8d5b160d28 100644
+--- a/tools/testing/selftests/bpf/prog_tests/sk_storage_tracing.c
++++ b/tools/testing/selftests/bpf/prog_tests/sk_storage_tracing.c
+@@ -22,6 +22,38 @@ static struct test_sk_storage_tracing *skel;
+ static __u32 duration;
+ static pid_t my_pid;
+ 
++static void check_xdp_storage(int active_fd)
++{
++	struct sockaddr_in6 local, peer;
++	socklen_t len = sizeof(local);
++	char packet[ETH_HLEN] = {};
++	int err, fd;
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet,
++		    .data_size_in = sizeof(packet),
++	);
++
++	err = getsockname(active_fd, (void *)&local, &len);
++	if (!ASSERT_OK(err, "getsockname"))
++		return;
++	len = sizeof(peer);
++	err = getpeername(active_fd, (void *)&peer, &len);
++	if (!ASSERT_OK(err, "getpeername"))
++		return;
++
++	memcpy(skel->bss->xdp_tuple.ipv6.saddr, &local.sin6_addr, sizeof(local.sin6_addr));
++	memcpy(skel->bss->xdp_tuple.ipv6.daddr, &peer.sin6_addr, sizeof(peer.sin6_addr));
++	skel->bss->xdp_tuple.ipv6.sport = local.sin6_port;
++	skel->bss->xdp_tuple.ipv6.dport = peer.sin6_port;
++	fd = bpf_program__fd(skel->progs.xdp_read_sk_storage);
++	err = bpf_prog_test_run_opts(fd, &opts);
++	if (!ASSERT_OK(err, "xdp_storage_run"))
++		return;
++	ASSERT_EQ(opts.retval, XDP_PASS, "xdp_storage_found");
++	ASSERT_EQ(skel->bss->xdp_storage_pid, my_pid, "xdp_storage_pid");
++}
++
+ static int check_sk_stg(int sk_fd, __u32 expected_state)
+ {
+ 	struct sk_stg sk_stg;
+@@ -70,6 +102,8 @@ static void do_test(void)
+ 		  passive_fd, errno))
+ 		goto out;
+ 
++	check_xdp_storage(active_fd);
++
+ 	shutdown(active_fd, SHUT_WR);
+ 	err = read(passive_fd, &abyte, 1);
+ 	if (!ASSERT_OK(err, "read(passive_fd)"))
+@@ -123,6 +157,7 @@ void serial_test_sk_storage_tracing(void)
+ 	if (!ASSERT_OK_PTR(skel, "test_sk_storage_tracing"))
+ 		return;
+ 
++	bpf_program__set_autoattach(skel->progs.xdp_read_sk_storage, false);
+ 	err = test_sk_storage_tracing__attach(skel);
+ 	if (!ASSERT_OK(err, "test_sk_storage_tracing__attach")) {
+ 		test_sk_storage_tracing__destroy(skel);
+diff --git a/tools/testing/selftests/bpf/progs/test_sk_storage_tracing.c b/tools/testing/selftests/bpf/progs/test_sk_storage_tracing.c
+index 40531e56776e..7f47d4895670 100644
+--- a/tools/testing/selftests/bpf/progs/test_sk_storage_tracing.c
++++ b/tools/testing/selftests/bpf/progs/test_sk_storage_tracing.c
+@@ -28,6 +28,29 @@ struct {
+ } del_sk_stg_map SEC(".maps");
+ 
+ char task_comm[16] = "";
++struct bpf_sock_tuple xdp_tuple;
++__u32 xdp_storage_pid;
++
++SEC("xdp")
++int xdp_read_sk_storage(struct xdp_md *ctx)
++{
++	struct bpf_sock *sk;
++	struct sk_stg *stg;
++	int action = XDP_DROP;
++
++	sk = bpf_sk_lookup_tcp(ctx, &xdp_tuple, sizeof(xdp_tuple.ipv6),
++			       BPF_F_CURRENT_NETNS, 0);
++	if (!sk)
++		return XDP_ABORTED;
++
++	stg = bpf_sk_storage_get(&sk_stg_map, sk, 0, 0);
++	if (stg) {
++		xdp_storage_pid = stg->pid;
++		action = XDP_PASS;
++	}
++	bpf_sk_release(sk);
++	return action;
++}
+ 
+ SEC("tp_btf/inet_sock_set_state")
+ int BPF_PROG(trace_inet_sock_set_state, struct sock *sk, int oldstate,
+-- 
+2.43.0
+

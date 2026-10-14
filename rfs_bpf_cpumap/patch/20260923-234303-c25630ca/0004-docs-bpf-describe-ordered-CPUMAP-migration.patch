@@ -1,0 +1,189 @@
+From 7cbebe4694ff2abff42acec6eb5f7678d69beb57 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 23 Sep 2026 23:42:40 +0800
+Subject: [PATCH 4/4] docs/bpf: describe ordered CPUMAP migration
+
+Document the opt-in map setting, redirect and state kfuncs, source
+reservations, GRO completion boundary and retained entry generations.
+Explain the offline exception, rebuilding worker affinity after hotplug,
+and why a local PASS fallback can bypass outstanding packets.
+
+Require stable domains for active flows and control-plane ingress
+quiescence before detach, admission changes or domain reuse. Describe
+socket storage as policy input rather than transport completion state,
+and call out the added locking and possible GRO aggregation cost.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ Documentation/bpf/map_cpumap.rst | 154 +++++++++++++++++++++++++++++++
+ 1 file changed, 154 insertions(+)
+
+diff --git a/Documentation/bpf/map_cpumap.rst b/Documentation/bpf/map_cpumap.rst
+index 923cfc8ab51f..263959658923 100644
+--- a/Documentation/bpf/map_cpumap.rst
++++ b/Documentation/bpf/map_cpumap.rst
+@@ -94,6 +94,160 @@ CPU entries can be deleted using the ``bpf_map_delete_elem()``
+ helper. This helper will return 0 on success, or negative error in case of
+ failure.
+ 
++Ordered CPU migration
++=====================
++
++An optional ordered mode supports policies which change the CPU of an active
++flow. It is independent of ``CONFIG_RPS``. The BPF program chooses the candidate
++CPU and an ordering domain; CPUMAP delays a change until the previous target has
++finished the domain's earlier submissions. A domain is a preallocated slot, not
++a kernel flow table. Packet parsing, socket association and CPU selection remain
++in BPF.
++
++Set ``map_extra`` to the number of domains when creating the CPUMAP. Zero keeps
++the ordinary CPUMAP behavior. Domains have indices from zero to
++``map_extra - 1`` and exist for the lifetime of the map. CPU entries retain their
++usual keys and ``struct bpf_cpumap_val`` values. The memory used by domains is
++allocated at map creation; allocation failure fails map creation.
++
++An ordered map accepts submissions only through ``bpf_cpumap_redirect()``.
++Calling ``bpf_redirect_map()`` on it returns ``XDP_ABORTED``. This prevents
++ordinary submissions from bypassing the ordered accounting in the same map.
++It does not prevent a BPF program from passing a packet locally or using a
++different map.
++
++Kernel BPF interface
++--------------------
++
++The following kfuncs are available to XDP programs. As with other kfuncs, their
++interfaces are not a stable userspace ABI. Include ``vmlinux.h`` for the state
++type and declare the kfuncs with ``__ksym``::
++
++    extern int bpf_cpumap_redirect(void *map, __u32 cpu,
++                                  __u32 domain) __ksym;
++    extern int bpf_cpumap_get_state(void *map, __u32 domain,
++                                   void *state, __u32 size) __ksym;
++
++``map`` must be a constant map pointer known to the verifier.
++
++``bpf_cpumap_redirect()`` returns ``XDP_REDIRECT`` for an ordered CPUMAP with
++valid CPU and domain indices, or ``XDP_ABORTED`` for invalid arguments. It
++records a redirect request, like ``bpf_redirect_map()``. The program must
++return ``XDP_REDIRECT`` to submit the packet. Returning another action, or
++replacing the request with another redirect, leaves no reserved submission.
++A successful kfunc return does not guarantee queue admission.
++
++At actual submission, CPUMAP selects the candidate if the domain is idle.
++Otherwise it keeps the previous target. An absent or offline candidate also
++keeps a usable previous target. If no usable target exists, the redirect fails
++and the packet is dropped through the existing redirect error path. Queue
++exhaustion drops the packet without leaving an outstanding completion ticket.
++These failures do not create a local ``XDP_PASS`` fallback: such a packet could
++overtake traffic still running on the previous CPU.
++
++``bpf_cpumap_get_state()`` copies the following snapshot into an initialized
++buffer of exactly ``sizeof(struct bpf_cpumap_state)`` bytes::
++
++    struct bpf_cpumap_state {
++        __u64 last_tail;
++        __u64 completed;
++        __u32 cpu;
++        __u32 pending;
++    };
++
++It returns zero on success and ``-EINVAL`` for an unsuitable map, domain or
++buffer size. An unused domain has ``cpu == ~0U`` and zero counters. Otherwise:
++
++* ``cpu`` identifies the retained target entry, including a retired entry.
++* ``pending`` counts source reservations which have not yet been published
++  to the target ring or dropped. Native XDP source bulks can hold these.
++* ``last_tail`` identifies the domain's last successful ring insertion.
++* ``completed`` is that entry's completed prefix, shared by all its domains.
++
++The counters are unsigned, wrapping 64-bit sequence numbers. After stopping
++new producers, a domain has drained when ``pending == 0`` and
++``(__s64)(completed - last_tail) >= 0``. Like other sequence-counter
++comparisons, this assumes fewer than half the sequence space is outstanding.
++The snapshot is informational while producers run; observing an idle domain
++does not reserve it or authorize a concurrent teardown. Ticket values from
++different entries, maps or snapshots must not be combined.
++
++Ordering and lifetime
++---------------------
++
++The kernel reserves a submission before leaving the domain lock. Pending
++source bulks keep the target fixed. Successful ring insertions receive tickets
++under the ring's producer lock. Failed insertions return the reservation and
++do not allocate a ticket. The consumer preserves ring order for native frames
++and generic XDP skbs, including batches containing both.
++
++Completion is published after a full GRO flush and synchronous handoff of the
++normal receive list to the network stack, every 64 packets or when the ring
++becomes empty. It is not published merely because a frame was dequeued or
++because the remote XDP program returned ``XDP_PASS``. Remote drops and skb
++allocation failures also retire their tickets. The entry's remote XDP program
++may pass or drop packets; a second ``XDP_REDIRECT`` is dropped because its
++asynchronous completion cannot be tracked by this map.
++
++Replacing or deleting a CPU entry first removes it from the map, then drains
++its existing source bulks and ring through the usual RCU/kthread lifecycle.
++Domains retain references to its progress until they can switch. They do not
++submit new packets to a retired entry: a busy domain can temporarily drop
++packets during replacement. Recreating an entry at the same CPU index does
++not make it the same target generation.
++
++As in native RFS, an offline previous CPU is an exception to waiting for its
++completion watermark. Pending source submissions must still be accounted
++before switching. CPUMAP retains its existing kthread/hotplug behavior;
++this is not a guarantee of ordering or lossless delivery across CPU hotplug.
++The scheduler can relax an offlined worker's affinity. After bringing its CPU
++online again, the control plane must replace that CPU entry before relying on
++the original worker affinity. The normal entry replacement barrier applies.
++
++The guarantee concerns CPU migration of submissions to the same domain.
++It cannot reconstruct wire order when multiple RX queues or producers already
++present a flow out of order, and it does not serialize unrelated flows which
++GRO may deliver independently. Native RPS or another asynchronous stage after
++CPUMAP requires its own ordering analysis; disable native RPS on this receive
++path when using CPUMAP as its sole software CPU steering mechanism.
++
++Policy and control-plane responsibilities
++----------------------------------------
++
++All packets of an active flow must use the same map and domain, including
++packets before a socket is available. A BPF flow table can store domain IDs;
++collisions may conservatively delay migration of otherwise unrelated flows.
++Changing a flow's domain in flight defeats the migration barrier.
++
++XDP socket lookup and ``bpf_sk_storage_get()`` can read socket policy state
++recorded by socket or tracing BPF programs. The lookup reference must be
++released with ``bpf_sk_release()``. This storage can supply the candidate CPU,
++but it does not replace the pre-socket classification/domain needed for an
++active flow. Socket lookup misses, fragments, non-local packets and namespace
++or tunnel boundaries need explicit policy decisions. The infrastructure
++neither chooses a fallback CPU nor parses these packet formats.
++
++Before reassigning a domain to a different identity, replacing the entire map,
++switching an active flow to local PASS, or detaching the ingress program,
++quiesce the affected ingress and drain its domains. Prevent new submissions
++throughout the transition. Merely reading an idle snapshot while traffic
++continues, closing a socket or deleting a policy-map entry is insufficient.
++Live atomic transitions between these paths are not provided by this API.
++
++Cost
++----
++
++Ordered maps add domain locking, ring ticket accounting, retained progress
++references, and completion publication. Their source bulks also store domain
++pointers. No per-packet accounting object is allocated. Full GRO flushes at
++the completion boundary can reduce aggregation compared to ordinary CPUMAP's
++age-based flushes under sustained load. Benchmark throughput, latency and GRO
++aggregation on the intended NIC, packet mix and queue configuration.
++
++Ordinary maps do not allocate domains or progress state and keep their existing
++redirect and remote-program semantics. The shared paths contain additional
++mode checks; no zero-overhead claim is made for these checks.
++
+ Examples
+ ========
+ Kernel
+-- 
+2.43.0
+

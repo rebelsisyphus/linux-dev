@@ -1,0 +1,1 @@
+cmd_/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/fixdep-in.o :=  printf "/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/%s " fixdep.o | xargs ld -r -o /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/fixdep-in.o

@@ -1,0 +1,40 @@
+From 12186a33504ca94311269637f90836b8e9b3fec2 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 12 Oct 2026 13:17:11 +0800
+Subject: [PATCH 2/8] skbuff: preserve MAC header length in page-pool copies
+
+Generic XDP can replace an skb with a page-pool copy when a program has
+BPF_F_XDP_HAS_FRAGS. skb_copy_header() does not copy mac_len. A subsequent
+CPUMAP redirect therefore pulls zero bytes from the replacement skb,
+leaving its Ethernet header at the IP receive boundary. Loopback UDP
+reaches TC on the selected CPU, then is dropped with IP_INHDR; TCP, SCTP
+and MPTCP connection setup fails on the same path.
+
+Copy mac_len alongside the skb header. The non-frags generic path does
+not use this copy, and native CPUMAP construction remains unchanged.
+The composition selftests in this series cover real IPv4/IPv6 UDP with
+and without the frags program flag. The external policy also exercises
+TCP, SCTP and MPTCP through this path.
+
+Fixes: e6d5dbdd20aa ("xdp: add multi-buff support for xdp running in generic mode")
+Assisted-by: LLM
+---
+ net/core/skbuff.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index cc3b4b70288b..e2a61cea2602 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -966,6 +966,8 @@ int skb_pp_cow_data(struct page_pool *pool, struct sk_buff **pskb,
+ 
+ 	skb_reserve(nskb, headroom);
+ 	skb_copy_header(nskb, skb);
++	/* Generic XDP redirect uses this to remove the copied MAC header. */
++	nskb->mac_len = skb->mac_len;
+ 	skb_mark_for_recycle(nskb);
+ 
+ 	err = skb_copy_bits(skb, 0, nskb->data, size);
+-- 
+2.43.0
+

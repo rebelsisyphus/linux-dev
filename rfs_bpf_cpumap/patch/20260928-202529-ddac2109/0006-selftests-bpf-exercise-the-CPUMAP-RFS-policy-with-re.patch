@@ -1,0 +1,613 @@
+From ebe271bc2cb4967d0562b3bbfb061d1eca712f76 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 28 Sep 2026 20:25:26 +0800
+Subject: [PATCH 6/7] selftests/bpf: exercise the CPUMAP RFS policy with real
+ sockets
+
+Compile the sample BPF source into the test object and observe actual
+stack handoff from TC. Use TCP and connected UDP sockets over IPv4/IPv6
+to check receive/send CPU changes, accept/splice/zero-copy observers,
+MSG_ERRQUEUE exclusion, absent and outside-set hints, and socket
+recreation. Check both the receiving CPU and payload order.
+
+Inject native XDP UDP frames into live sockets to cover the native
+CPUMAP delivery path. Configure the private namespace to accept injected
+loopback traffic without a cached output route. Check lookup-miss
+redirect and the parser's unsupported/truncated packet boundary.
+
+Existing ordered CPUMAP tests cover the migration barrier, queue-full,
+concurrent producers, target replacement and CPU hotplug separately.
+Run on an x86-64 CONFIG_RPS=n kernel with KASAN and lockdep enabled.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ tools/testing/selftests/bpf/Makefile          |   4 +
+ .../selftests/bpf/prog_tests/xdp_rfs.c        | 510 ++++++++++++++++++
+ .../selftests/bpf/progs/test_xdp_rfs.c        |  42 ++
+ 3 files changed, 556 insertions(+)
+ create mode 100644 tools/testing/selftests/bpf/prog_tests/xdp_rfs.c
+ create mode 100644 tools/testing/selftests/bpf/progs/test_xdp_rfs.c
+
+diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
+index 93c707116fad..c1675aa133e6 100644
+--- a/tools/testing/selftests/bpf/Makefile
++++ b/tools/testing/selftests/bpf/Makefile
+@@ -479,6 +479,10 @@ CLANG_CFLAGS = $(CLANG_SYS_INCLUDES)
+ $(OUTPUT)/test_l4lb_noinline.o: BPF_CFLAGS += -fno-inline
+ $(OUTPUT)/test_xdp_noinline.o: BPF_CFLAGS += -fno-inline
+ 
++# Exercise the sample policy itself, including its socket observers.
++$(OUTPUT)/test_xdp_rfs.bpf.o: $(srctree)/samples/bpf/xdp_rfs.bpf.c \
++			    $(srctree)/samples/bpf/xdp_rfs.h
++
+ $(OUTPUT)/flow_dissector_load.o: flow_dissector_load.h
+ $(OUTPUT)/cgroup_getset_retval_hooks.o: cgroup_getset_retval_hooks.h
+ 
+diff --git a/tools/testing/selftests/bpf/prog_tests/xdp_rfs.c b/tools/testing/selftests/bpf/prog_tests/xdp_rfs.c
+new file mode 100644
+index 000000000000..0cd81c86f62a
+--- /dev/null
++++ b/tools/testing/selftests/bpf/prog_tests/xdp_rfs.c
+@@ -0,0 +1,510 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <sched.h>
++#include <net/if.h>
++#include <sys/stat.h>
++#include <linux/if_link.h>
++#include <test_progs.h>
++#include <network_helpers.h>
++#include "../../../../../samples/bpf/xdp_rfs.h"
++#include "test_xdp_rfs.skel.h"
++
++struct rfs_fixture {
++	struct test_xdp_rfs *skel;
++	struct nstoken *ns;
++	struct bpf_tc_hook tc;
++	cpu_set_t affinity;
++	char name[64];
++	int cpus[3], ifindex, listener, server, client;
++	bool attached, affinity_saved;
++};
++
++static int pin_cpu(int cpu)
++{
++	cpu_set_t set;
++
++	CPU_ZERO(&set);
++	CPU_SET(cpu, &set);
++	return sched_setaffinity(0, sizeof(set), &set);
++}
++
++static bool drain(struct rfs_fixture *f)
++{
++	char packet[14] = {};
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet,
++		    .data_size_in = sizeof(packet),
++	);
++	int i, err;
++
++	for (i = 0; i < 1000; i++) {
++		err = bpf_prog_test_run_opts(bpf_program__fd(f->skel->progs.rfs_drain), &opts);
++		if (err || f->skel->bss->query_error)
++			return false;
++		if (!f->skel->bss->busy_domains)
++			return true;
++		usleep(1000);
++	}
++	return false;
++}
++
++static bool hint_is(struct rfs_fixture *f, int cpu)
++{
++	struct rfs_hint hint;
++	int err;
++
++	err = bpf_map_lookup_elem(bpf_map__fd(f->skel->maps.socket_cpu), &f->server, &hint);
++	return ASSERT_OK(err, "read_socket_hint") &&
++	       ASSERT_EQ(hint.cpu_plus_one, cpu + 1, "socket_cpu");
++}
++
++static __u64 stat_sum(struct rfs_fixture *f, __u32 key)
++{
++	int possible = libbpf_num_possible_cpus(), cpu;
++	__u64 *values, total = 0;
++
++	values = calloc(possible, sizeof(*values));
++	if (!ASSERT_OK_PTR(values, "stat_alloc"))
++		return 0;
++	if (ASSERT_OK(bpf_map_lookup_elem(bpf_map__fd(f->skel->maps.stats), &key, values),
++		      "read_stats")) {
++		for (cpu = 0; cpu < possible; cpu++)
++			total += values[cpu];
++	}
++	free(values);
++	return total;
++}
++
++/* Wait for TC before recv(), so recv's new hint cannot decide this packet. */
++static bool transmit(struct rfs_fixture *f, int expected_cpu, char value)
++{
++	__u32 before = __atomic_load_n(&f->skel->bss->packets, __ATOMIC_RELAXED);
++	int i;
++
++	if (!ASSERT_OK(pin_cpu(f->cpus[0]), "pin_sender") ||
++	    !ASSERT_EQ(send(f->client, &value, 1, 0), 1, "send"))
++		return false;
++	for (i = 0; i < 5000; i++) {
++		if (__atomic_load_n(&f->skel->bss->packets, __ATOMIC_RELAXED) > before)
++			break;
++		usleep(1000);
++	}
++	if (!ASSERT_LT(i, 5000, "stack_handoff") || !ASSERT_TRUE(drain(f), "drain"))
++		return false;
++	if (expected_cpu >= 0)
++		return ASSERT_EQ(f->skel->bss->receive_cpu, expected_cpu, "receive_cpu");
++	return true;
++}
++
++static bool consume(struct rfs_fixture *f, int cpu, char expected)
++{
++	char value = 0;
++
++	return ASSERT_OK(pin_cpu(cpu), "pin_reader") &&
++	       ASSERT_EQ(recv(f->server, &value, 1, 0), 1, "recv") &&
++	       ASSERT_EQ(value, expected, "payload_order") && hint_is(f, cpu);
++}
++
++static void cleanup(struct rfs_fixture *f)
++{
++	if (f->client >= 0)
++		close(f->client);
++	if (f->server >= 0)
++		close(f->server);
++	if (f->listener >= 0)
++		close(f->listener);
++	if (f->attached) {
++		/* Closing TCP emits FINs; stop ingress before checking all domains. */
++		SYS_NOFAIL("ip link set lo down");
++		ASSERT_TRUE(drain(f), "cleanup_drain");
++		bpf_xdp_detach(f->ifindex, XDP_FLAGS_SKB_MODE, NULL);
++	}
++	if (f->tc.ifindex)
++		bpf_tc_hook_destroy(&f->tc);
++	test_xdp_rfs__destroy(f->skel);
++	close_netns(f->ns);
++	if (f->name[0])
++		SYS_NOFAIL("ip netns del %s", f->name);
++	if (f->affinity_saved)
++		sched_setaffinity(0, sizeof(f->affinity), &f->affinity);
++}
++
++static bool setup(struct rfs_fixture *f, int family, int type)
++{
++	struct bpf_cpumap_val entry = { .qsize = 2048 };
++	struct sockaddr_storage addr;
++	socklen_t len = sizeof(addr);
++	struct bpf_program *prog;
++	struct stat ns;
++	int cpu, n = 0, possible, i, err;
++	__u32 key, one = 1;
++
++	LIBBPF_OPTS(bpf_tc_opts, tc_opts, .handle = 1, .priority = 1);
++
++	memset(f, 0, sizeof(*f));
++	f->listener = -1;
++	f->server = -1;
++	f->client = -1;
++	if (!ASSERT_OK(sched_getaffinity(0, sizeof(f->affinity), &f->affinity), "affinity"))
++		return false;
++	f->affinity_saved = true;
++	for (cpu = 0; cpu < CPU_SETSIZE && n < 3; cpu++) {
++		if (CPU_ISSET(cpu, &f->affinity))
++			f->cpus[n++] = cpu;
++	}
++	if (n < 3) {
++		test__skip();
++		return false;
++	}
++	snprintf(f->name, sizeof(f->name), "xdp_rfs_%d", getpid());
++	SYS(fail, "ip netns add %s", f->name);
++	f->ns = open_netns(f->name);
++	if (!ASSERT_OK_PTR(f->ns, "netns") ||
++	    !ASSERT_OK(stat("/proc/self/ns/net", &ns), "netns_inode"))
++		goto fail;
++	SYS(fail, "ip link set lo up");
++	f->ifindex = if_nametoindex("lo");
++	f->skel = test_xdp_rfs__open();
++	if (!ASSERT_OK_PTR(f->skel, "open"))
++		goto fail;
++	possible = libbpf_num_possible_cpus();
++	if (!ASSERT_GT(possible, 0, "possible_cpus"))
++		goto fail;
++	bpf_map__set_max_entries(f->skel->maps.cpu_map, possible);
++	bpf_map__set_max_entries(f->skel->maps.allowed, possible);
++	f->skel->rodata->nr_cpus = 2;
++	f->skel->rodata->cpus[0] = f->cpus[1];
++	f->skel->rodata->cpus[1] = f->cpus[2];
++	f->skel->rodata->netns_ino = ns.st_ino;
++	f->skel->rodata->hash_seed = 0x12345678;
++	if (!ASSERT_OK(test_xdp_rfs__load(f->skel), "load"))
++		goto fail;
++	bpf_object__for_each_program(prog, f->skel->obj) {
++		if (bpf_program__type(prog) != BPF_PROG_TYPE_TRACING)
++			bpf_program__set_autoattach(prog, false);
++	}
++	if (!ASSERT_OK(test_xdp_rfs__attach(f->skel), "attach_observers"))
++		goto fail;
++	for (i = 1; i < 3; i++) {
++		key = f->cpus[i];
++		if (!ASSERT_OK(bpf_map_update_elem(bpf_map__fd(f->skel->maps.cpu_map),
++						   &key, &entry, BPF_ANY), "create_cpu") ||
++		    !ASSERT_OK(bpf_map_update_elem(bpf_map__fd(f->skel->maps.allowed),
++						   &key, &one, BPF_ANY), "allow_cpu"))
++			goto fail;
++	}
++	f->tc.sz = sizeof(f->tc);
++	f->tc.ifindex = f->ifindex;
++	f->tc.attach_point = BPF_TC_INGRESS;
++	if (!ASSERT_OK(bpf_tc_hook_create(&f->tc), "tc_create"))
++		goto fail;
++	tc_opts.prog_fd = bpf_program__fd(f->skel->progs.rfs_receive);
++	if (!ASSERT_OK(bpf_tc_attach(&f->tc, &tc_opts), "tc_attach"))
++		goto fail;
++	err = bpf_xdp_attach(f->ifindex, bpf_program__fd(f->skel->progs.rfs_redirect),
++			     XDP_FLAGS_SKB_MODE | XDP_FLAGS_UPDATE_IF_NOEXIST, NULL);
++	if (!ASSERT_OK(err, "xdp_attach"))
++		goto fail;
++	f->attached = true;
++	if (!ASSERT_OK(pin_cpu(f->cpus[0]), "pin_setup"))
++		goto fail;
++	f->listener = start_server(family, type, family == AF_INET ? "127.0.0.1" : "::1",
++				   0, 3000);
++	if (!ASSERT_OK_FD(f->listener, "listener"))
++		goto fail;
++	if (!ASSERT_OK(getsockname(f->listener, (void *)&addr, &len), "getsockname"))
++		goto fail;
++	f->skel->bss->server_port = family == AF_INET ?
++		((struct sockaddr_in *)&addr)->sin_port : ((struct sockaddr_in6 *)&addr)->sin6_port;
++	f->client = connect_to_fd(f->listener, 3000);
++	if (!ASSERT_OK_FD(f->client, "connect"))
++		goto fail;
++	if (type == SOCK_STREAM) {
++		if (!ASSERT_OK(pin_cpu(f->cpus[1]), "pin_accept"))
++			goto fail;
++		f->server = accept(f->listener, NULL, NULL);
++		if (!ASSERT_OK_FD(f->server, "accept") || !hint_is(f, f->cpus[1]))
++			goto fail;
++	} else {
++		f->server = f->listener;
++		f->listener = -1;
++		if (!ASSERT_OK(connect_fd_to_fd(f->server, f->client, 3000), "connect_udp"))
++			goto fail;
++	}
++	return ASSERT_TRUE(drain(f), "setup_drain");
++fail:
++	return false;
++}
++
++static void test_policy(int family, int type)
++{
++	struct rfs_fixture f;
++	struct rfs_hint hint;
++	struct sockaddr_storage addr;
++	socklen_t addrlen = sizeof(addr);
++	__u64 fallback, hits;
++	int err, fallback_cpu, pipefd[2] = { -1, -1 };
++	char value;
++
++	if (!setup(&f, family, type))
++		goto out;
++	/* Accept already supplies a hint; connected UDP starts without one. */
++	if (!transmit(&f, type == SOCK_STREAM ? f.cpus[1] : -1, 'a') ||
++	    !consume(&f, f.cpus[2], 'a'))
++		goto out;
++	hits = stat_sum(&f, RFS_HINT);
++	if (!transmit(&f, f.cpus[2], 'b') || !consume(&f, f.cpus[1], 'b') ||
++	    !ASSERT_GT(stat_sum(&f, RFS_HINT), hits, "used_socket_hint"))
++		goto out;
++	if (!transmit(&f, f.cpus[1], 'c') || !consume(&f, f.cpus[2], 'c'))
++		goto out;
++
++	/* Error-queue reads must not update the application CPU hint. */
++	if (!ASSERT_OK(pin_cpu(f.cpus[0]), "pin_error_reader"))
++		goto out;
++	recv(f.server, &value, 1, MSG_ERRQUEUE | MSG_DONTWAIT);
++	if (!hint_is(&f, f.cpus[2]))
++		goto out;
++
++	/* A CPU outside the configured set changes only the candidate CPU. */
++	recv(f.server, &value, 1, MSG_DONTWAIT);
++	if (!hint_is(&f, f.cpus[0]))
++		goto out;
++	fallback = stat_sum(&f, RFS_FALLBACK);
++	if (!transmit(&f, -1, 'd'))
++		goto out;
++	fallback_cpu = f.skel->bss->receive_cpu;
++	if (!ASSERT_TRUE(fallback_cpu == f.cpus[1] || fallback_cpu == f.cpus[2],
++			 "fallback_in_cpu_set") ||
++	    !ASSERT_GT(stat_sum(&f, RFS_FALLBACK), fallback, "outside_cpu_fallback") ||
++	    !consume(&f, f.cpus[2], 'd'))
++		goto out;
++
++	/* Missing storage does not pass locally or create storage from XDP. */
++	if (!ASSERT_OK(bpf_map_delete_elem(bpf_map__fd(f.skel->maps.socket_cpu), &f.server),
++		       "delete_hint") || !transmit(&f, fallback_cpu, 'e'))
++		goto out;
++	err = bpf_map_lookup_elem(bpf_map__fd(f.skel->maps.socket_cpu), &f.server, &hint);
++	if (!ASSERT_ERR(err, "xdp_did_not_create_hint") ||
++	    !consume(&f, f.cpus[1], 'e'))
++		goto out;
++
++	/* Send-side use independently updates the receiver's socket hint. */
++	if (!ASSERT_OK(pin_cpu(f.cpus[2]), "pin_server_send") ||
++	    !ASSERT_EQ(send(f.server, "f", 1, 0), 1, "server_send") ||
++	    !hint_is(&f, f.cpus[2]) ||
++	    !ASSERT_EQ(recv(f.client, &value, 1, 0), 1, "client_recv") ||
++	    !ASSERT_TRUE(drain(&f), "reply_drain") ||
++	    !transmit(&f, f.cpus[2], 'g'))
++		goto out;
++	if (type == SOCK_STREAM) {
++		if (!ASSERT_OK(pipe(pipefd), "pipe") ||
++		    !ASSERT_OK(pin_cpu(f.cpus[1]), "pin_splice") ||
++		    !ASSERT_EQ(splice(f.server, NULL, pipefd[1], NULL, 1, 0), 1, "splice") ||
++		    !hint_is(&f, f.cpus[1]) ||
++		    !ASSERT_EQ(read(pipefd[0], &value, 1), 1, "pipe_read") ||
++		    !ASSERT_EQ(value, 'g', "splice_payload") ||
++		    !transmit(&f, f.cpus[1], 'h') || !consume(&f, f.cpus[2], 'h'))
++			goto out;
++		{
++			struct tcp_zerocopy_receive zc = {};
++			socklen_t len = sizeof(zc);
++
++			if (!ASSERT_OK(pin_cpu(f.cpus[1]), "pin_zerocopy") ||
++			    !ASSERT_OK(getsockopt(f.server, SOL_TCP, TCP_ZEROCOPY_RECEIVE,
++					  &zc, &len), "zerocopy_receive") ||
++			    !hint_is(&f, f.cpus[1]))
++				goto out;
++		}
++	} else if (!consume(&f, f.cpus[1], 'g')) {
++		goto out;
++	}
++	if (type == SOCK_DGRAM) {
++		/* Reuse the tuple after close: a new socket must not inherit a hint. */
++		if (!ASSERT_OK(getsockname(f.server, (void *)&addr, &addrlen), "saved_addr"))
++			goto out;
++		close(f.server);
++		f.server = start_server_addr(SOCK_DGRAM, &addr, addrlen, NULL);
++		if (!ASSERT_OK_FD(f.server, "replacement_socket") ||
++		    !ASSERT_OK(connect_fd_to_fd(f.server, f.client, 3000), "replacement_connect") ||
++		    !ASSERT_ERR(bpf_map_lookup_elem(bpf_map__fd(f.skel->maps.socket_cpu),
++						  &f.server, &hint), "no_stale_hint") ||
++		    !transmit(&f, fallback_cpu, 'z') || !consume(&f, f.cpus[2], 'z'))
++			goto out;
++	}
++out:
++	if (pipefd[0] >= 0)
++		close(pipefd[0]);
++	if (pipefd[1] >= 0)
++		close(pipefd[1]);
++	cleanup(&f);
++}
++
++static void test_native_udp(int family)
++{
++	struct {
++		__u16 pad;
++		struct ethhdr eth;
++		struct iphdr ip;
++		struct udphdr udp;
++		char value;
++		char tail;
++	} v4 = {};
++	struct {
++		__u16 pad;
++		struct ethhdr eth;
++		struct ipv6hdr ip;
++		struct udphdr udp;
++		char value;
++		char tail;
++	} v6 = {};
++	size_t size4 = offsetof(typeof(v4), tail) + 1 - offsetof(typeof(v4), eth);
++	size_t size6 = offsetof(typeof(v6), tail) + 1 - offsetof(typeof(v6), eth);
++	struct rfs_fixture f;
++	struct xdp_md ctx = {};
++	__u32 before;
++	int i, n, cpu, err;
++	char value;
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .ctx_in = &ctx,
++		    .ctx_size_in = sizeof(ctx),
++		    .flags = BPF_F_TEST_XDP_LIVE_FRAMES,
++		    .repeat = 1,
++	);
++
++	if (!setup(&f, family, SOCK_DGRAM))
++		goto out;
++	/* Injected loopback frames have no output route attached to the skb. */
++	if (family == AF_INET) {
++		if (!ASSERT_OK(write_sysctl("/proc/sys/net/ipv4/conf/lo/accept_local", "1"),
++			       "accept_injected_local_source") ||
++		    !ASSERT_OK(write_sysctl("/proc/sys/net/ipv4/conf/lo/route_localnet", "1"),
++			       "route_injected_loopback"))
++			goto out;
++	}
++	/* Stop generic ingress before injecting native frames into this device. */
++	if (!ASSERT_OK(bpf_xdp_detach(f.ifindex, XDP_FLAGS_SKB_MODE, NULL), "detach_generic"))
++		goto out;
++	f.attached = false;
++	ctx.ingress_ifindex = f.ifindex;
++	v4.eth.h_proto = htons(ETH_P_IP);
++	v4.ip.version = 4;
++	v4.ip.ihl = 5;
++	v4.ip.ttl = 64;
++	v4.ip.protocol = IPPROTO_UDP;
++	v4.ip.tot_len = htons(size4 - sizeof(v4.eth));
++	v4.ip.saddr = htonl(INADDR_LOOPBACK);
++	v4.ip.daddr = htonl(INADDR_LOOPBACK);
++	v4.ip.check = build_ip_csum(&v4.ip);
++	v4.udp.source = get_socket_local_port(f.client);
++	v4.udp.dest = f.skel->bss->server_port;
++	v4.udp.len = htons(sizeof(v4.udp) + 2);
++	v6.eth.h_proto = htons(ETH_P_IPV6);
++	v6.ip.version = 6;
++	v6.ip.nexthdr = IPPROTO_UDP;
++	v6.ip.hop_limit = 64;
++	v6.ip.payload_len = htons(sizeof(v6.udp) + 2);
++	v6.ip.saddr = in6addr_loopback;
++	v6.ip.daddr = in6addr_loopback;
++	v6.udp = v4.udp;
++	opts.data_in = family == AF_INET ? (void *)&v4.eth : (void *)&v6.eth;
++	opts.data_size_in = family == AF_INET ? size4 : size6;
++	ctx.data_end = opts.data_size_in;
++	for (n = 0; n < 4; n++) {
++		cpu = f.cpus[1 + (n & 1)];
++		if (!ASSERT_OK(pin_cpu(cpu), "pin_native_reader"))
++			goto out;
++		recv(f.server, &value, 1, MSG_DONTWAIT);
++		if (!hint_is(&f, cpu) || !ASSERT_OK(pin_cpu(f.cpus[0]), "pin_injector"))
++			goto out;
++		v4.value = 'a' + n;
++		v6.value = 'a' + n;
++		v6.udp.check = 0;
++		v6.udp.check = build_udp_v6_csum(&v6.ip, &v6.udp);
++		before = __atomic_load_n(&f.skel->bss->packets, __ATOMIC_RELAXED);
++		err = bpf_prog_test_run_opts(bpf_program__fd(f.skel->progs.rfs_redirect), &opts);
++		if (!ASSERT_OK(err, "native_inject"))
++			goto out;
++		for (i = 0; i < 5000; i++) {
++			if (__atomic_load_n(&f.skel->bss->packets, __ATOMIC_RELAXED) > before)
++				break;
++			usleep(1000);
++		}
++		if (!ASSERT_LT(i, 5000, "native_stack_handoff") ||
++		    !ASSERT_TRUE(drain(&f), "native_drain") ||
++		    !ASSERT_EQ(f.skel->bss->receive_cpu, cpu, "native_receive_cpu") ||
++		    !consume(&f, cpu, 'a' + n))
++			goto out;
++	}
++out:
++	cleanup(&f);
++}
++
++static void test_classification(void)
++{
++	struct ipv4_packet packet = pkt_v4;
++	struct rfs_fixture f;
++	__u64 before;
++	int fd;
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = &packet,
++		    .data_size_in = sizeof(packet),
++	);
++
++	if (!setup(&f, AF_INET, SOCK_DGRAM))
++		goto out;
++	fd = bpf_program__fd(f.skel->progs.rfs_redirect);
++	/* This TCP tuple has no socket. It must still request ordered redirect. */
++	packet.iph.version = 4;
++	packet.iph.tot_len = htons(sizeof(packet) - sizeof(packet.eth));
++	before = stat_sum(&f, RFS_FALLBACK);
++	if (!ASSERT_OK(bpf_prog_test_run_opts(fd, &opts), "lookup_miss") ||
++	    !ASSERT_EQ(opts.retval, XDP_REDIRECT, "miss_stays_ordered") ||
++	    !ASSERT_GT(stat_sum(&f, RFS_FALLBACK), before, "lookup_miss_fallback"))
++		goto out;
++	opts.data_size_in = sizeof(packet.eth);
++	if (!ASSERT_OK(bpf_prog_test_run_opts(fd, &opts), "truncated_ip") ||
++	    !ASSERT_EQ(opts.retval, XDP_DROP, "truncated_drop"))
++		goto out;
++	opts.data_size_in = sizeof(packet);
++	opts.data_size_out = 0;
++	packet.iph.frag_off = htons(0x2000);
++	if (!ASSERT_OK(bpf_prog_test_run_opts(fd, &opts), "fragment") ||
++	    !ASSERT_EQ(opts.retval, XDP_PASS, "fragment_outside_scope"))
++		goto out;
++	packet.iph.frag_off = 0;
++	opts.data_size_out = 0;
++	packet.eth.h_proto = htons(ETH_P_ARP);
++	if (!ASSERT_OK(bpf_prog_test_run_opts(fd, &opts), "arp") ||
++	    !ASSERT_EQ(opts.retval, XDP_PASS, "arp_pass"))
++		goto out;
++	packet.eth.h_proto = htons(ETH_P_IP);
++	opts.data_size_out = 0;
++	packet.eth.h_dest[0] = 1;
++	if (!ASSERT_OK(bpf_prog_test_run_opts(fd, &opts), "multicast") ||
++	    !ASSERT_EQ(opts.retval, XDP_PASS, "multicast_pass"))
++		goto out;
++out:
++	cleanup(&f);
++}
++
++void test_xdp_rfs(void)
++{
++	if (test__start_subtest("tcp_ipv4"))
++		test_policy(AF_INET, SOCK_STREAM);
++	if (test__start_subtest("tcp_ipv6"))
++		test_policy(AF_INET6, SOCK_STREAM);
++	if (test__start_subtest("udp_ipv4"))
++		test_policy(AF_INET, SOCK_DGRAM);
++	if (test__start_subtest("udp_ipv6"))
++		test_policy(AF_INET6, SOCK_DGRAM);
++	if (test__start_subtest("native_udp_ipv4"))
++		test_native_udp(AF_INET);
++	if (test__start_subtest("native_udp_ipv6"))
++		test_native_udp(AF_INET6);
++	if (test__start_subtest("classification"))
++		test_classification();
++}
+diff --git a/tools/testing/selftests/bpf/progs/test_xdp_rfs.c b/tools/testing/selftests/bpf/progs/test_xdp_rfs.c
+new file mode 100644
+index 000000000000..13d1129826d6
+--- /dev/null
++++ b/tools/testing/selftests/bpf/progs/test_xdp_rfs.c
+@@ -0,0 +1,42 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "../../../../../samples/bpf/xdp_rfs.bpf.c"
++
++__u16 server_port;
++__u32 packets, receive_cpu;
++
++/* Observe the real stack handoff, after CPUMAP has constructed an skb. */
++SEC("tc")
++int rfs_receive(struct __sk_buff *skb)
++{
++	void *data = (void *)(long)skb->data;
++	void *end = (void *)(long)skb->data_end;
++	struct ethhdr *eth = data;
++	__be16 *ports;
++	__u8 protocol;
++
++	if ((void *)(eth + 1) > end)
++		return 0;
++	if (eth->h_proto == bpf_htons(0x0800)) {
++		struct iphdr *ip = (void *)(eth + 1);
++
++		if ((void *)(ip + 1) > end || ip->ihl < 5)
++			return 0;
++		ports = (void *)ip + ip->ihl * 4;
++		protocol = ip->protocol;
++	} else if (eth->h_proto == bpf_htons(0x86dd)) {
++		struct ipv6hdr *ip = (void *)(eth + 1);
++
++		if ((void *)(ip + 1) > end)
++			return 0;
++		ports = (void *)(ip + 1);
++		protocol = ip->nexthdr;
++	} else {
++		return 0;
++	}
++	if ((protocol != IPPROTO_TCP && protocol != IPPROTO_UDP) ||
++	    (void *)(ports + 2) > end || ports[1] != server_port)
++		return 0;
++	receive_cpu = bpf_get_smp_processor_id();
++	__sync_fetch_and_add(&packets, 1);
++	return 0;
++}
+-- 
+2.43.0
+

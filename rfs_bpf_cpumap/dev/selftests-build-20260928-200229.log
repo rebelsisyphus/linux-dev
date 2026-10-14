@@ -1,0 +1,13 @@
+['make', '-C', '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf', '-f', '/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/Makefile', 'OUTPUT=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests/', 'VMLINUX_BTF=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/kernel-btf-image', 'LSKELS=', 'LSKELS_EXTRA=', 'LSKELS_SIGNED=', 'LINKED_SKELS=', 'LIBARENA_SKEL=', 'LIBARENA_ASAN_SKEL=', 'TRUNNER_EXTRA_FILES=ima_setup.sh', 'SKIP_DOCS=1', 'SKIP_LLVM=1', 'SKIP_LIBBFD=1', 'BPF_STRICT_BUILD=1', 'progs/test_xdp_rfs.c-CFLAGS=-I/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/progs', 'LLVM_STRIP=llvm-strip-18', 'LLVM_OBJCOPY=llvm-objcopy-18', '-j8', 'test_progs']
+make: Entering directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'
+
+Auto-detecting system features:
+...                                    llvm: [ [31mOFF[m ]
+
+  CLNG-BPF [test_progs] test_xdp_rfs.bpf.o
+../../../../../../kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/progs/test_xdp_rfs.c:2:10: fatal error: '../../../../../samples/bpf/xdp_rfs.bpf.c' file not found
+    2 | #include "../../../../../samples/bpf/xdp_rfs.bpf.c"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1 error generated.
+make: *** [/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/Makefile:892: /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests//test_xdp_rfs.bpf.o] Error 1
+make: Leaving directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'

@@ -1,0 +1,301 @@
+['make', '-C', '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf', '-f', '/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/Makefile', 'OUTPUT=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/', 'VMLINUX_BTF=/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/kernel-btf-image', 'LSKELS=', 'LSKELS_EXTRA=', 'LSKELS_SIGNED=', 'LINKED_SKELS=', 'LIBARENA_SKEL=', 'LIBARENA_ASAN_SKEL=', 'TRUNNER_EXTRA_FILES=ima_setup.sh', 'SKIP_DOCS=1', 'SKIP_LLVM=1', 'SKIP_LIBBFD=1', 'BPF_STRICT_BUILD=1', '../../../../../../kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/progs/test_xdp_rfs.c-CFLAGS=-I/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/progs', 'LLVM_STRIP=llvm-strip-18', 'LLVM_OBJCOPY=llvm-objcopy-18', '-j8', 'test_progs']
+make: Entering directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'
+
+Auto-detecting system features:
+...                                    llvm: [ [31mOFF[m ]
+
+  MKDIR    libbpf
+  MKDIR    bpftool
+  MKDIR    include
+  TEST-HDR [test_progs] tests.h
+  LIB-OBJ  [test_progs] find_bit.o
+  EXT-COPY [test_progs] ima_setup.sh
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/libbpf/bpf_helper_defs.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/btf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_common.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_legacy.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf_helpers.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf_tracing.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf_endian.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf_core_read.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/skel_internal.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_version.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/usdt.bpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf_helper_defs.h
+  INSTALL libbpf_headers
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/libbpf.pc
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/libbpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/libbpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/bpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/bpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/nlattr.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/nlattr.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/btf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/btf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/libbpf_utils.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/libbpf_utils.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/netlink.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/netlink.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/bpf_prog_linfo.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/bpf_prog_linfo.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/libbpf_probes.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/libbpf_probes.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/hashmap.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/hashmap.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/btf_dump.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/btf_dump.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/ringbuf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/ringbuf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/strset.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/strset.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/linker.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/linker.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/gen_loader.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/gen_loader.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/relo_core.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/usdt.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/zip.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/elf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/relo_core.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/features.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/btf_iter.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/btf_relocate.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/usdt.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/zip.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/elf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/features.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/btf_iter.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/btf_relocate.o
+  LD      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/sharedobjs/libbpf-in.o
+  LD      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/staticobjs/libbpf-in.o
+  LINK    /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/libbpf.a
+  LINK    /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs/tools/build/libbpf/libbpf.so.1.8.0
+  EXT-OBJ  [test_progs] test_progs.o
+  EXT-OBJ  [test_progs] cgroup_helpers.o
+  EXT-OBJ  [test_progs] trace_helpers.o
+  EXT-OBJ  [test_progs] network_helpers.o
+  EXT-OBJ  [test_progs] testing_helpers.o
+  EXT-OBJ  [test_progs] btf_helpers.o
+  EXT-OBJ  [test_progs] cap_helpers.o
+  EXT-OBJ  [test_progs] unpriv_helpers.o
+  EXT-OBJ  [test_progs] sysctl_helpers.o
+  EXT-OBJ  [test_progs] netlink_helpers.o
+  EXT-OBJ  [test_progs] jit_disasm_helpers.o
+  EXT-OBJ  [test_progs] io_helpers.o
+  EXT-OBJ  [test_progs] test_loader.o
+  EXT-OBJ  [test_progs] xsk.o
+  EXT-OBJ  [test_progs] disasm.o
+  EXT-OBJ  [test_progs] disasm_helpers.o
+  EXT-OBJ  [test_progs] json_writer.o
+  EXT-OBJ  [test_progs] bpftool_helpers.o
+  EXT-OBJ  [test_progs] usdt_1.o
+  EXT-OBJ  [test_progs] usdt_2.o
+  CC       veristat.o
+  BINARY   veristat
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/hashmap.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/nlattr.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/relo_core.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_internal.h
+  MKDIR   /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf
+  MKDIR   /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/
+  MKDIR   /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/btf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/btf_dumper.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/cfg.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/cgroup.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/common.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/feature.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/gen.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/iter.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/json_writer.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/link.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/main.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/map.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/map_perf_ring.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/net.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/netlink_dumper.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/perf.o
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/hashmap.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/relo_core.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/libbpf_internal.h
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/sign.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/struct_ops.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/token.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/tracelog.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/xlated_dumper.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/disasm.o
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/bpf_helper_defs.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/libbpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/btf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/libbpf_common.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/libbpf_legacy.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf_helpers.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf_tracing.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf_endian.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf_core_read.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/skel_internal.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/usdt.bpf.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/libbpf_version.h
+  INSTALL /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/include/bpf/bpf_helper_defs.h
+  INSTALL libbpf_headers
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/libbpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/bpf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/nlattr.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/btf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/libbpf_utils.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/netlink.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/bpf_prog_linfo.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/libbpf_probes.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/hashmap.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/btf_dump.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/ringbuf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/strset.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/linker.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/gen_loader.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/relo_core.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/usdt.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/zip.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/elf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/features.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/btf_iter.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/btf_relocate.o
+  LD      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/staticobjs/libbpf-in.o
+  LINK    /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/libbpf/libbpf.a
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/main.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/common.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/json_writer.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/gen.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/btf.o
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/sign.o
+  LINK    /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bootstrap/bpftool
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/vmlinux.h
+  CLANG   /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/pid_iter.bpf.o
+  CLANG   /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/profiler.bpf.o
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/profiler.skel.h
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/prog.o
+  GEN     /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/pid_iter.skel.h
+  CC      /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/pids.o
+  LINK    /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/bpftool
+  INSTALL bpftool
+  GEN      vmlinux.h
+  CLNG-BPF [test_progs] test_sk_storage_trace_itself.bpf.o
+  CLNG-BPF [test_progs] test_sk_storage_tracing.bpf.o
+  CLNG-BPF [test_progs] test_xdp_cpumap_ordered.bpf.o
+  CLNG-BPF [test_progs] test_xdp_rfs.bpf.o
+  CLNG-BPF [test_progs] test_xdp_with_cpumap_frags_helpers.bpf.o
+  CLNG-BPF [test_progs] test_xdp_with_cpumap_helpers.bpf.o
+  GEN-SKEL     [test_progs] test_xdp_with_cpumap_frags_helpers.skel.h
+  GEN-SKEL     [test_progs] test_xdp_with_cpumap_helpers.skel.h
+  GEN-SKEL     [test_progs] test_xdp_cpumap_ordered.skel.h
+  GEN-SKEL     [test_progs] test_sk_storage_trace_itself.skel.h
+  GEN-SKEL     [test_progs] test_sk_storage_tracing.skel.h
+  GEN-SKEL     [test_progs] test_xdp_rfs.skel.h
+  TEST-OBJ [test_progs] sk_storage_tracing.test.o
+  TEST-OBJ [test_progs] xdp_cpumap_attach.test.o
+  TEST-OBJ [test_progs] xdp_cpumap_ordered.test.o
+  TEST-OBJ [test_progs] xdp_rfs.test.o
+In file included from /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/network_helpers.h:17,
+                 from /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/../../../../../../kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/prog_tests/xdp_rfs.c:9:
+/usr/include/netinet/tcp.h:98:8: error: redefinition of ‘struct tcphdr’
+   98 | struct tcphdr
+      |        ^~~~~~
+In file included from /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf/../../../../../../kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/prog_tests/xdp_rfs.c:7:
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:25:8: note: originally defined here
+   25 | struct tcphdr {
+      |        ^~~~~~
+/usr/include/netinet/tcp.h:217:6: error: redeclaration of ‘enum tcp_ca_state’
+  217 | enum tcp_ca_state
+      |      ^~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:179:6: note: originally defined here
+  179 | enum tcp_ca_state {
+      |      ^~~~~~~~~~~~
+/usr/include/netinet/tcp.h:219:3: error: redeclaration of enumerator ‘TCP_CA_Open’
+  219 |   TCP_CA_Open = 0,
+      |   ^~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:184:9: note: previous definition of ‘TCP_CA_Open’ with type ‘enum tcp_ca_state’
+  184 |         TCP_CA_Open = 0,
+      |         ^~~~~~~~~~~
+/usr/include/netinet/tcp.h:220:3: error: redeclaration of enumerator ‘TCP_CA_Disorder’
+  220 |   TCP_CA_Disorder = 1,
+      |   ^~~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:192:9: note: previous definition of ‘TCP_CA_Disorder’ with type ‘enum tcp_ca_state’
+  192 |         TCP_CA_Disorder = 1,
+      |         ^~~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:221:3: error: redeclaration of enumerator ‘TCP_CA_CWR’
+  221 |   TCP_CA_CWR = 2,
+      |   ^~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:199:9: note: previous definition of ‘TCP_CA_CWR’ with type ‘enum tcp_ca_state’
+  199 |         TCP_CA_CWR = 2,
+      |         ^~~~~~~~~~
+/usr/include/netinet/tcp.h:222:3: error: redeclaration of enumerator ‘TCP_CA_Recovery’
+  222 |   TCP_CA_Recovery = 3,
+      |   ^~~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:205:9: note: previous definition of ‘TCP_CA_Recovery’ with type ‘enum tcp_ca_state’
+  205 |         TCP_CA_Recovery = 3,
+      |         ^~~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:223:3: error: redeclaration of enumerator ‘TCP_CA_Loss’
+  223 |   TCP_CA_Loss = 4
+      |   ^~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:210:9: note: previous definition of ‘TCP_CA_Loss’ with type ‘enum tcp_ca_state’
+  210 |         TCP_CA_Loss = 4
+      |         ^~~~~~~~~~~
+/usr/include/netinet/tcp.h:226:8: error: redefinition of ‘struct tcp_info’
+  226 | struct tcp_info
+      |        ^~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:214:8: note: originally defined here
+  214 | struct tcp_info {
+      |        ^~~~~~~~
+/usr/include/netinet/tcp.h:277:8: error: redefinition of ‘struct tcp_md5sig’
+  277 | struct tcp_md5sig
+      |        ^~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:326:8: note: originally defined here
+  326 | struct tcp_md5sig {
+      |        ^~~~~~~~~~
+/usr/include/netinet/tcp.h:288:8: error: redefinition of ‘struct tcp_repair_opt’
+  288 | struct tcp_repair_opt
+      |        ^~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:137:8: note: originally defined here
+  137 | struct tcp_repair_opt {
+      |        ^~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:297:3: error: redeclaration of enumerator ‘TCP_NO_QUEUE’
+  297 |   TCP_NO_QUEUE,
+      |   ^~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:152:9: note: previous definition of ‘TCP_NO_QUEUE’ with type ‘enum <anonymous>’
+  152 |         TCP_NO_QUEUE,
+      |         ^~~~~~~~~~~~
+/usr/include/netinet/tcp.h:298:3: error: redeclaration of enumerator ‘TCP_RECV_QUEUE’
+  298 |   TCP_RECV_QUEUE,
+      |   ^~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:153:9: note: previous definition of ‘TCP_RECV_QUEUE’ with type ‘enum <anonymous>’
+  153 |         TCP_RECV_QUEUE,
+      |         ^~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:299:3: error: redeclaration of enumerator ‘TCP_SEND_QUEUE’
+  299 |   TCP_SEND_QUEUE,
+      |   ^~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:154:9: note: previous definition of ‘TCP_SEND_QUEUE’ with type ‘enum <anonymous>’
+  154 |         TCP_SEND_QUEUE,
+      |         ^~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:300:3: error: redeclaration of enumerator ‘TCP_QUEUES_NR’
+  300 |   TCP_QUEUES_NR,
+      |   ^~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:155:9: note: previous definition of ‘TCP_QUEUES_NR’ with type ‘enum <anonymous>’
+  155 |         TCP_QUEUES_NR,
+      |         ^~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:331:8: error: redefinition of ‘struct tcp_repair_window’
+  331 | struct tcp_repair_window
+      |        ^~~~~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:142:8: note: originally defined here
+  142 | struct tcp_repair_window {
+      |        ^~~~~~~~~~~~~~~~~
+/usr/include/netinet/tcp.h:341:8: error: redefinition of ‘struct tcp_zerocopy_receive’
+  341 | struct tcp_zerocopy_receive
+      |        ^~~~~~~~~~~~~~~~~~~~
+/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/tcp.h:347:8: note: originally defined here
+  347 | struct tcp_zerocopy_receive {
+      |        ^~~~~~~~~~~~~~~~~~~~
+make: *** [/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftest-subset/Makefile:893: /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//xdp_rfs.test.o] Error 1
+make: *** Waiting for unfinished jobs....
+make: Leaving directory '/home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/testing/selftests/bpf'

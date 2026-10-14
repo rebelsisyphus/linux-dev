@@ -1,0 +1,39 @@
+Local draft only: no message has been sent.
+Patch recipients: netdev@vger.kernel.org, bpf@vger.kernel.org;
+David S. Miller <davem@davemloft.net>, Eric Dumazet <edumazet@google.com>,
+Jakub Kicinski <kuba@kernel.org>, Paolo Abeni <pabeni@redhat.com>,
+Jesper Dangaard Brouer <hawk@kernel.org>.
+Confirm current maintainers and mail-client formatting before posting;
+remove this temporary recipient/instruction block from the message body.
+The complete local get_maintainer output is v2-maintainers-final.txt.
+
+Subject: generic XDP page-pool copy loses mac_len before CPUMAP redirect
+
+The reproduced source is based on
+9b87fdc9af2fbfcdb5c24a64139685ef80f6573f with the local CPUMAP RFC.
+The relevant copy path was introduced by e6d5dbdd20aa6a86974af51deb9414cd2e7794cb
+("xdp: add multi-buff support for xdp running in generic mode").
+This report does not assert an untested release range or latest-tree status.
+
+Attach a BPF_F_XDP_HAS_FRAGS generic XDP program that redirects local UDP
+IPv4/IPv6 packets through CPUMAP. skb_pp_cow_data creates a page-pool copy
+and invokes skb_copy_header, which does not copy mac_len. The later generic
+redirect pulls the replacement skb's zero mac_len, leaving the Ethernet
+header at the IP receive boundary. Tracing records IP_INHDR drops despite
+TC observing the handoff on the target CPU. The non-frags control delivers.
+
+Preserve skb->mac_len in skb_pp_cow_data after skb_copy_header. This has no
+new allocation or reference transition. The local core composition tests
+xdp_rfs/generic_frags_udp_ipv4 and generic_frags_udp_ipv6 deliver payloads
+after the fix. TCP/SCTP/MPTCP external policy tests exercise the same copy.
+Tests require the patched kernel, BPF privileges and network namespaces;
+the reproducer sources and full validation paths accompany the RFC archive.
+
+Observed before-fix trace: dev/generic-drop-trace-20261012.log.
+After-fix core run: test/runs/20261012-130802-3831f6f1/results/test_result.txt.
+The later external GRO fixture failure in that run is separately diagnosed
+in dev/v2-validation.md and does not invalidate the generic copy checks.
+
+This is a functional packet-delivery failure. No new trust-boundary crossing
+or kernel memory corruption was demonstrated. Human review of the fix,
+affected versions and DCO remains necessary before upstream submission.

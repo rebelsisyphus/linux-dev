@@ -1,0 +1,66 @@
+{
+  "base": "9b87fdc9af2fbfcdb5c24a64139685ef80f6573f",
+  "head": "354807ea5cc9dadf76ffc78eea5b00c3e41a0abc",
+  "tree": "a650f56ad24ef650990eeaa3fb64161aa403a982",
+  "matches_each_commit": true,
+  "matches_captured_worktree": true,
+  "ordered_mechanism_diff_unchanged_from_v1": true,
+  "steps": [
+    {
+      "patch": "0001-bpf-allow-XDP-programs-to-access-socket-storage.patch",
+      "sha256": "26f3a2fd1e7a305361695f7266964edd760e376af28b391496aec1eb556b0544",
+      "commit": "998b3d82d1e13b06e3fb26b075fbffca8b8c172b",
+      "tree": "d0619c25d670cfca4c33586ef2c79b1ec92d8c3c",
+      "matches_commit": true
+    },
+    {
+      "patch": "0002-skbuff-preserve-MAC-header-length-in-page-pool-copie.patch",
+      "sha256": "30ec8befc43a9c6952bd610dee713338866f377faf7e6eefa332c1febb9d71d7",
+      "commit": "12186a33504ca94311269637f90836b8e9b3fec2",
+      "tree": "99851f8f6575f04aed568fafa5ee32144386f368",
+      "matches_commit": true
+    },
+    {
+      "patch": "0003-bpf-add-optional-ordered-domains-to-CPUMAP.patch",
+      "sha256": "8c42ee0e27fd3ca11139dd25144aabc83302f7829ddc8667484cdeec6686faca",
+      "commit": "1b42ec4d73173fb517d6e99c7bc16bec65ae882a",
+      "tree": "7315e31b6a0849f668ebce1b3af15e1987644244",
+      "matches_commit": true
+    },
+    {
+      "patch": "0004-selftests-bpf-exercise-ordered-CPUMAP-migration-and-.patch",
+      "sha256": "83a31b84b75f05ddd8e4c3bd5beb4f2e4fa0a58e8d0527142b0d5d7f5a509e78",
+      "commit": "82e484d7eaa37ad8dc8cf2f6c975810fad338200",
+      "tree": "dbc9b03a9ba5df24da826197b057fc51178c1635",
+      "matches_commit": true
+    },
+    {
+      "patch": "0005-selftests-bpf-combine-XDP-socket-storage-and-ordered.patch",
+      "sha256": "ddf35eb6732eb77f65aae2ec09ae258c891a623b56ea6b6c4dd2f8595408b246",
+      "commit": "57f58babab6eb862c42459287d3b61a558855b4b",
+      "tree": "aed4091f379413e5ab9f8ce17dc50d3f1348f2f3",
+      "matches_commit": true
+    },
+    {
+      "patch": "0006-docs-bpf-describe-ordered-CPUMAP-migration.patch",
+      "sha256": "afb0cef5ae7b72b5e19088404687b2cd012952b91062375e2a56a30c470a7bed",
+      "commit": "71a2be383ef45f46c6eda513655891fbdc160750",
+      "tree": "c4977b44b0e0f985fd552c0bc5b869ad6f59867b",
+      "matches_commit": true
+    },
+    {
+      "patch": "0007-sctp-expose-referenced-association-socket-lookup-to-.patch",
+      "sha256": "21f30af78b46689b3d7e40a6bde64b653518fb3685a29ed85b5f44be3fce6f58",
+      "commit": "b3a5dbeebb7eb5dfc6796481367d5a6584624ede",
+      "tree": "f1dcf81fda46aaa7e28b14a3b96b891f7f85536f",
+      "matches_commit": true
+    },
+    {
+      "patch": "0008-selftests-bpf-check-SCTP-XDP-lookup-and-socket-refer.patch",
+      "sha256": "611a60fce2e02de0a862a514e2feb5791fde0e6c6d8989645ac755927db71476",
+      "commit": "354807ea5cc9dadf76ffc78eea5b00c3e41a0abc",
+      "tree": "a650f56ad24ef650990eeaa3fb64161aa403a982",
+      "matches_commit": true
+    }
+  ]
+}

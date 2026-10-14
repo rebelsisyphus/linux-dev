@@ -1,0 +1,35 @@
+Subject: [PATCH RFC 0/4] bpf: optional ordered CPU steering with CPUMAP
+
+This local RFC series adds the transport-side infrastructure needed for
+application-aware XDP CPU steering. BPF owns classification, socket hints
+and the desired CPU. The kernel owns admission to a retained CPUMAP entry,
+source reservations, post-GRO completion and entry lifetime.
+
+A nonzero CPUMAP map_extra preallocates ordering domains. Two XDP kfuncs
+request ordered redirection and query a domain snapshot. A normal CPU
+change waits for the old domain's submitted prefix; CPU offline retains
+the native RFS exception. Ordinary CPUMAP operation remains available.
+
+This is deliberately scoped to infrastructure. It adds neither a kernel
+flow hash table nor a built-in RFS/LLC/load-balancing policy. XDP can read
+socket storage using the existing helper so independent observers can
+provide policy input. No CONFIG_RPS dependency or driver change is needed.
+
+Stable domains are required from flow admission onward. Detach, domain
+reuse and transition to local PASS require quiescing ingress and draining.
+Second remote redirects are dropped in ordered mode. CPU online requires
+recreating the affected entry to restore worker affinity. These are
+documented limits rather than claims of transparent live handoff.
+
+Validation: full x86-64 build with RPS disabled, KASAN and lockdep; QEMU
+test_progs reports 3 tests / 15 subtests passed with no skips or failures.
+Separate object builds cover RPS enabled, INET disabled, BPF_SYSCALL
+disabled and PREEMPT_RT. Physical-NIC throughput, tail latency and GRO
+aggregation costs remain to be measured. Per-domain locking and full GRO
+flushes at the 64-packet/empty-ring completion boundary are not free.
+
+The four patches are socket storage access, ordered CPUMAP infrastructure,
+selftests, and documentation. Base: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f.
+
+This cover letter and series have only been saved locally. No messages
+have been sent to the maintainers or mailing lists.

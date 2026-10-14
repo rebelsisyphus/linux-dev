@@ -1,0 +1,9 @@
+{
+  "tested_commit": "57de598224fd3ae5314d0a7bce192a3a9ae3256c",
+  "final_commit": "aaf425c9c842ee58ab5f48e1bcd16cbdc47e0020",
+  "file": "tests/prog_tests/external_xdp_rfs.c",
+  "change": "wrapping and indentation only; no source tokens changed",
+  "before_sha256": "2a27df4ea29760e8adb92b4f5ee036aa92f494be325115bc47a855654c25d108",
+  "after_sha256": "6df124f85a9a96f6e44142da7474531e10adf9c8da55ff0dab4ba8d9da500972",
+  "tokens_equal": true
+}

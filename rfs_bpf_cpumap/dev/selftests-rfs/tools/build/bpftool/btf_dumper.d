@@ -1,0 +1,44 @@
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/btf_dumper.o: \
+ btf_dumper.c \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/bitops.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/bits.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/vdso/bits.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/vdso/const.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/const.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/bits.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/build_bug.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler_types.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler-context-analysis.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler-gcc.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/overflow.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/__ffs.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/__ffz.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/fls.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/__fls.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/fls64.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/hweight.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/arch_hweight.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/const_hweight.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/atomic.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/asm-generic/bitops/non-atomic.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/btf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/err.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/asm/errno.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/btf.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_common.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_version.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/bpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/bpf_common.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_legacy.h \
+ json_writer.h main.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/skel_internal.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/kernel.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/math.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/panic.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/container_of.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/hashmap.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf.h

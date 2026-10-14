@@ -1,0 +1,5 @@
+Applied all four patches sequentially to base in an isolated Git index.
+Base: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+Tip: 7cbebe4694ff2abff42acec6eb5f7678d69beb57
+Result tree: 5af57f45f4886675800177b71e305bff0a13a100
+PASS

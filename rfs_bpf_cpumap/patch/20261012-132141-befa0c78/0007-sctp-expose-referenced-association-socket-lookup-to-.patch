@@ -1,0 +1,269 @@
+From b3a5dbeebb7eb5dfc6796481367d5a6584624ede Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 12 Oct 2026 13:17:11 +0800
+Subject: [PATCH 7/8] sctp: expose referenced association socket lookup to XDP
+
+An XDP receive policy can use TCP/UDP lookup to read application hints
+from socket storage, but SCTP associations have no equivalent interface.
+Expose an advisory association lookup in the ingress device's network
+namespace, constrained by the ingress interface and L3 master context.
+
+Hold a transport reference while taking a socket reference. The transport
+pins its association; RCU and the endpoint's socket reference protect the
+socket acquisition during accept/peeloff. Return an acquired socket and
+provide a matching release kfunc so the verifier enforces its lifetime.
+
+Only existing associations match. This is neither SCTP packet validation
+nor final demultiplexing, and it does not claim a snapshot remains current
+after peeloff. CPU hints, tuple domains and selection policy stay in BPF.
+Register with the SCTP module lifetime, unwind protocol registration on
+errors and keep BPF_SYSCALL=n builds independent of BPF registration.
+
+Assisted-by: LLM
+---
+ Documentation/bpf/index.rst       |  1 +
+ Documentation/bpf/sctp-lookup.rst | 50 ++++++++++++++++
+ MAINTAINERS                       |  1 +
+ include/net/sctp/sctp.h           |  9 +++
+ net/sctp/Makefile                 |  1 +
+ net/sctp/bpf.c                    | 95 +++++++++++++++++++++++++++++++
+ net/sctp/protocol.c               |  6 ++
+ 7 files changed, 163 insertions(+)
+ create mode 100644 Documentation/bpf/sctp-lookup.rst
+ create mode 100644 net/sctp/bpf.c
+
+diff --git a/Documentation/bpf/index.rst b/Documentation/bpf/index.rst
+index 638a00d42bc2..ed1e4323801b 100644
+--- a/Documentation/bpf/index.rst
++++ b/Documentation/bpf/index.rst
+@@ -34,6 +34,7 @@ that goes into great technical depth about the BPF Architecture.
+    linux-notes
+    other
+    redirect
++   sctp-lookup
+ 
+ .. Links:
+ .. _BPF and XDP Reference Guide: https://docs.cilium.io/en/latest/bpf/
+diff --git a/Documentation/bpf/sctp-lookup.rst b/Documentation/bpf/sctp-lookup.rst
+new file mode 100644
+index 000000000000..d4ebe47fc3ef
+--- /dev/null
++++ b/Documentation/bpf/sctp-lookup.rst
+@@ -0,0 +1,50 @@
++.. SPDX-License-Identifier: GPL-2.0-only
++
++SCTP socket lookup from XDP
++==========================
++
++An XDP program can look up the socket of an existing SCTP association in
++the ingress device's network namespace. This allows an early receive policy
++to read socket local storage without maintaining a second association table.
++It does not require CONFIG_RPS or select a receive CPU in the SCTP stack.
++
++With CONFIG_IP_SCTP and CONFIG_BPF_SYSCALL, SCTP registers::
++
++    extern struct sock *bpf_xdp_sctp_lookup(struct xdp_md *ctx,
++                                           struct bpf_sock_tuple *tuple,
++                                           __u32 tuple__sz) __ksym;
++    extern void bpf_sctp_release(struct sock *sk) __ksym;
++
++Use sizeof(tuple->ipv4) or sizeof(tuple->ipv6) for tuple__sz. Addresses and
++ports are in network byte order, with source identifying the peer and
++destination identifying the local endpoint. IPv6 needs CONFIG_IPV6. The
++ingress interface and its L3 master context constrain the transport lookup.
++The verifier checks the memory region; the implementation checks tuple size.
++
++Lookup returns NULL for an invalid tuple size or absent association. It
++does not return an ordinary listening endpoint. An association on a
++one-to-many socket may return that shared socket. Release every non-NULL
++result using bpf_sctp_release on every path; the verifier tracks this
++reference. XDP socket storage access can use the returned socket.
++
++The transport lookup holds an association reference while acquiring the
++socket reference. RCU protects acquisition against a concurrent accept or
++peeloff changing the association's socket. The acquired socket reference
++remains valid independently of association teardown. This is only a safe
++snapshot: the association may move, the socket may close, or another socket
++may ultimately consume the packet.
++
++Lookup precedes routing and final SCTP demultiplexing. It does not validate
++verification tags, checksums, chunks or the SCTP state machine. NAT, VRF and
++policy routing must be accounted for by the caller. Distinct tuples of a
++multihomed association do not form a shared ordering domain merely because
++they resolve to the same socket.
++
++These GPL-only kfuncs are not a stable userspace ABI. Modular SCTP must be
++loaded, with usable module BTF, before a program referencing its kfuncs is
++loaded. A policy can use weak declarations to supply a fallback when the
++kfuncs are unavailable.
++
++The xdp_sctp_lookup selftest covers IPv4/IPv6 socket storage, invalid tuple
++sizes, verifier reference tracking, and lookup concurrent with peeloff and
++socket close. Run it with SCTP and IPv6 configured.
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 3b2eb2a7a89a..39e7ec1057a8 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -24610,6 +24610,7 @@ M:	Xin Long <lucien.xin@gmail.com>
+ L:	linux-sctp@vger.kernel.org
+ S:	Maintained
+ W:	https://github.com/sctp/lksctp-tools/wiki
++F:	Documentation/bpf/sctp-lookup.rst
+ F:	Documentation/networking/sctp.rst
+ F:	include/linux/sctp.h
+ F:	include/net/sctp/
+diff --git a/include/net/sctp/sctp.h b/include/net/sctp/sctp.h
+index d50c27812504..ab880706135a 100644
+--- a/include/net/sctp/sctp.h
++++ b/include/net/sctp/sctp.h
+@@ -669,4 +669,13 @@ static inline void sctp_sock_set_nodelay(struct sock *sk)
+ 	release_sock(sk);
+ }
+ 
++#ifdef CONFIG_BPF_SYSCALL
++int sctp_bpf_register(void);
++#else
++static inline int sctp_bpf_register(void)
++{
++	return 0;
++}
++#endif
++
+ #endif /* __net_sctp_h__ */
+diff --git a/net/sctp/Makefile b/net/sctp/Makefile
+index 0448398408d8..a78b296a31f4 100644
+--- a/net/sctp/Makefile
++++ b/net/sctp/Makefile
+@@ -21,5 +21,6 @@ sctp_diag-y := diag.o
+ sctp-$(CONFIG_SCTP_DBG_OBJCNT) += objcnt.o
+ sctp-$(CONFIG_PROC_FS) += proc.o
+ sctp-$(CONFIG_SYSCTL) += sysctl.o
++sctp-$(CONFIG_BPF_SYSCALL) += bpf.o
+ 
+ sctp-$(subst m,y,$(CONFIG_IPV6))	+= ipv6.o
+diff --git a/net/sctp/bpf.c b/net/sctp/bpf.c
+new file mode 100644
+index 000000000000..e4e5656fdaec
+--- /dev/null
++++ b/net/sctp/bpf.c
+@@ -0,0 +1,95 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/bpf.h>
++#include <linux/btf.h>
++#include <linux/btf_ids.h>
++#include <linux/filter.h>
++#include <linux/module.h>
++#include <net/sctp/sctp.h>
++#include <net/xdp.h>
++
++__bpf_kfunc_start_defs();
++
++/**
++ * bpf_xdp_sctp_lookup - Find an SCTP association's socket in the ingress netns
++ * @ctx: XDP context
++ * @tuple: Incoming IPv4 or IPv6 tuple, in network byte order
++ * @tuple__sz: sizeof(tuple->ipv4) or sizeof(tuple->ipv6)
++ *
++ * Only existing associations are looked up. This is an advisory pre-routing
++ * lookup, not SCTP packet validation or final socket demultiplexing. In
++ * particular, accept/peeloff can move the association after this snapshot.
++ * The returned reference must be released with bpf_sctp_release().
++ *
++ * Return: A referenced socket, or NULL if the tuple is invalid or no
++ * association matches in the ingress device's network namespace.
++ */
++__bpf_kfunc struct sock *
++bpf_xdp_sctp_lookup(struct xdp_md *ctx, struct bpf_sock_tuple *tuple,
++		    u32 tuple__sz)
++{
++	struct xdp_buff *xdp = (struct xdp_buff *)ctx;
++	struct net_device *dev = xdp->rxq->dev;
++	union sctp_addr local = {}, peer = {};
++	struct sctp_transport *transport;
++	struct sock *sk = NULL;
++
++	if (tuple__sz == sizeof(tuple->ipv4)) {
++		local.v4.sin_family = AF_INET;
++		local.v4.sin_addr.s_addr = tuple->ipv4.daddr;
++		local.v4.sin_port = tuple->ipv4.dport;
++		peer.v4.sin_family = AF_INET;
++		peer.v4.sin_addr.s_addr = tuple->ipv4.saddr;
++		peer.v4.sin_port = tuple->ipv4.sport;
++	} else if (IS_ENABLED(CONFIG_IPV6) &&
++		   tuple__sz == sizeof(tuple->ipv6)) {
++		local.v6.sin6_family = AF_INET6;
++		memcpy(&local.v6.sin6_addr, tuple->ipv6.daddr, sizeof(struct in6_addr));
++		local.v6.sin6_port = tuple->ipv6.dport;
++		local.v6.sin6_scope_id = dev->ifindex;
++		peer.v6.sin6_family = AF_INET6;
++		memcpy(&peer.v6.sin6_addr, tuple->ipv6.saddr, sizeof(struct in6_addr));
++		peer.v6.sin6_port = tuple->ipv6.sport;
++		peer.v6.sin6_scope_id = dev->ifindex;
++	} else {
++		return NULL;
++	}
++
++	rcu_read_lock();
++	transport = sctp_addrs_lookup_transport(dev_net(dev), &local, &peer,
++						dev->ifindex, dev_sdif(dev));
++	if (transport) {
++		/*
++		 * The transport pins the association. Its socket may change during
++		 * accept/peeloff, but each endpoint retains its socket reference
++		 * through sctp_endpoint_destroy_rcu(). Thus even the old socket
++		 * stays alive until we can take our own reference under RCU.
++		 */
++		sk = READ_ONCE(transport->asoc->base.sk);
++		sock_hold(sk);
++		sctp_transport_put(transport);
++	}
++	rcu_read_unlock();
++	return sk;
++}
++
++__bpf_kfunc void bpf_sctp_release(struct sock *sk)
++{
++	sock_put(sk);
++}
++
++__bpf_kfunc_end_defs();
++
++BTF_KFUNCS_START(sctp_kfunc_ids)
++BTF_ID_FLAGS(func, bpf_xdp_sctp_lookup, KF_ACQUIRE | KF_RET_NULL)
++BTF_ID_FLAGS(func, bpf_sctp_release, KF_RELEASE)
++BTF_KFUNCS_END(sctp_kfunc_ids)
++
++static const struct btf_kfunc_id_set sctp_kfunc_set = {
++	.owner = THIS_MODULE,
++	.set = &sctp_kfunc_ids,
++};
++
++int __init sctp_bpf_register(void)
++{
++	return register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &sctp_kfunc_set);
++}
+diff --git a/net/sctp/protocol.c b/net/sctp/protocol.c
+index 27c26e12f95d..862fc9e94a5c 100644
+--- a/net/sctp/protocol.c
++++ b/net/sctp/protocol.c
+@@ -1636,11 +1636,17 @@ static __init int sctp_init(void)
+ 	if (status)
+ 		goto err_v6_add_protocol;
+ 
++	status = sctp_bpf_register();
++	if (status)
++		goto err_bpf_register;
++
+ 	if (sctp_offload_init() < 0)
+ 		pr_crit("%s: Cannot add SCTP protocol offload\n", __func__);
+ 
+ out:
+ 	return status;
++err_bpf_register:
++	sctp_v6_del_protocol();
+ err_v6_add_protocol:
+ 	sctp_v4_del_protocol();
+ err_add_protocol:
+-- 
+2.43.0
+

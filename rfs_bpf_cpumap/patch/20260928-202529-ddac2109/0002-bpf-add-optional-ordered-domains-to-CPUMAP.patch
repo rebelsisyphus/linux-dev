@@ -1,0 +1,811 @@
+From 1a5083899c7dddef8d5006c188530b540364119c Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Wed, 23 Sep 2026 23:42:40 +0800
+Subject: [PATCH 2/7] bpf: add optional ordered domains to CPUMAP
+
+Changing an active flow's CPUMAP target can deliver its new packets before
+the old target has finished processing earlier ones. A ring dequeue or a
+remote XDP PASS is too early to authorize that change: GRO and the normal
+receive list can still hold packets.
+
+Let a nonzero map_extra allocate a fixed number of ordering domains.
+bpf_cpumap_redirect() accepts a BPF-selected domain and candidate CPU;
+actual redirect atomically reserves a submission on the retained target.
+Outstanding source bulks or an incomplete old watermark defer migration.
+The kfunc only records intent, so returning a different XDP action leaves
+no reservation. Ordinary redirect_map calls reject ordered maps.
+
+Assign tickets at successful ring insertion under its producer lock and
+return source reservations on both insertion and failure. Preserve mixed
+native/generic ring order, and publish a completed prefix only after a
+full GRO flush and synchronous stack handoff, every 64 packets or at ring
+empty. Remote DROP retires tickets; a second remote REDIRECT is dropped
+because its asynchronous completion is outside this accounting domain.
+
+Retain references to retired entries' progress while their resources drain
+through the existing RCU/kthread teardown. A replaced entry cannot accept
+new submissions, and reusing a CPU index cannot bypass the old generation.
+An offline previous CPU permits leaving its watermark behind once source
+reservations settle, matching the scope of native RFS's offline exception.
+Existing CPUMAP worker draining is retained, without a discard-all path.
+
+bpf_cpumap_get_state() exposes an informational snapshot for observation
+and drain after ingress quiescence. Flow identity, socket hints and CPU
+policy remain in BPF. Ordinary maps allocate no domains or progress state.
+No CONFIG_RPS dependency or driver change is introduced.
+
+Validated with a full CONFIG_RPS=n build and ordered CPUMAP selftests under
+KASAN/lockdep. Compile checks cover CONFIG_RPS=y, CONFIG_INET=n,
+CONFIG_BPF_SYSCALL=n and PREEMPT_RT. Throughput and GRO aggregation still
+require measurements on physical NICs.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ include/linux/bpf.h            |  20 ++
+ include/linux/filter.h         |   1 +
+ include/uapi/linux/bpf.h       |   4 +
+ kernel/bpf/cpumap.c            | 369 ++++++++++++++++++++++++++++++++-
+ kernel/bpf/syscall.c           |   1 +
+ net/core/filter.c              |  19 +-
+ tools/include/uapi/linux/bpf.h |   4 +
+ 7 files changed, 409 insertions(+), 9 deletions(-)
+
+diff --git a/include/linux/bpf.h b/include/linux/bpf.h
+index e57af902560c..1ba1a5873266 100644
+--- a/include/linux/bpf.h
++++ b/include/linux/bpf.h
+@@ -3070,6 +3070,7 @@ struct xdp_frame;
+ struct sk_buff;
+ struct bpf_dtab_netdev;
+ struct bpf_cpu_map_entry;
++struct bpf_cpu_map_domain;
+ 
+ void __dev_flush(struct list_head *flush_list);
+ int dev_xdp_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
+@@ -3089,6 +3090,10 @@ int cpu_map_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf,
+ 		    struct net_device *dev_rx);
+ int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+ 			     struct sk_buff *skb);
++int cpu_map_enqueue_ordered(struct bpf_cpu_map_domain *domain, u32 cpu,
++			    struct xdp_frame *xdpf, struct net_device *dev_rx);
++int cpu_map_generic_redirect_ordered(struct bpf_cpu_map_domain *domain,
++				     u32 cpu, struct sk_buff *skb);
+ 
+ /* Return map's numa specified by userspace */
+ static inline int bpf_map_attr_numa_node(const union bpf_attr *attr)
+@@ -3389,6 +3394,7 @@ static inline void __dev_flush(struct list_head *flush_list)
+ struct xdp_frame;
+ struct bpf_dtab_netdev;
+ struct bpf_cpu_map_entry;
++struct bpf_cpu_map_domain;
+ 
+ static inline
+ int dev_xdp_enqueue(struct net_device *dev, struct xdp_frame *xdpf,
+@@ -3445,6 +3451,20 @@ static inline int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+ 	return -EOPNOTSUPP;
+ }
+ 
++static inline int cpu_map_enqueue_ordered(struct bpf_cpu_map_domain *domain,
++					  u32 cpu, struct xdp_frame *xdpf,
++					  struct net_device *dev_rx)
++{
++	return -EOPNOTSUPP;
++}
++
++static inline int
++cpu_map_generic_redirect_ordered(struct bpf_cpu_map_domain *domain, u32 cpu,
++				 struct sk_buff *skb)
++{
++	return -EOPNOTSUPP;
++}
++
+ static inline struct bpf_prog *bpf_prog_get_type_path(const char *name,
+ 				enum bpf_prog_type type)
+ {
+diff --git a/include/linux/filter.h b/include/linux/filter.h
+index 39decde7fc73..9e2aa5c76dfc 100644
+--- a/include/linux/filter.h
++++ b/include/linux/filter.h
+@@ -848,6 +848,7 @@ struct bpf_nh_params {
+ #define BPF_RI_F_CPU_MAP_INIT	BIT(2)
+ #define BPF_RI_F_DEV_MAP_INIT	BIT(3)
+ #define BPF_RI_F_XSK_MAP_INIT	BIT(4)
++#define BPF_RI_F_CPU_MAP_ORDERED	BIT(5)
+ 
+ struct bpf_redirect_info {
+ 	u64 tgt_index;
+diff --git a/include/uapi/linux/bpf.h b/include/uapi/linux/bpf.h
+index 732b35cc08d1..7e398ab683d8 100644
+--- a/include/uapi/linux/bpf.h
++++ b/include/uapi/linux/bpf.h
+@@ -1559,6 +1559,10 @@ union bpf_attr {
+ 		 * (nelem_hint). 0 = use rhashtable default. Must be
+ 		 * <= min(max_entries, U16_MAX). Upper 32 bits reserved,
+ 		 * must be zero.
++		 *
++		 * BPF_MAP_TYPE_CPUMAP - number of preallocated ordering domains.
++		 * Zero selects ordinary CPUMAP operation. Upper 32 bits must
++		 * be zero. Ordered maps use bpf_cpumap_redirect().
+ 		 */
+ 		__u64	map_extra;
+ 
+diff --git a/kernel/bpf/cpumap.c b/kernel/bpf/cpumap.c
+index 5e59ab896f05..c164afd2bd64 100644
+--- a/kernel/bpf/cpumap.c
++++ b/kernel/bpf/cpumap.c
+@@ -33,6 +33,7 @@
+ #include <linux/completion.h>
+ #include <trace/events/xdp.h>
+ #include <linux/btf_ids.h>
++#include <linux/btf.h>
+ 
+ #include <linux/netdevice.h>
+ #include <net/gro.h>
+@@ -56,6 +57,17 @@ struct xdp_bulk_queue {
+ 	local_lock_t bq_lock;
+ };
+ 
++struct cpu_map_ordered_bulk {
++	struct xdp_bulk_queue bulk;
++	struct bpf_cpu_map_domain *domains[CPU_MAP_BULK_SIZE];
++};
++
++struct cpu_map_progress {
++	/* Written under queue->producer_lock. Failed insertions take no ticket. */
++	u64 submitted;
++	atomic64_t completed ____cacheline_aligned_in_smp;
++};
++
+ /* Struct for every remote "destination" CPU in map */
+ struct bpf_cpu_map_entry {
+ 	u32 cpu;    /* kthread CPU and map index */
+@@ -74,18 +86,46 @@ struct bpf_cpu_map_entry {
+ 
+ 	struct completion kthread_running;
+ 	struct rcu_work free_work;
++	refcount_t refs;
++	struct cpu_map_progress *progress;
++};
++
++struct bpf_cpu_map_domain {
++	/* Protects target, last_tail and source reservations in pending. */
++	spinlock_t lock;
++	struct bpf_cpu_map *cmap;
++	struct bpf_cpu_map_entry *target;
++	u64 last_tail;
++	u32 pending;
++};
++
++struct bpf_cpumap_state {
++	u64 last_tail;
++	u64 completed;
++	u32 cpu;
++	u32 pending;
+ };
+ 
+ struct bpf_cpu_map {
+ 	struct bpf_map map;
+ 	/* Below members specific for map type */
+ 	struct bpf_cpu_map_entry __rcu **cpu_map;
++	struct bpf_cpu_map_domain *domains;
+ };
+ 
++static void cpu_map_entry_put(struct bpf_cpu_map_entry *rcpu)
++{
++	if (refcount_dec_and_test(&rcpu->refs)) {
++		kfree(rcpu->progress);
++		kfree(rcpu);
++	}
++}
++
+ static struct bpf_map *cpu_map_alloc(union bpf_attr *attr)
+ {
+ 	u32 value_size = attr->value_size;
+ 	struct bpf_cpu_map *cmap;
++	u32 i;
+ 
+ 	/* check sanity of attributes */
+ 	if (attr->max_entries == 0 || attr->key_size != 4 ||
+@@ -97,6 +137,8 @@ static struct bpf_map *cpu_map_alloc(union bpf_attr *attr)
+ 	/* Pre-limit array size based on NR_CPUS, not final CPU check */
+ 	if (attr->max_entries > NR_CPUS)
+ 		return ERR_PTR(-E2BIG);
++	if (attr->map_extra > U32_MAX / sizeof(struct bpf_cpu_map_domain))
++		return ERR_PTR(-E2BIG);
+ 
+ 	cmap = bpf_map_area_alloc(sizeof(*cmap), NUMA_NO_NODE);
+ 	if (!cmap)
+@@ -112,6 +154,20 @@ static struct bpf_map *cpu_map_alloc(union bpf_attr *attr)
+ 		bpf_map_area_free(cmap);
+ 		return ERR_PTR(-ENOMEM);
+ 	}
++	if (attr->map_extra) {
++		cmap->domains = bpf_map_area_alloc(attr->map_extra *
++						 sizeof(*cmap->domains),
++						 cmap->map.numa_node);
++		if (!cmap->domains) {
++			bpf_map_area_free(cmap->cpu_map);
++			bpf_map_area_free(cmap);
++			return ERR_PTR(-ENOMEM);
++		}
++		for (i = 0; i < attr->map_extra; i++) {
++			spin_lock_init(&cmap->domains[i].lock);
++			cmap->domains[i].cmap = cmap;
++		}
++	}
+ 
+ 	return &cmap->map;
+ }
+@@ -153,6 +209,8 @@ static u32 cpu_map_bpf_prog_run_skb(struct bpf_cpu_map_entry *rcpu,
+ 			skbs[pass++] = skb;
+ 			break;
+ 		case XDP_REDIRECT:
++			if (rcpu->progress)
++				goto drop;
+ 			err = xdp_do_generic_redirect(skb->dev, skb, &xdp,
+ 						      rcpu->prog);
+ 			if (unlikely(err)) {
+@@ -169,6 +227,7 @@ static u32 cpu_map_bpf_prog_run_skb(struct bpf_cpu_map_entry *rcpu,
+ 			trace_xdp_exception(skb->dev, rcpu->prog, act);
+ 			fallthrough;
+ 		case XDP_DROP:
++drop:
+ 			napi_consume_skb(skb, true);
+ 			stats->drop++;
+ 			break;
+@@ -213,6 +272,8 @@ static int cpu_map_bpf_prog_run_xdp(struct bpf_cpu_map_entry *rcpu,
+ 			}
+ 			break;
+ 		case XDP_REDIRECT:
++			if (rcpu->progress)
++				goto drop;
+ 			err = xdp_do_redirect(xdpf->dev_rx, &xdp,
+ 					      rcpu->prog);
+ 			if (unlikely(err)) {
+@@ -229,6 +290,7 @@ static int cpu_map_bpf_prog_run_xdp(struct bpf_cpu_map_entry *rcpu,
+ 			trace_xdp_exception(xdpf->dev_rx, rcpu->prog, act);
+ 			fallthrough;
+ 		case XDP_DROP:
++drop:
+ 			xdp_return_frame(xdpf);
+ 			stats->drop++;
+ 			break;
+@@ -242,6 +304,72 @@ static int cpu_map_bpf_prog_run_xdp(struct bpf_cpu_map_entry *rcpu,
+ 
+ #define CPUMAP_BATCH 8
+ 
++/* Keep native frames and generic skbs in ring order, including mixed batches. */
++static void cpu_map_receive_ordered(struct bpf_cpu_map_entry *rcpu, void **frames,
++				    u32 n, u32 sched)
++{
++	struct bpf_net_context __bpf_net_ctx, *bpf_net_ctx = NULL;
++	struct xdp_cpumap_stats stats = {};
++	void *cache[CPUMAP_BATCH], *skbs[CPUMAP_BATCH];
++	u32 i, native = 0, allocated, used = 0, pass = 0;
++
++	if (rcpu->prog) {
++		rcu_read_lock();
++		bpf_net_ctx = bpf_net_ctx_set(&__bpf_net_ctx);
++		xdp_set_return_frame_no_direct();
++	}
++	for (i = 0; i < n; i++) {
++		void *f = frames[i];
++
++		if (__ptr_test_bit(0, &f)) {
++			__ptr_clear_bit(0, &f);
++			if (rcpu->prog &&
++			    !cpu_map_bpf_prog_run_skb(rcpu, &f, 1, &stats)) {
++				frames[i] = NULL;
++				continue;
++			}
++			__ptr_set_bit(0, &f);
++		} else {
++			if (rcpu->prog &&
++			    !cpu_map_bpf_prog_run_xdp(rcpu, &f, 1, &stats)) {
++				frames[i] = NULL;
++				continue;
++			}
++			native++;
++		}
++		frames[i] = f;
++	}
++	if (rcpu->prog) {
++		xdp_clear_return_frame_no_direct();
++		bpf_net_ctx_clear(bpf_net_ctx);
++		rcu_read_unlock();
++	}
++
++	allocated = napi_skb_cache_get_bulk(cache, native);
++	for (i = 0; i < n; i++) {
++		struct xdp_frame *xdpf;
++		void *f = frames[i];
++
++		if (!f)
++			continue;
++		if (__ptr_test_bit(0, &f)) {
++			__ptr_clear_bit(0, &f);
++			skbs[pass++] = f;
++			continue;
++		}
++		xdpf = f;
++		if (used == allocated) {
++			xdp_return_frame(xdpf);
++			continue;
++		}
++		__xdp_build_skb_from_frame(xdpf, cache[used], xdpf->dev_rx);
++		skbs[pass++] = cache[used++];
++	}
++	trace_xdp_cpumap_kthread(rcpu->map_id, n, native - allocated, sched, &stats);
++	for (i = 0; i < pass; i++)
++		gro_receive_skb(&rcpu->gro, skbs[i]);
++}
++
+ struct cpu_map_ret {
+ 	u32 xdp_n;
+ 	u32 skb_n;
+@@ -295,6 +423,7 @@ static int cpu_map_kthread_run(void *data)
+ 	struct bpf_cpu_map_entry *rcpu = data;
+ 	unsigned long last_qs = jiffies;
+ 	u32 packets = 0;
++	u64 processed = 0;
+ 
+ 	complete(&rcpu->kthread_running);
+ 	set_current_state(TASK_INTERRUPTIBLE);
+@@ -336,6 +465,12 @@ static int cpu_map_kthread_run(void *data)
+ 		 */
+ 		n = __ptr_ring_consume_batched(rcpu->queue, frames,
+ 					       CPUMAP_BATCH);
++		if (rcpu->progress) {
++			local_bh_disable();
++			cpu_map_receive_ordered(rcpu, frames, n, sched);
++			processed += n;
++			goto flush;
++		}
+ 		for (i = 0; i < n; i++) {
+ 			void *f = frames[i];
+ 			struct page *page;
+@@ -395,11 +530,21 @@ static int cpu_map_kthread_run(void *data)
+ 		for (i = 0; i < ret.xdp_n + ret.skb_n; i++)
+ 			gro_receive_skb(&rcpu->gro, skbs[i]);
+ 
++flush:
+ 		/* Flush either every 64 packets or in case of empty ring */
+ 		packets += n;
+ 		empty = __ptr_ring_empty(rcpu->queue);
+ 		if (packets >= NAPI_POLL_WEIGHT || empty) {
+-			cpu_map_gro_flush(rcpu, empty);
++			if (rcpu->progress) {
++				/*
++				 * A ticket is complete only after GRO and the normal
++				 * list have handed the entire prefix to the stack.
++				 */
++				gro_flush_normal(&rcpu->gro, false);
++				atomic64_set_release(&rcpu->progress->completed, processed);
++			} else {
++				cpu_map_gro_flush(rcpu, empty);
++			}
+ 			packets = 0;
+ 		}
+ 
+@@ -439,6 +584,7 @@ __cpu_map_entry_alloc(struct bpf_map *map, struct bpf_cpumap_val *value,
+ 	gfp_t gfp = GFP_KERNEL | __GFP_NOWARN;
+ 	struct bpf_cpu_map_entry *rcpu;
+ 	struct xdp_bulk_queue *bq;
++	size_t bulk_size = sizeof(*bq);
+ 
+ 	/* Have map->numa_node, but choose node of redirect target CPU */
+ 	numa = cpu_to_node(cpu);
+@@ -446,9 +592,18 @@ __cpu_map_entry_alloc(struct bpf_map *map, struct bpf_cpumap_val *value,
+ 	rcpu = bpf_map_kmalloc_node(map, sizeof(*rcpu), gfp | __GFP_ZERO, numa);
+ 	if (!rcpu)
+ 		return ERR_PTR(err);
++	refcount_set(&rcpu->refs, 1);
++	if (map->map_extra) {
++		rcpu->progress = bpf_map_kmalloc_node(map, sizeof(*rcpu->progress),
++						      gfp | __GFP_ZERO, numa);
++		if (!rcpu->progress)
++			goto free_rcu;
++		atomic64_set(&rcpu->progress->completed, 0);
++		bulk_size = sizeof(struct cpu_map_ordered_bulk);
++	}
+ 
+ 	/* Alloc percpu bulkq */
+-	rcpu->bulkq = bpf_map_alloc_percpu(map, sizeof(*rcpu->bulkq),
++	rcpu->bulkq = bpf_map_alloc_percpu(map, bulk_size,
+ 					   sizeof(void *), gfp);
+ 	if (!rcpu->bulkq)
+ 		goto free_rcu;
+@@ -513,6 +668,7 @@ __cpu_map_entry_alloc(struct bpf_map *map, struct bpf_cpumap_val *value,
+ free_bulkq:
+ 	free_percpu(rcpu->bulkq);
+ free_rcu:
++	kfree(rcpu->progress);
+ 	kfree(rcpu);
+ 	return ERR_PTR(err);
+ }
+@@ -542,7 +698,7 @@ static void __cpu_map_entry_free(struct work_struct *work)
+ 	ptr_ring_cleanup(rcpu->queue, NULL);
+ 	kfree(rcpu->queue);
+ 	free_percpu(rcpu->bulkq);
+-	kfree(rcpu);
++	cpu_map_entry_put(rcpu);
+ }
+ 
+ /* After the xchg of the bpf_cpu_map_entry pointer, we need to make sure the old
+@@ -644,6 +800,11 @@ static void cpu_map_free(struct bpf_map *map)
+ 		/* Stop kthread and cleanup entry directly */
+ 		__cpu_map_entry_free(&rcpu->free_work.work);
+ 	}
++	for (i = 0; i < cmap->map.map_extra; i++) {
++		if (cmap->domains[i].target)
++			cpu_map_entry_put(cmap->domains[i].target);
++	}
++	bpf_map_area_free(cmap->domains);
+ 	bpf_map_area_free(cmap->cpu_map);
+ 	bpf_map_area_free(cmap);
+ }
+@@ -665,6 +826,79 @@ static void *__cpu_map_lookup_elem(struct bpf_map *map, u32 key)
+ 	return rcpu;
+ }
+ 
++static bool cpu_map_domain_busy(struct bpf_cpu_map_domain *domain)
++{
++	struct bpf_cpu_map_entry *rcpu = domain->target;
++
++	return domain->pending ||
++		(s64)(atomic64_read_acquire(&rcpu->progress->completed) -
++		      domain->last_tail) < 0;
++}
++
++/*
++ * Reserve a submission before dropping the domain lock. Pending submissions
++ * pin its target until every source bulk has either published or dropped them.
++ * The caller's RCU section also covers the eventual source bulk flush.
++ */
++static struct bpf_cpu_map_entry *
++cpu_map_reserve(struct bpf_cpu_map_domain *domain, u32 cpu)
++{
++	struct bpf_cpu_map_entry *rcpu, *old, *put = NULL;
++	struct bpf_map *map = &domain->cmap->map;
++	int err = -ENODEV;
++
++	spin_lock_bh(&domain->lock);
++	old = domain->target;
++	rcpu = old;
++	if (!old || (!domain->pending &&
++		     (!cpu_online(old->cpu) || !cpu_map_domain_busy(domain)))) {
++		rcpu = __cpu_map_lookup_elem(map, cpu);
++		if (!rcpu || !cpu_online(rcpu->cpu))
++			rcpu = old;
++	}
++	if (!rcpu || !cpu_online(rcpu->cpu))
++		goto unlock;
++	/*
++	 * A replaced entry is draining. Its progress remains readable, but it
++	 * must not receive submissions that outlive its removal grace period.
++	 */
++	if (__cpu_map_lookup_elem(map, rcpu->cpu) != rcpu) {
++		err = -EAGAIN;
++		goto unlock;
++	}
++	if (domain->pending == U32_MAX) {
++		err = -EOVERFLOW;
++		goto unlock;
++	}
++	if (rcpu != old) {
++		refcount_inc(&rcpu->refs);
++		domain->target = rcpu;
++		domain->last_tail = 0;
++		put = old;
++	}
++	domain->pending++;
++	spin_unlock_bh(&domain->lock);
++	if (put)
++		cpu_map_entry_put(put);
++	return rcpu;
++unlock:
++	spin_unlock_bh(&domain->lock);
++	return ERR_PTR(err);
++}
++
++static void cpu_map_commit(struct bpf_cpu_map_domain *domain,
++			   struct bpf_cpu_map_entry *rcpu, int err)
++{
++	lockdep_assert_held(&rcpu->queue->producer_lock);
++	if (!err)
++		rcpu->progress->submitted++;
++	spin_lock(&domain->lock);
++	if (!err)
++		domain->last_tail = rcpu->progress->submitted;
++	domain->pending--;
++	spin_unlock(&domain->lock);
++}
++
+ static void *cpu_map_lookup_elem(struct bpf_map *map, void *key)
+ {
+ 	struct bpf_cpu_map_entry *rcpu =
+@@ -692,6 +926,14 @@ static int cpu_map_get_next_key(struct bpf_map *map, void *key, void *next_key)
+ 
+ static long cpu_map_redirect(struct bpf_map *map, u64 index, u64 flags)
+ {
++	struct bpf_redirect_info *ri = bpf_net_ctx_get_ri();
++
++	ri->kern_flags &= ~BPF_RI_F_CPU_MAP_ORDERED;
++	if (map->map_extra) {
++		ri->map_id = 0;
++		ri->map_type = BPF_MAP_TYPE_UNSPEC;
++		return XDP_ABORTED;
++	}
+ 	return __bpf_xdp_redirect_map(map, index, flags, 0,
+ 				      __cpu_map_lookup_elem);
+ }
+@@ -702,6 +944,7 @@ static u64 cpu_map_mem_usage(const struct bpf_map *map)
+ 
+ 	/* Currently the dynamically allocated elements are not counted */
+ 	usage += (u64)map->max_entries * sizeof(struct bpf_cpu_map_entry *);
++	usage += map->map_extra * sizeof(struct bpf_cpu_map_domain);
+ 	return usage;
+ }
+ 
+@@ -741,6 +984,12 @@ static void bq_flush_to_queue(struct xdp_bulk_queue *bq)
+ 		int err;
+ 
+ 		err = __ptr_ring_produce(q, xdpf);
++		if (rcpu->progress) {
++			struct cpu_map_ordered_bulk *ordered;
++
++			ordered = container_of(bq, struct cpu_map_ordered_bulk, bulk);
++			cpu_map_commit(ordered->domains[i], rcpu, err);
++		}
+ 		if (err) {
+ 			drops++;
+ 			xdp_return_frame_rx_napi(xdpf);
+@@ -760,7 +1009,8 @@ static void bq_flush_to_queue(struct xdp_bulk_queue *bq)
+  * Thus, safe percpu variable access. PREEMPT_RT relies on
+  * local_lock_nested_bh() to serialise access to the per-CPU bq.
+  */
+-static void bq_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf)
++static void bq_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf,
++		       struct bpf_cpu_map_domain *domain)
+ {
+ 	struct xdp_bulk_queue *bq;
+ 
+@@ -779,6 +1029,12 @@ static void bq_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf)
+ 	 * Queue time is very short, as driver will invoke flush
+ 	 * operation, when completing napi->poll call.
+ 	 */
++	if (domain) {
++		struct cpu_map_ordered_bulk *ordered;
++
++		ordered = container_of(bq, struct cpu_map_ordered_bulk, bulk);
++		ordered->domains[bq->count] = domain;
++	}
+ 	bq->q[bq->count++] = xdpf;
+ 
+ 	if (!bq->flush_node.prev) {
+@@ -796,10 +1052,45 @@ int cpu_map_enqueue(struct bpf_cpu_map_entry *rcpu, struct xdp_frame *xdpf,
+ 	/* Info needed when constructing SKB on remote CPU */
+ 	xdpf->dev_rx = dev_rx;
+ 
+-	bq_enqueue(rcpu, xdpf);
++	bq_enqueue(rcpu, xdpf, NULL);
++	return 0;
++}
++
++int cpu_map_enqueue_ordered(struct bpf_cpu_map_domain *domain, u32 cpu,
++			    struct xdp_frame *xdpf, struct net_device *dev_rx)
++{
++	struct bpf_cpu_map_entry *rcpu = cpu_map_reserve(domain, cpu);
++
++	if (IS_ERR(rcpu))
++		return PTR_ERR(rcpu);
++	bpf_net_ctx_get_ri()->tgt_index = rcpu->cpu;
++	xdpf->dev_rx = dev_rx;
++	bq_enqueue(rcpu, xdpf, domain);
+ 	return 0;
+ }
+ 
++int cpu_map_generic_redirect_ordered(struct bpf_cpu_map_domain *domain,
++				     u32 cpu, struct sk_buff *skb)
++{
++	struct bpf_cpu_map_entry *rcpu = cpu_map_reserve(domain, cpu);
++	int ret;
++
++	if (IS_ERR(rcpu))
++		return PTR_ERR(rcpu);
++	bpf_net_ctx_get_ri()->tgt_index = rcpu->cpu;
++	__skb_pull(skb, skb->mac_len);
++	skb_set_redirected(skb, false);
++	__ptr_set_bit(0, &skb);
++	spin_lock(&rcpu->queue->producer_lock);
++	ret = __ptr_ring_produce(rcpu->queue, skb);
++	cpu_map_commit(domain, rcpu, ret);
++	spin_unlock(&rcpu->queue->producer_lock);
++	if (!ret)
++		wake_up_process(rcpu->kthread);
++	trace_xdp_cpumap_enqueue(rcpu->map_id, !ret, !!ret, rcpu->cpu);
++	return ret;
++}
++
+ int cpu_map_generic_redirect(struct bpf_cpu_map_entry *rcpu,
+ 			     struct sk_buff *skb)
+ {
+@@ -832,3 +1123,71 @@ void __cpu_map_flush(struct list_head *flush_list)
+ 		wake_up_process(bq->obj->kthread);
+ 	}
+ }
++
++__bpf_kfunc_start_defs();
++
++__bpf_kfunc int bpf_cpumap_redirect(void *map__const_map, u32 cpu, u32 domain)
++{
++	struct bpf_map *map = map__const_map;
++	struct bpf_redirect_info *ri = bpf_net_ctx_get_ri();
++	struct bpf_cpu_map *cmap;
++
++	ri->map_id = 0;
++	ri->map_type = BPF_MAP_TYPE_UNSPEC;
++	ri->kern_flags &= ~BPF_RI_F_CPU_MAP_ORDERED;
++	if (map->map_type != BPF_MAP_TYPE_CPUMAP ||
++	    domain >= map->map_extra || cpu >= map->max_entries)
++		return XDP_ABORTED;
++	cmap = container_of(map, struct bpf_cpu_map, map);
++	ri->tgt_value = &cmap->domains[domain];
++	ri->tgt_index = cpu;
++	ri->map_id = map->id;
++	ri->map_type = BPF_MAP_TYPE_CPUMAP;
++	WRITE_ONCE(ri->map, NULL);
++	ri->flags = 0;
++	ri->kern_flags |= BPF_RI_F_CPU_MAP_ORDERED;
++	return XDP_REDIRECT;
++}
++
++__bpf_kfunc int bpf_cpumap_get_state(void *map__const_map, u32 domain,
++				     void *state, u32 state__sz)
++{
++	struct bpf_cpumap_state snapshot = { .cpu = U32_MAX };
++	struct bpf_map *map = map__const_map;
++	struct bpf_cpu_map_domain *d;
++	struct bpf_cpu_map *cmap;
++
++	if (map->map_type != BPF_MAP_TYPE_CPUMAP ||
++	    domain >= map->map_extra || state__sz != sizeof(snapshot))
++		return -EINVAL;
++	cmap = container_of(map, struct bpf_cpu_map, map);
++	d = &cmap->domains[domain];
++	spin_lock_bh(&d->lock);
++	if (d->target) {
++		snapshot.cpu = d->target->cpu;
++		snapshot.last_tail = d->last_tail;
++		snapshot.completed = atomic64_read_acquire(&d->target->progress->completed);
++		snapshot.pending = d->pending;
++	}
++	spin_unlock_bh(&d->lock);
++	memcpy(state, &snapshot, sizeof(snapshot));
++	return 0;
++}
++
++__bpf_kfunc_end_defs();
++
++BTF_KFUNCS_START(cpu_map_kfunc_ids)
++BTF_ID_FLAGS(func, bpf_cpumap_redirect)
++BTF_ID_FLAGS(func, bpf_cpumap_get_state)
++BTF_KFUNCS_END(cpu_map_kfunc_ids)
++
++static const struct btf_kfunc_id_set cpu_map_kfunc_set = {
++	.owner = THIS_MODULE,
++	.set = &cpu_map_kfunc_ids,
++};
++
++static int __init cpu_map_init(void)
++{
++	return register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &cpu_map_kfunc_set);
++}
++late_initcall(cpu_map_init);
+diff --git a/kernel/bpf/syscall.c b/kernel/bpf/syscall.c
+index c7bc9ba9b331..6d55f2654247 100644
+--- a/kernel/bpf/syscall.c
++++ b/kernel/bpf/syscall.c
+@@ -1419,6 +1419,7 @@ static int map_create_alloc(union bpf_attr *attr, bpfptr_t uattr, struct bpf_ver
+ 	if (attr->map_type != BPF_MAP_TYPE_BLOOM_FILTER &&
+ 	    attr->map_type != BPF_MAP_TYPE_ARENA &&
+ 	    attr->map_type != BPF_MAP_TYPE_RHASH &&
++	    attr->map_type != BPF_MAP_TYPE_CPUMAP &&
+ 	    attr->map_extra != 0) {
+ 		bpf_log(log, "Invalid map_extra.\n");
+ 		return -EINVAL;
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 1751f57b4cca..6a80d662cba2 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -4618,12 +4618,14 @@ __xdp_do_redirect_frame(struct bpf_redirect_info *ri, struct net_device *dev,
+ 	void *fwd = ri->tgt_value;
+ 	u32 map_id = ri->map_id;
+ 	u32 flags = ri->flags;
++	bool ordered = ri->kern_flags & BPF_RI_F_CPU_MAP_ORDERED;
+ 	struct bpf_map *map;
+ 	int err;
+ 
+ 	ri->map_id = 0; /* Valid map id idr range: [1,INT_MAX[ */
+ 	ri->flags = 0;
+ 	ri->map_type = BPF_MAP_TYPE_UNSPEC;
++	ri->kern_flags &= ~BPF_RI_F_CPU_MAP_ORDERED;
+ 
+ 	if (unlikely(!xdpf)) {
+ 		err = -EOVERFLOW;
+@@ -4653,7 +4655,10 @@ __xdp_do_redirect_frame(struct bpf_redirect_info *ri, struct net_device *dev,
+ 		}
+ 		break;
+ 	case BPF_MAP_TYPE_CPUMAP:
+-		err = cpu_map_enqueue(fwd, xdpf, dev);
++		if (ordered)
++			err = cpu_map_enqueue_ordered(fwd, ri->tgt_index, xdpf, dev);
++		else
++			err = cpu_map_enqueue(fwd, xdpf, dev);
+ 		break;
+ 	case BPF_MAP_TYPE_UNSPEC:
+ 		if (map_id == INT_MAX) {
+@@ -4713,7 +4718,7 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+ 				       struct xdp_buff *xdp,
+ 				       const struct bpf_prog *xdp_prog,
+ 				       void *fwd, enum bpf_map_type map_type,
+-				       u32 map_id, u32 flags)
++				       u32 map_id, u32 flags, bool ordered)
+ {
+ 	struct bpf_redirect_info *ri = bpf_net_ctx_get_ri();
+ 	struct bpf_map *map;
+@@ -4750,7 +4755,10 @@ static int xdp_do_generic_redirect_map(struct net_device *dev,
+ 		consume_skb(skb);
+ 		break;
+ 	case BPF_MAP_TYPE_CPUMAP:
+-		err = cpu_map_generic_redirect(fwd, skb);
++		if (ordered)
++			err = cpu_map_generic_redirect_ordered(fwd, ri->tgt_index, skb);
++		else
++			err = cpu_map_generic_redirect(fwd, skb);
+ 		if (unlikely(err))
+ 			goto err;
+ 		break;
+@@ -4775,11 +4783,13 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
+ 	void *fwd = ri->tgt_value;
+ 	u32 map_id = ri->map_id;
+ 	u32 flags = ri->flags;
++	bool ordered = ri->kern_flags & BPF_RI_F_CPU_MAP_ORDERED;
+ 	int err;
+ 
+ 	ri->map_id = 0; /* Valid map id idr range: [1,INT_MAX[ */
+ 	ri->flags = 0;
+ 	ri->map_type = BPF_MAP_TYPE_UNSPEC;
++	ri->kern_flags &= ~BPF_RI_F_CPU_MAP_ORDERED;
+ 
+ 	if (map_type == BPF_MAP_TYPE_UNSPEC && map_id == INT_MAX) {
+ 		fwd = dev_get_by_index_rcu(dev_net(dev), ri->tgt_index);
+@@ -4798,7 +4808,8 @@ int xdp_do_generic_redirect(struct net_device *dev, struct sk_buff *skb,
+ 		return 0;
+ 	}
+ 
+-	return xdp_do_generic_redirect_map(dev, skb, xdp, xdp_prog, fwd, map_type, map_id, flags);
++	return xdp_do_generic_redirect_map(dev, skb, xdp, xdp_prog, fwd,
++					   map_type, map_id, flags, ordered);
+ err:
+ 	_trace_xdp_redirect_err(dev, xdp_prog, ri->tgt_index, err);
+ 	return err;
+diff --git a/tools/include/uapi/linux/bpf.h b/tools/include/uapi/linux/bpf.h
+index 732b35cc08d1..7e398ab683d8 100644
+--- a/tools/include/uapi/linux/bpf.h
++++ b/tools/include/uapi/linux/bpf.h
+@@ -1559,6 +1559,10 @@ union bpf_attr {
+ 		 * (nelem_hint). 0 = use rhashtable default. Must be
+ 		 * <= min(max_entries, U16_MAX). Upper 32 bits reserved,
+ 		 * must be zero.
++		 *
++		 * BPF_MAP_TYPE_CPUMAP - number of preallocated ordering domains.
++		 * Zero selects ordinary CPUMAP operation. Upper 32 bits must
++		 * be zero. Ordered maps use bpf_cpumap_redirect().
+ 		 */
+ 		__u64	map_extra;
+ 
+-- 
+2.43.0
+

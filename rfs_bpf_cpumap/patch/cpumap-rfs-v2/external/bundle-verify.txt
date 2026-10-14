@@ -1,0 +1,7 @@
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/patch/cpumap-rfs-v2/external/rfs-bpf.bundle is okay
+The bundle contains these 3 refs:
+57de598224fd3ae5314d0a7bce192a3a9ae3256c refs/heads/archive/tested-before-style-20261012
+aaf425c9c842ee58ab5f48e1bcd16cbdc47e0020 refs/heads/main
+aaf425c9c842ee58ab5f48e1bcd16cbdc47e0020 HEAD
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1

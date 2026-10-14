@@ -1,0 +1,138 @@
+---------------------------------------------
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c
+---------------------------------------------
+WARNING: externs should be avoided in .c files
+#15: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:15:
++extern struct sock *bpf_xdp_sctp_lookup(struct xdp_md *ctx,
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#90: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:90:
++const volatile __u32 nr_cpus;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#91: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:91:
++const volatile __u32 cpus[RFS_MAX_CPUS];
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#92: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:92:
++const volatile __u32 netns_ino;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#93: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:93:
++const volatile __u32 hash_seed;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#94: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:94:
++const volatile __u32 policy;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#95: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:95:
++const volatile bool ordered = true;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#97: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:97:
++const volatile __u32 hardware;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#132: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:132:
++	if (*(volatile __u32 *)&hint->cpu_plus_one != cpu)
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#133: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:133:
++		*(volatile __u32 *)&hint->cpu_plus_one = cpu;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#327: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:327:
++	old = *(volatile __u32 *)&choice->cpu_plus_one;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#466: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:466:
++					observed = *(volatile __u32 *)&hint->cpu_plus_one;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#487: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c:487:
++				observed = *(volatile __u32 *)&hint->cpu_plus_one;
+
+total: 0 errors, 13 warnings, 0 checks, 550 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs.bpf.c has style problems, please review.
+----------------------------------------------
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs_user.c
+----------------------------------------------
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#32: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs_user.c:32:
++static volatile sig_atomic_t exiting;
+
+WARNING: quoted string split across lines
+#537: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs_user.c:537:
++		fprintf(stderr, "Hardware intents require rfs/llc-load "
++			"and a short pin directory\n");
+
+WARNING: quoted string split across lines
+#658: FILE: /home/sisyphus/code/rfs-bpf/src/xdp_rfs_user.c:658:
++		fprintf(stderr, "Measurement baseline: ordinary CPUMAP, "
++			"no ordering/drain guarantee\n");
+
+total: 0 errors, 3 warnings, 0 checks, 713 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs_user.c has style problems, please review.
+--------------------------------------
+/home/sisyphus/code/rfs-bpf/src/load.c
+--------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 176 lines checked
+
+/home/sisyphus/code/rfs-bpf/src/load.c has no obvious style problems and is ready for submission.
+--------------------------------------
+/home/sisyphus/code/rfs-bpf/src/load.h
+--------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 13 lines checked
+
+/home/sisyphus/code/rfs-bpf/src/load.h has no obvious style problems and is ready for submission.
+-----------------------------------------
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs.h
+-----------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 65 lines checked
+
+/home/sisyphus/code/rfs-bpf/src/xdp_rfs.h has no obvious style problems and is ready for submission.
+---------------------------------------------------------------
+/home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c
+---------------------------------------------------------------
+CHECK: line length of 105 exceeds 100 columns
+#717: FILE: /home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c:717:
++	    !ASSERT_OK(bpf_map_lookup_elem_flags(fd, &actual, &intent, BPF_F_LOCK), "intent_snapshot") ||
+
+CHECK: line length of 107 exceeds 100 columns
+#721: FILE: /home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c:721:
++	    !ASSERT_OK(bpf_map_lookup_elem_flags(fd, &actual, &intent, BPF_F_LOCK), "new_intent_snapshot"))
+
+CHECK: Alignment should match open parenthesis
+#744: FILE: /home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c:744:
++	if (!ASSERT_OK(bpf_map_update_elem(bpf_map__fd(f.skel->maps.cpu_map),
++					  &key, &entry, BPF_ANY), "load_extra_cpu") ||
+
+CHECK: Alignment should match open parenthesis
+#753: FILE: /home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c:753:
++		if (!ASSERT_OK(bpf_map_update_elem(bpf_map__fd(f.skel->maps.llc),
++						  &key, &group, BPF_ANY), "load_topology"))
+
+total: 0 errors, 0 warnings, 4 checks, 818 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/rfs-bpf/tests/prog_tests/external_xdp_rfs.c has style problems, please review.
+---------------------------------------------------------------
+/home/sisyphus/code/rfs-bpf/tests/progs/test_external_xdp_rfs.c
+---------------------------------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 100 lines checked
+
+/home/sisyphus/code/rfs-bpf/tests/progs/test_external_xdp_rfs.c has no obvious style problems and is ready for submission.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

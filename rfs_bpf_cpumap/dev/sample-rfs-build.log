@@ -1,0 +1,4 @@
+make[1]: Entering directory '/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/sample-rfs'
+  CC  xdp_rfs_user.o
+  LD  xdp_rfs
+make[1]: Leaving directory '/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/sample-rfs'

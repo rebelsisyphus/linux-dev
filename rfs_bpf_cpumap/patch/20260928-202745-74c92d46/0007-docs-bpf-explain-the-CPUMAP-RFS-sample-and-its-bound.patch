@@ -1,0 +1,219 @@
+From 9de54e62c380e308927758207e9507fcb107e479 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 28 Sep 2026 20:25:29 +0800
+Subject: [PATCH 7/7] docs/bpf: explain the CPUMAP RFS sample and its
+ boundaries
+
+Describe socket CPU observations, stable tuple domains and ordered hash
+fallbacks. Document how to build, configure, attach and drain the sample,
+including its static topology and ingress quiescence requirements.
+
+State the supported packet and socket paths, early-lookup limitations,
+process failure behavior, and the outstanding performance evaluation.
+Distinguish selection counters from successful packet delivery and show
+how to run the policy and infrastructure selftests.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ Documentation/bpf/index.rst   |   1 +
+ Documentation/bpf/xdp-rfs.rst | 158 ++++++++++++++++++++++++++++++++++
+ samples/bpf/README.rst        |   5 ++
+ 3 files changed, 164 insertions(+)
+ create mode 100644 Documentation/bpf/xdp-rfs.rst
+
+diff --git a/Documentation/bpf/index.rst b/Documentation/bpf/index.rst
+index 638a00d42bc2..34b7b8ac561f 100644
+--- a/Documentation/bpf/index.rst
++++ b/Documentation/bpf/index.rst
+@@ -34,6 +34,7 @@ that goes into great technical depth about the BPF Architecture.
+    linux-notes
+    other
+    redirect
++   xdp-rfs
+ 
+ .. Links:
+ .. _BPF and XDP Reference Guide: https://docs.cilium.io/en/latest/bpf/
+diff --git a/Documentation/bpf/xdp-rfs.rst b/Documentation/bpf/xdp-rfs.rst
+new file mode 100644
+index 000000000000..0cb62e640d76
+--- /dev/null
++++ b/Documentation/bpf/xdp-rfs.rst
+@@ -0,0 +1,158 @@
++.. SPDX-License-Identifier: GPL-2.0
++
++RFS policy with XDP and ordered CPUMAP
++====================================
++
++``samples/bpf/xdp_rfs`` demonstrates Receive Flow Steering as a BPF policy.
++It requires the optional ordered CPUMAP interfaces described in
++:doc:`map_cpumap`, XDP socket lookup, and XDP socket storage access.
++``CONFIG_RPS`` is not required. The policy does not modify the scheduler or
++add a kernel flow table.
++
++Policy
++------
++
++BPF tracing programs observe ``inet_sendmsg``, ``inet6_sendmsg``,
++``inet_recvmsg``, ``inet6_recvmsg``, ``inet_splice_eof`` and
++``tcp_splice_read`` at entry, and successful ``inet_accept`` at exit.
++When available, ``tcp_zerocopy_receive`` is also observed. The send observers
++use protocol entry points because ``inet_send_prepare`` can be inlined.
++They record the executing CPU in
++``BPF_MAP_TYPE_SK_STORAGE`` for established TCP and connected UDP sockets in
++the loader's network namespace. Error-queue receives are excluded. These
++are application-use observations, not the socket's incoming-packet CPU.
++They remain effective with ``CONFIG_RPS=n``.
++
++The hint is an aligned 32-bit CPU-plus-one value. Concurrent users of a
++socket have last-writer-wins semantics, like native RFS's advisory CPU hint.
++Hints persist until another observation or socket destruction; they do not
++have a timer. The sample does not observe SCTP, MPTCP subflow propagation or
++io_uring zero-copy receive. Ordinary sendmsg/recvmsg paths used by io_uring
++are observed when they reach the functions above. Missing optional tracing
++targets are reported by the loader.
++
++XDP hashes a directional address/port/protocol tuple into one of 4096 ordered
++domains. This assignment is independent of socket existence and remains
++unchanged for the map's lifetime, including during connection establishment,
++socket destruction, and socket storage allocation failures. Colliding flows
++share a migration barrier and can delay each other's CPU changes. There is
++no dynamic domain allocator, hash-map eviction, or domain reuse protocol.
++
++XDP looks up the socket, reads its hint without allocating socket storage,
++and releases the lookup reference. If the CPU belongs to the configured set,
++it becomes the desired CPU. Otherwise a stable tuple hash selects a CPU from
++that set. Lookup failures, missing storage and hints outside the set all
++take this fallback, still using the same ordered domain. Listeners and
++unconnected UDP sockets never provide hints.
++
++Every admitted packet uses ``bpf_cpumap_redirect()``. The kernel, rather than
++a racy BPF state query, decides when the old target has drained enough to
++permit migration. Queue exhaustion or target failure does not cause a local
++PASS fallback. The normal ordered CPUMAP drop and CPU-hotplug exceptions
++apply.
++
++Packet scope
++------------
++
++The example parses Ethernet with non-fragmented IPv4 TCP/UDP (including IPv4
++header options) or IPv6 TCP/UDP without extension headers. Other Ethernet
++protocols, VLAN encapsulation, fragments and IPv6 extension headers pass
++locally. Truncated headers needed for classification are dropped. The
++ordering contract therefore applies only to flows that consistently use
++the supported packet formats. In particular, mixing fragmented and
++non-fragmented packets of one flow can bypass the barrier. This example is
++not a fragmentation, tunneling or VLAN policy.
++
++Use it on a direct local unicast path. Socket lookup precedes netfilter and
++other demultiplexing decisions: NAT, VRF, reuseport BPF, sk_lookup policy,
++socket-map redirection, and VLAN devices in other namespaces require their
++own association policy. A successful early lookup is not proof that the
++stack will deliver the packet to that socket. Multicast and broadcast are
++outside the supported RFS policy.
++
++Control and lifetime
++--------------------
++
++The loader takes an interface and a comma-separated list of distinct online
++CPUs (at most 128). The CPU set and hash seed are immutable while loaded.
++It creates a queue of 2048 entries for each CPU before attaching ingress.
++It refuses to replace an existing XDP program. Driver XDP is the default;
++``-S`` selects generic XDP for drivers without native support.
++
++Keep the interface administratively down during initial attachment. Once
++the loader prints ``ready``, bring the interface up from another terminal.
++Before exiting, bring it down again and keep it down until the loader exits.
++SIGINT/SIGTERM while the interface is up leaves the program attached and
++waits for it to be brought down. The loader then queries all domains until
++source reservations and completion watermarks have drained, and detaches
++only its own ingress program. It leaves the interface down.
++
++The interface state is a control-plane contract: another controller must not
++bring it up during drain or inject test frames behind the stopped device.
++Changing the map, domain assignment or CPU set also requires this protocol.
++Disable native RPS and RFS on every RX queue; the loader checks both
++``rps_cpus`` and ``rps_flow_cnt`` at startup. A native RFS flow table can
++steer packets even with an empty RPS CPU mask. Downstream asynchronous
++steering is outside CPUMAP's completion boundary.
++
++Use a static CPU topology for the sample. Before CPU hotplug, stop ingress,
++drain and restart the sample with the intended online set. CPU online can
++require recreating a CPUMAP worker whose affinity was relaxed during CPU
++offline. The loader does not implement hotplug event tracking.
++
++On a drain error, or abrupt process death, the legacy XDP attachment retains
++its program and maps; the loader's tracing links disappear. Existing hints
++can therefore become stale, and new sockets use the hash fallback. This is
++not an automatic recovery service. Quiesce ingress before manual removal;
++do not replace the running program while its queues are outstanding.
++
++Building and running
++--------------------
++
++Use a kernel with BTF, BPF JIT, BPF events, function tracing, INET, NET_NS, and the
++ordered CPUMAP patchset. IPv6 observations additionally need IPv6 tracing
++targets. Build the samples as described in ``samples/bpf/README.rst``.
++To limit the existing samples Makefile to this program::
++
++  make M=samples/bpf tprogs-y=xdp_rfs always-y=xdp_rfs \
++       LINKED_SKELS=xdp_rfs.skel.h BPF_SRCS_LINKED=xdp_rfs.bpf.c
++
++For a separate kernel build/output directory, add ``O=/path/to/kernel-build``
++and ``MO=/path/to/sample-output``. Use ``CLANG``, ``LLC`` and ``BPFTOOL`` to
++select installed build tools when necessary.
++
++For example, in an isolated network namespace with native RPS disabled::
++
++  ip link set dev eth0 down
++  ./xdp_rfs -i eth0 -c 2,3
++
++After ``ready``, in a second terminal in the same namespace::
++
++  ip link set dev eth0 up
++  # Run the server, change its CPU affinity and generate client traffic.
++  ip link set dev eth0 down
++
++Then stop the loader with Ctrl-C. It prints per-CPU aggregated counters for
++hint/fallback selections, unsupported PASS, parser DROP, and observer storage
++allocation failures. Selection counts describe redirect requests, not
++successful ring admission or stack delivery. CPUMAP tracepoints expose its
++queue and redirect errors.
++
++Validation and cost
++-------------------
++
++``test_progs -t xdp_rfs`` runs the sample BPF source itself, with additional
++TC observation of stack delivery. It uses real TCP and connected UDP sockets,
++checks IPv4/IPv6 receive/send CPU changes, accept/splice/zero-copy observations,
++error-queue exclusion, missing/out-of-set hints, and socket recreation.
++Native live-frame tests check CPUMAP-to-UDP delivery and CPU migration;
++classification tests cover lookup misses and the unsupported-format boundary. Run
++``test_progs -t xdp_cpumap_ordered`` for migration barriers, concurrent
++producers, queue-full, entry replacement and hotplug infrastructure tests.
++
++The sample adds parsing, hashing, socket lookup, storage lookup, statistics
++and fentry work, as well as ordered CPUMAP's locks/accounting and GRO flush
++cost. Socket storage is allocated on first observation, not per XDP packet.
++No throughput or latency improvement is implied by functional tests.
++Measure these costs and domain collisions against native RFS and ordinary
++CPUMAP on the intended NIC and workload before deployment.
+diff --git a/samples/bpf/README.rst b/samples/bpf/README.rst
+index cabe2d216997..5cd6784b0e23 100644
+--- a/samples/bpf/README.rst
++++ b/samples/bpf/README.rst
+@@ -10,6 +10,11 @@ See the commit messages removing each tool from this directory for how to
+ convert specific command invocations between the old samples and the utilities
+ in xdp-tools.
+ 
++The ``xdp_rfs`` sample uses the ordered CPUMAP extension to steer receive
++processing using application socket CPU hints. See
++``Documentation/bpf/xdp-rfs.rst`` for its build instructions, control protocol
++and packet/observer limitations.
++
+ Build dependencies
+ ==================
+ 
+-- 
+2.43.0
+

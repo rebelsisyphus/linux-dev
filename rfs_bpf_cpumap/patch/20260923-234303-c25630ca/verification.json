@@ -1,0 +1,59 @@
+{
+  "base": "9b87fdc9af2fbfcdb5c24a64139685ef80f6573f",
+  "tip": "7cbebe4694ff2abff42acec6eb5f7678d69beb57",
+  "tree": "5af57f45f4886675800177b71e305bff0a13a100",
+  "run_id": "20260923-230457-8f04d26c",
+  "kernel_sha256": "27c637c48800ea23be9c1583756958a46cc06016e4befbc95a23aad385892ea1",
+  "source_sha256": {
+    "Documentation/bpf/map_cpumap.rst": "44732700495124970420bd6f1c50f4c9e24771443e6605e9310a1e4cc5243dd1",
+    "include/linux/bpf.h": "717663d0187b01dd4f2ac50d008007cbbb64ba7c86588f8b9ea633d53257028d",
+    "include/linux/filter.h": "1b2957cbdef900eafe3384768a24a74115250b597b56396d95b4fb8cf7f84637",
+    "include/uapi/linux/bpf.h": "c81e70af780b6cd70ed85e071ea857385d07c86c02e9e37c84219575cca610f5",
+    "kernel/bpf/cpumap.c": "811938bff45751996a3cf8d5675e7918d2f7a2bc188eeec03f6c9338f508122d",
+    "kernel/bpf/syscall.c": "469fdfa4fe5f059ca58af503008bfad00b651db3e0e8376f3b3d2007a92b1dc4",
+    "net/core/filter.c": "276cf0b68c214f0bd866ae6e94c64f76c8925b023c9209334a354b81191a1cd7",
+    "tools/include/uapi/linux/bpf.h": "c81e70af780b6cd70ed85e071ea857385d07c86c02e9e37c84219575cca610f5",
+    "tools/testing/selftests/bpf/prog_tests/sk_storage_tracing.c": "36c745c727ecba0d4019cac77eead83a8f79f49c561fa0d150b5d4a9b89caef1",
+    "tools/testing/selftests/bpf/progs/test_sk_storage_tracing.c": "25c62d98f7371275bfbf739b352dfe92f7250c91677eec34ab6cee3f6644cc94",
+    "tools/testing/selftests/bpf/prog_tests/xdp_cpumap_ordered.c": "91cf4cfd4b381d215666e8434049efd01898feb5c3edbc03feb45505ef4454f5",
+    "tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c": "3bfc7de9830432544638394585c426e8e716b9ef22d75738660d15ba246dab30",
+    "tools/testing/selftests/bpf/xdp_cpumap_ordered.h": "c757018c58c27d620bd8aada3380348f6f5a7733233f718479c7accb7dc808a7"
+  },
+  "patch_sha256": {
+    "0001-bpf-allow-XDP-programs-to-access-socket-storage.patch": "e4c95af4b86c17c4e180f972de973e0df8fb76272cc207dd204ff056cf7112a0",
+    "0002-bpf-add-optional-ordered-domains-to-CPUMAP.patch": "b0f579f8261c109956470faef5c1f5ec2069dc236eb44cd0d9b8e1cd522f204b",
+    "0003-selftests-bpf-cover-ordered-CPUMAP-steering.patch": "2a5dc55d08c90878913d4ee985ea74832b6b618fd6ab4b1db98175e41d270a06",
+    "0004-docs-bpf-describe-ordered-CPUMAP-migration.patch": "9e1f22ba4ab372f9f4f274a39245f7032a55896f301122b2c222b10e14bfe0ff"
+  },
+  "checkpatch": [
+    {
+      "patch": "0001-bpf-allow-XDP-programs-to-access-socket-storage.patch",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0,
+      "checks": 0
+    },
+    {
+      "patch": "0002-bpf-add-optional-ordered-domains-to-CPUMAP.patch",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0,
+      "checks": 0
+    },
+    {
+      "patch": "0003-selftests-bpf-cover-ordered-CPUMAP-steering.patch",
+      "exit_code": 1,
+      "errors": 0,
+      "warnings": 2,
+      "checks": 0
+    },
+    {
+      "patch": "0004-docs-bpf-describe-ordered-CPUMAP-migration.patch",
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 0,
+      "checks": 0
+    }
+  ],
+  "spdx_subcheck": "unavailable: Python ply missing; identifiers checked manually"
+}

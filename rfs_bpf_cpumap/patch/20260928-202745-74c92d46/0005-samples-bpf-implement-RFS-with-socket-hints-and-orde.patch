@@ -1,0 +1,803 @@
+From 4ddac4dc2d28e5e832e4c73c420f1e2a14dcf1e5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 28 Sep 2026 20:25:23 +0800
+Subject: [PATCH 5/7] samples/bpf: implement RFS with socket hints and ordered
+ CPUMAP
+
+Add a runnable CPU steering policy on top of ordered CPUMAP. Observe
+application socket use with BPF tracing and store an advisory CPU hint in
+socket storage. Use the protocol send/receive entry points and successful
+accept exit, plus TCP splice and optional zero-copy receive. Filter by the
+loader's network namespace and established TCP/connected UDP state.
+
+In XDP, hash the tuple to a stable domain before consulting the socket.
+Read socket storage without allocating, release the lookup reference, and
+select either the hinted CPU in the configured set or a stable hash
+fallback. Lookup and allocation failures never switch an admitted tuple
+to local PASS. Keep migration and completion decisions in the existing
+ordered redirect kfunc; introduce no kernel policy or CONFIG_RPS
+dependency.
+
+Provide a libbpf loader with driver/generic XDP modes, CPU validation,
+native RPS/RFS exclusion, initialization before attachment, and conditional
+detachment after ingress quiescence and domain drain. Refuse replacement
+of an existing program. Keep fixed domains and a static CPU set for this
+sample; fragments, extension headers and custom demultiplexing remain
+outside its ordering contract.
+
+Build the sample out of tree with generated skeleton/header includes.
+
+Assisted-by: LLM
+Signed-off-by: Dong Chenchen <superdcc97@163.com>
+---
+ samples/bpf/.gitignore     |   1 +
+ samples/bpf/Makefile       |  12 +-
+ samples/bpf/xdp_rfs.bpf.c  | 291 +++++++++++++++++++++++++++++
+ samples/bpf/xdp_rfs.h      |  22 +++
+ samples/bpf/xdp_rfs_user.c | 363 +++++++++++++++++++++++++++++++++++++
+ 5 files changed, 687 insertions(+), 2 deletions(-)
+ create mode 100644 samples/bpf/xdp_rfs.bpf.c
+ create mode 100644 samples/bpf/xdp_rfs.h
+ create mode 100644 samples/bpf/xdp_rfs_user.c
+
+diff --git a/samples/bpf/.gitignore b/samples/bpf/.gitignore
+index 0002cd359fb1..d61556c824d3 100644
+--- a/samples/bpf/.gitignore
++++ b/samples/bpf/.gitignore
+@@ -40,6 +40,7 @@ tracex7
+ xdp_adjust_tail
+ xdp_fwd
+ xdp_router_ipv4
++xdp_rfs
+ xdp_tx_iptunnel
+ testfile.img
+ hbm_out.log
+diff --git a/samples/bpf/Makefile b/samples/bpf/Makefile
+index 95a4fa1f1e44..a25e229761d6 100644
+--- a/samples/bpf/Makefile
++++ b/samples/bpf/Makefile
+@@ -23,6 +23,7 @@ tprogs-y += offwaketime
+ tprogs-y += spintest
+ tprogs-y += map_perf_test
+ tprogs-y += xdp_router_ipv4
++tprogs-y += xdp_rfs
+ tprogs-y += trace_event
+ tprogs-y += sampleip
+ tprogs-y += tc_l2_redirect
+@@ -80,6 +81,7 @@ ibumad-objs := ibumad_user.o
+ hbm-objs := hbm.o $(CGROUP_HELPERS)
+ 
+ xdp_router_ipv4-objs := xdp_router_ipv4_user.o $(XDP_SAMPLE)
++xdp_rfs-objs := xdp_rfs_user.o
+ 
+ # Tell kbuild to always build the programs
+ always-y := $(tprogs-y)
+@@ -283,6 +285,10 @@ $(obj)/$(TRACE_HELPERS) $(obj)/$(CGROUP_HELPERS) $(obj)/$(XDP_SAMPLE): | libbpf_
+ .PHONY: libbpf_hdrs
+ 
+ $(obj)/xdp_router_ipv4_user.o: $(obj)/xdp_router_ipv4.skel.h
++$(obj)/xdp_rfs_user.o: $(obj)/xdp_rfs.skel.h
++$(obj)/xdp_rfs_user.o: TPROGS_CFLAGS += -I$(obj)
++$(obj)/xdp_rfs.bpf.o: CLANG_FLAGS += -fms-extensions -Wno-microsoft-anon-tag
++$(obj)/xdp_rfs.bpf.o: $(src)/xdp_rfs.h
+ 
+ $(obj)/tracex5.bpf.o: $(obj)/syscall_nrs.h
+ $(obj)/hbm_out_kern.o: $(src)/hbm.h $(src)/hbm_kern.h
+@@ -341,16 +347,18 @@ $(obj)/xdp_router_ipv4.bpf.o: $(obj)/xdp_sample.bpf.o
+ 
+ $(obj)/%.bpf.o: $(src)/%.bpf.c $(obj)/vmlinux.h $(src)/xdp_sample.bpf.h $(src)/xdp_sample_shared.h
+ 	@echo "  CLANG-BPF " $@
+-	$(Q)$(CLANG) -g -O2 --target=bpf -D__TARGET_ARCH_$(SRCARCH) \
++	$(Q)$(CLANG) $(CLANG_FLAGS) -g -O2 --target=bpf -D__TARGET_ARCH_$(SRCARCH) \
+ 		-Wno-compare-distinct-pointer-types -I$(srctree)/include \
+-		-I$(srctree)/samples/bpf -I$(srctree)/tools/include \
++		-I$(obj) -I$(srctree)/samples/bpf -I$(srctree)/tools/include \
+ 		-I$(LIBBPF_INCLUDE) $(CLANG_SYS_INCLUDES) \
+ 		-c $(filter %.bpf.c,$^) -o $@
+ 
+ LINKED_SKELS := xdp_router_ipv4.skel.h
++LINKED_SKELS += xdp_rfs.skel.h
+ clean-files += $(LINKED_SKELS)
+ 
+ xdp_router_ipv4.skel.h-deps := xdp_router_ipv4.bpf.o xdp_sample.bpf.o
++xdp_rfs.skel.h-deps := xdp_rfs.bpf.o
+ 
+ LINKED_BPF_SRCS := $(patsubst %.bpf.o,%.bpf.c,$(foreach skel,$(LINKED_SKELS),$($(skel)-deps)))
+ 
+diff --git a/samples/bpf/xdp_rfs.bpf.c b/samples/bpf/xdp_rfs.bpf.c
+new file mode 100644
+index 000000000000..38551effd8f4
+--- /dev/null
++++ b/samples/bpf/xdp_rfs.bpf.c
+@@ -0,0 +1,291 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "vmlinux.h"
++#include <bpf/bpf_endian.h>
++#include <bpf/bpf_helpers.h>
++#include <bpf/bpf_tracing.h>
++#include "xdp_rfs.h"
++
++#define MSG_ERRQUEUE 0x2000
++
++extern int bpf_cpumap_redirect(void *map, __u32 cpu, __u32 domain) __ksym;
++extern int bpf_cpumap_get_state(void *map, __u32 domain, void *state,
++				__u32 size) __ksym;
++
++struct {
++	__uint(type, BPF_MAP_TYPE_CPUMAP);
++	__uint(max_entries, 1);
++	__uint(map_extra, RFS_DOMAINS);
++	__type(key, __u32);
++	__type(value, struct bpf_cpumap_val);
++} cpu_map SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_ARRAY);
++	__uint(max_entries, 1);
++	__type(key, __u32);
++	__type(value, __u32);
++} allowed SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_SK_STORAGE);
++	__uint(map_flags, BPF_F_NO_PREALLOC);
++	__type(key, int);
++	__type(value, struct rfs_hint);
++} socket_cpu SEC(".maps");
++
++struct {
++	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
++	__uint(max_entries, RFS_STAT_MAX);
++	__type(key, __u32);
++	__type(value, __u64);
++} stats SEC(".maps");
++
++const volatile __u32 nr_cpus;
++const volatile __u32 cpus[RFS_MAX_CPUS];
++const volatile __u32 netns_ino;
++const volatile __u32 hash_seed;
++
++/* Only the unattached control program writes these fields. */
++__u32 busy_domains;
++int query_error;
++
++static __always_inline void count(__u32 key)
++{
++	__u64 *value = bpf_map_lookup_elem(&stats, &key);
++
++	if (value)
++		__sync_fetch_and_add(value, 1);
++}
++
++static __always_inline void record_cpu(struct sock *sk)
++{
++	struct rfs_hint *hint;
++	__u32 cpu;
++	__u16 protocol;
++
++	if (!sk || sk->__sk_common.skc_state != BPF_TCP_ESTABLISHED ||
++	    sk->__sk_common.skc_net.net->ns.inum != netns_ino)
++		return;
++	protocol = sk->sk_protocol;
++	if (protocol != IPPROTO_TCP && protocol != IPPROTO_UDP)
++		return;
++	hint = bpf_sk_storage_get(&socket_cpu, sk, 0, BPF_SK_STORAGE_GET_F_CREATE);
++	if (!hint) {
++		count(RFS_STORAGE_FAILURE);
++		return;
++	}
++	cpu = bpf_get_smp_processor_id() + 1;
++	if (*(volatile __u32 *)&hint->cpu_plus_one != cpu)
++		*(volatile __u32 *)&hint->cpu_plus_one = cpu;
++}
++
++SEC("fentry/inet_sendmsg")
++int BPF_PROG(rfs_send4, struct socket *sock)
++{
++	record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fentry/inet6_sendmsg")
++int BPF_PROG(rfs_send6, struct socket *sock)
++{
++	record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fentry/inet_splice_eof")
++int BPF_PROG(rfs_splice_eof, struct socket *sock)
++{
++	record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fentry/inet_recvmsg")
++int BPF_PROG(rfs_recv4, struct socket *sock, struct msghdr *msg,
++	     size_t size, int flags)
++{
++	if (!(flags & MSG_ERRQUEUE))
++		record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fentry/inet6_recvmsg")
++int BPF_PROG(rfs_recv6, struct socket *sock, struct msghdr *msg,
++	     size_t size, int flags)
++{
++	if (!(flags & MSG_ERRQUEUE))
++		record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fexit/inet_accept")
++int BPF_PROG(rfs_accept, struct socket *sock, struct socket *newsock,
++	     struct proto_accept_arg *arg, int ret)
++{
++	if (!ret)
++		record_cpu(newsock->sk);
++	return 0;
++}
++
++SEC("fentry/tcp_splice_read")
++int BPF_PROG(rfs_splice, struct socket *sock)
++{
++	record_cpu(sock->sk);
++	return 0;
++}
++
++SEC("fentry/tcp_zerocopy_receive")
++int BPF_PROG(rfs_zerocopy, struct sock *sk)
++{
++	record_cpu(sk);
++	return 0;
++}
++
++static __always_inline __u32 mix(__u32 hash, __u32 word)
++{
++	hash ^= word;
++	hash *= 0x9e3779b1;
++	return (hash << 13) | (hash >> 19);
++}
++
++/* Zero-initialized tuple padding makes the domain independent of lookup. */
++static __always_inline __u32 tuple_hash(struct bpf_sock_tuple *tuple,
++					__u32 size, __u8 protocol)
++{
++	__u32 hash = mix(hash_seed, size ^ protocol);
++	__u32 word;
++	int i;
++
++#pragma unroll
++	for (i = 0; i < sizeof(*tuple) / sizeof(word); i++) {
++		__builtin_memcpy(&word, (char *)tuple + i * sizeof(word), sizeof(word));
++		hash = mix(hash, word);
++	}
++	hash ^= hash >> 16;
++	hash *= 0x85ebca6b;
++	hash ^= hash >> 13;
++	return hash;
++}
++
++static __always_inline bool cpu_allowed(__u32 cpu)
++{
++	__u32 *value = bpf_map_lookup_elem(&allowed, &cpu);
++
++	return value && *value;
++}
++
++SEC("xdp")
++int rfs_redirect(struct xdp_md *ctx)
++{
++	void *data = (void *)(long)ctx->data;
++	void *end = (void *)(long)ctx->data_end;
++	struct bpf_sock_tuple tuple = {};
++	struct ethhdr *eth = data;
++	struct rfs_hint *hint;
++	struct bpf_sock *sk;
++	__u32 size, hash, cpu, observed = 0;
++	__u8 protocol;
++	void *transport;
++
++	if ((void *)(eth + 1) > end)
++		goto drop;
++	if (eth->h_dest[0] & 1)
++		goto pass;
++	if (eth->h_proto == bpf_htons(0x0800)) {
++		struct iphdr *ip = (void *)(eth + 1);
++		__u32 len;
++
++		if ((void *)(ip + 1) > end || ip->version != 4 || ip->ihl < 5)
++			goto drop;
++		len = ip->ihl * 4;
++		if ((void *)ip + len > end || bpf_ntohs(ip->tot_len) < len)
++			goto drop;
++		if (ip->frag_off & bpf_htons(0x3fff))
++			goto pass;
++		protocol = ip->protocol;
++		tuple.ipv4.saddr = ip->saddr;
++		tuple.ipv4.daddr = ip->daddr;
++		size = sizeof(tuple.ipv4);
++		transport = (void *)ip + len;
++		if (protocol != IPPROTO_TCP && protocol != IPPROTO_UDP)
++			goto pass;
++		if (bpf_ntohs(ip->tot_len) < len + 4 || transport + 4 > end)
++			goto drop;
++		__builtin_memcpy(&tuple.ipv4.sport, transport, 4);
++	} else if (eth->h_proto == bpf_htons(0x86dd)) {
++		struct ipv6hdr *ip = (void *)(eth + 1);
++
++		if ((void *)(ip + 1) > end || ip->version != 6)
++			goto drop;
++		protocol = ip->nexthdr;
++		if (protocol != IPPROTO_TCP && protocol != IPPROTO_UDP)
++			goto pass;
++		transport = ip + 1;
++		if (bpf_ntohs(ip->payload_len) < 4 || transport + 4 > end)
++			goto drop;
++		__builtin_memcpy(tuple.ipv6.saddr, &ip->saddr, sizeof(ip->saddr));
++		__builtin_memcpy(tuple.ipv6.daddr, &ip->daddr, sizeof(ip->daddr));
++		__builtin_memcpy(&tuple.ipv6.sport, transport, 4);
++		size = sizeof(tuple.ipv6);
++	} else {
++		goto pass;
++	}
++
++	if (!nr_cpus || nr_cpus > RFS_MAX_CPUS)
++		goto drop;
++	hash = tuple_hash(&tuple, size, protocol);
++	cpu = cpus[hash % nr_cpus];
++	if (protocol == IPPROTO_TCP)
++		sk = bpf_sk_lookup_tcp(ctx, &tuple, size, BPF_F_CURRENT_NETNS, 0);
++	else
++		sk = bpf_sk_lookup_udp(ctx, &tuple, size, BPF_F_CURRENT_NETNS, 0);
++	if (sk) {
++		if (sk->state == BPF_TCP_ESTABLISHED) {
++			hint = bpf_sk_storage_get(&socket_cpu, sk, 0, 0);
++			if (hint)
++				observed = *(volatile __u32 *)&hint->cpu_plus_one;
++		}
++		bpf_sk_release(sk);
++	}
++	if (observed && cpu_allowed(observed - 1)) {
++		cpu = observed - 1;
++		count(RFS_HINT);
++	} else {
++		count(RFS_FALLBACK);
++	}
++	/* A lookup miss changes only the candidate, never the ordering domain. */
++	return bpf_cpumap_redirect(&cpu_map, cpu, hash & (RFS_DOMAINS - 1));
++pass:
++	count(RFS_PASS);
++	return XDP_PASS;
++drop:
++	count(RFS_DROP);
++	return XDP_DROP;
++}
++
++static int check_domain(__u32 domain, void *ctx)
++{
++	struct bpf_cpumap_state state = {};
++	int err;
++
++	err = bpf_cpumap_get_state(&cpu_map, domain, &state, sizeof(state));
++	if (err) {
++		query_error = err;
++		return 1;
++	}
++	if (state.pending || (__s64)(state.completed - state.last_tail) < 0)
++		busy_domains++;
++	return 0;
++}
++
++/* Run with BPF_PROG_TEST_RUN only after ingress has been quiesced. */
++SEC("xdp")
++int rfs_drain(struct xdp_md *ctx)
++{
++	busy_domains = 0;
++	query_error = 0;
++	bpf_loop(RFS_DOMAINS, check_domain, NULL, 0);
++	return XDP_PASS;
++}
++
++char LICENSE[] SEC("license") = "GPL";
+diff --git a/samples/bpf/xdp_rfs.h b/samples/bpf/xdp_rfs.h
+new file mode 100644
+index 000000000000..8f31ec39ac6e
+--- /dev/null
++++ b/samples/bpf/xdp_rfs.h
+@@ -0,0 +1,22 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __XDP_RFS_H
++#define __XDP_RFS_H
++
++#define RFS_MAX_CPUS 128
++#define RFS_DOMAINS 4096
++
++struct rfs_hint {
++	/* Zero means unobserved; updates from concurrent users are advisory. */
++	__u32 cpu_plus_one;
++};
++
++enum rfs_stat {
++	RFS_HINT,
++	RFS_FALLBACK,
++	RFS_PASS,
++	RFS_DROP,
++	RFS_STORAGE_FAILURE,
++	RFS_STAT_MAX,
++};
++
++#endif
+diff --git a/samples/bpf/xdp_rfs_user.c b/samples/bpf/xdp_rfs_user.c
+new file mode 100644
+index 000000000000..2c43d8ba3ac0
+--- /dev/null
++++ b/samples/bpf/xdp_rfs_user.c
+@@ -0,0 +1,363 @@
++// SPDX-License-Identifier: GPL-2.0
++#define _GNU_SOURCE
++#include <errno.h>
++#include <glob.h>
++#include <limits.h>
++#include <net/if.h>
++#include <signal.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/random.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <time.h>
++#include <unistd.h>
++#include <linux/if_link.h>
++#include <bpf/bpf.h>
++#include <bpf/btf.h>
++#include <bpf/libbpf.h>
++#include "xdp_rfs.h"
++#include "xdp_rfs.skel.h"
++
++static volatile sig_atomic_t exiting;
++
++static void on_signal(int sig)
++{
++	exiting = 1;
++}
++
++static int interface_up(int fd, const char *name)
++{
++	struct ifreq req = {};
++
++	snprintf(req.ifr_name, sizeof(req.ifr_name), "%s", name);
++	if (ioctl(fd, SIOCGIFFLAGS, &req))
++		return -errno;
++	return !!(req.ifr_flags & IFF_UP);
++}
++
++static bool cpu_online(__u32 cpu)
++{
++	char *line = NULL, *p, *end;
++	unsigned long first, last;
++	size_t size = 0;
++	bool online = false;
++	FILE *file;
++
++	file = fopen("/sys/devices/system/cpu/online", "r");
++	if (!file)
++		return false;
++	if (getline(&line, &size, file) < 0)
++		goto out;
++	p = line;
++	while (*p) {
++		first = strtoul(p, &end, 10);
++		if (end == p)
++			break;
++		last = first;
++		if (*end == '-') {
++			p = end + 1;
++			last = strtoul(p, &end, 10);
++			if (end == p)
++				break;
++		}
++		if (cpu >= first && cpu <= last) {
++			online = true;
++			break;
++		}
++		if (*end != ',')
++			break;
++		p = end + 1;
++	}
++out:
++	free(line);
++	fclose(file);
++	return online;
++}
++
++static int parse_cpus(struct xdp_rfs *skel, const char *list, int possible)
++{
++	unsigned long cpu;
++	char *end;
++	__u32 i, n = 0;
++
++	while (*list) {
++		if (n == RFS_MAX_CPUS || *list < '0' || *list > '9')
++			return -EINVAL;
++		errno = 0;
++		cpu = strtoul(list, &end, 10);
++		if (errno || cpu >= possible || (*end && *end != ',') ||
++		    !cpu_online(cpu))
++			return -EINVAL;
++		for (i = 0; i < n; i++) {
++			if (skel->rodata->cpus[i] == cpu)
++				return -EINVAL;
++		}
++		skel->rodata->cpus[n++] = cpu;
++		if (!*end)
++			break;
++		list = end + 1;
++		if (!*list)
++			return -EINVAL;
++	}
++	skel->rodata->nr_cpus = n;
++	return n ? 0 : -EINVAL;
++}
++
++static int check_zero_files(const char *pattern)
++{
++	glob_t paths = {};
++	int err, ch;
++	size_t i;
++	FILE *file;
++
++	err = glob(pattern, 0, NULL, &paths);
++	if (err) {
++		globfree(&paths);
++		return err == GLOB_NOMATCH ? 0 : -EIO;
++	}
++	for (i = 0; i < paths.gl_pathc; i++) {
++		file = fopen(paths.gl_pathv[i], "r");
++		if (!file) {
++			err = -errno;
++			break;
++		}
++		while ((ch = fgetc(file)) != EOF) {
++			if (ch != '0' && ch != ',' && ch != '\n') {
++				err = -EBUSY;
++				break;
++			}
++		}
++		if (ferror(file))
++			err = -EIO;
++		fclose(file);
++		if (err)
++			break;
++	}
++	globfree(&paths);
++	return err;
++}
++
++static int check_native_rps(const char *name)
++{
++	static const char * const attributes[] = { "rps_cpus", "rps_flow_cnt" };
++	char escaped[2 * IFNAMSIZ], *dst = escaped;
++	char pattern[PATH_MAX];
++	int err, i;
++
++	/* Valid interface names can contain glob metacharacters. */
++	for (; *name; name++) {
++		if (strchr("\\*?[]", *name))
++			*dst++ = '\\';
++		*dst++ = *name;
++	}
++	*dst = '\0';
++	/* RFS can steer with a flow table even when rps_cpus is empty. */
++	for (i = 0; i < sizeof(attributes) / sizeof(attributes[0]); i++) {
++		snprintf(pattern, sizeof(pattern), "/sys/class/net/%s/queues/rx-*/%s",
++			 escaped, attributes[i]);
++		err = check_zero_files(pattern);
++		if (err)
++			return err;
++	}
++	return 0;
++}
++
++static int drain(struct xdp_rfs *skel)
++{
++	char packet[14] = {};
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet,
++		    .data_size_in = sizeof(packet),
++	);
++	struct timespec start, now;
++	int err;
++
++	clock_gettime(CLOCK_MONOTONIC, &start);
++	do {
++		err = bpf_prog_test_run_opts(bpf_program__fd(skel->progs.rfs_drain), &opts);
++		if (err)
++			return err;
++		if (skel->bss->query_error)
++			return skel->bss->query_error;
++		if (!skel->bss->busy_domains)
++			return 0;
++		usleep(10000);
++		clock_gettime(CLOCK_MONOTONIC, &now);
++	} while (now.tv_sec - start.tv_sec < 10);
++	return -ETIMEDOUT;
++}
++
++static void print_stats(struct xdp_rfs *skel, int possible)
++{
++	static const char * const names[] = {
++		"hint", "fallback", "pass", "drop", "storage_failure",
++	};
++	__u64 *values = calloc(possible, sizeof(*values)), total;
++	__u32 key;
++	int cpu;
++
++	if (!values)
++		return;
++	for (key = 0; key < RFS_STAT_MAX; key++) {
++		if (bpf_map_lookup_elem(bpf_map__fd(skel->maps.stats), &key, values))
++			break;
++		total = 0;
++		for (cpu = 0; cpu < possible; cpu++)
++			total += values[cpu];
++		printf("%s=%llu%c", names[key], (unsigned long long)total,
++		       key == RFS_STAT_MAX - 1 ? '\n' : ' ');
++	}
++	free(values);
++}
++
++static void usage(const char *prog)
++{
++	fprintf(stderr, "Usage: %s [-S] -i IFNAME -c CPU,CPU,...\n"
++		"  -S: generic XDP (default: driver XDP)\n"
++		"Keep the interface down during startup and shutdown.\n"
++		"Bring it up after 'ready'; bring it down before Ctrl-C.\n"
++		"Use a static online CPU set; disable native RPS on the interface.\n",
++		prog);
++}
++
++int main(int argc, char **argv)
++{
++	struct bpf_cpumap_val entry = { .qsize = 2048 };
++	const char *name = NULL, *cpu_list = NULL;
++	__u32 flags = XDP_FLAGS_DRV_MODE;
++	struct xdp_rfs *skel = NULL;
++	struct bpf_program *prog;
++	struct btf *btf = NULL;
++	struct stat ns;
++	bool attached = false, warned = false;
++	int opt, possible, ifindex, fd = -1, err = 1;
++	__u32 i, cpu, one = 1;
++
++	while ((opt = getopt(argc, argv, "Si:c:h")) != -1) {
++		switch (opt) {
++		case 'S':
++			flags = XDP_FLAGS_SKB_MODE;
++			break;
++		case 'i':
++			name = optarg;
++			break;
++		case 'c':
++			cpu_list = optarg;
++			break;
++		default:
++			usage(argv[0]);
++			return opt == 'h' ? 0 : 1;
++		}
++	}
++	if (!name || !cpu_list || optind != argc || strlen(name) >= IFNAMSIZ) {
++		usage(argv[0]);
++		return 1;
++	}
++	fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
++	ifindex = if_nametoindex(name);
++	if (fd < 0 || !ifindex || interface_up(fd, name) != 0) {
++		fprintf(stderr, "Interface must exist and be administratively down\n");
++		goto out;
++	}
++	if (check_native_rps(name)) {
++		fprintf(stderr, "Cannot verify that all RX queues have native RPS/RFS disabled\n");
++		goto out;
++	}
++	possible = libbpf_num_possible_cpus();
++	if (possible <= 0 || stat("/proc/self/ns/net", &ns))
++		goto out;
++	skel = xdp_rfs__open();
++	if (!skel)
++		goto out;
++	if (parse_cpus(skel, cpu_list, possible)) {
++		fprintf(stderr, "CPU list must contain distinct online CPUs (at most %d)\n",
++			RFS_MAX_CPUS);
++		goto out;
++	}
++	skel->rodata->netns_ino = ns.st_ino;
++	if (getrandom((void *)&skel->rodata->hash_seed, sizeof(__u32), 0) != sizeof(__u32))
++		goto out;
++	if (bpf_map__set_max_entries(skel->maps.cpu_map, possible) ||
++	    bpf_map__set_max_entries(skel->maps.allowed, possible))
++		goto out;
++	btf = btf__load_vmlinux_btf();
++	if (libbpf_get_error(btf)) {
++		btf = NULL;
++		goto out;
++	}
++	if (btf__find_by_name_kind(btf, "tcp_zerocopy_receive", BTF_KIND_FUNC) < 0) {
++		bpf_program__set_autoload(skel->progs.rfs_zerocopy, false);
++		fprintf(stderr, "tcp_zerocopy_receive unavailable: observer disabled\n");
++	}
++	if (btf__find_by_name_kind(btf, "inet6_recvmsg", BTF_KIND_FUNC) < 0) {
++		bpf_program__set_autoload(skel->progs.rfs_recv6, false);
++		bpf_program__set_autoload(skel->progs.rfs_send6, false);
++		fprintf(stderr, "inet6_recvmsg unavailable: IPv6 observer disabled\n");
++	}
++	if (xdp_rfs__load(skel))
++		goto out;
++	/* Only tracing programs auto-attach; ingress and drain are explicit. */
++	bpf_object__for_each_program(prog, skel->obj) {
++		if (bpf_program__type(prog) == BPF_PROG_TYPE_XDP)
++			bpf_program__set_autoattach(prog, false);
++	}
++	if (xdp_rfs__attach(skel))
++		goto out;
++	for (i = 0; i < skel->rodata->nr_cpus; i++) {
++		cpu = skel->rodata->cpus[i];
++		if (bpf_map_update_elem(bpf_map__fd(skel->maps.cpu_map), &cpu, &entry, BPF_ANY) ||
++		    bpf_map_update_elem(bpf_map__fd(skel->maps.allowed), &cpu, &one, BPF_ANY))
++			goto out;
++	}
++	signal(SIGINT, on_signal);
++	signal(SIGTERM, on_signal);
++	if (bpf_xdp_attach(ifindex, bpf_program__fd(skel->progs.rfs_redirect),
++			   flags | XDP_FLAGS_UPDATE_IF_NOEXIST, NULL))
++		goto out;
++	attached = true;
++	printf("ready on %s; bring ingress up. Down the interface before Ctrl-C.\n", name);
++	fflush(stdout);
++	for (;;) {
++		int up = interface_up(fd, name);
++
++		if (exiting && !up)
++			break;
++		if (exiting && !warned) {
++			fprintf(stderr, "Waiting for interface down; policy remains attached\n");
++			warned = true;
++		}
++		if (up < 0) {
++			fprintf(stderr, "Cannot inspect interface: %s\n", strerror(-up));
++			goto out;
++		}
++		sleep(1);
++	}
++	if (drain(skel)) {
++		fprintf(stderr, "Drain failed; leaving XDP attached\n");
++		goto out;
++	}
++	{
++		LIBBPF_OPTS(bpf_xdp_attach_opts, opts,
++			    .old_prog_fd = bpf_program__fd(skel->progs.rfs_redirect),
++		);
++
++		if (bpf_xdp_detach(ifindex, flags, &opts))
++			goto out;
++	}
++	attached = false;
++	print_stats(skel, possible);
++	err = 0;
++out:
++	if (attached)
++		fprintf(stderr, "XDP/map retained; quiesce ingress before manual recovery\n");
++	btf__free(btf);
++	xdp_rfs__destroy(skel);
++	if (fd >= 0)
++		close(fd);
++	return err;
++}
+-- 
+2.43.0
+

@@ -1,0 +1,10 @@
+{
+  "samples/bpf/xdp_rfs.bpf.c": "26111b2fe9728c597b7effe80c9ce5fe7a82824c23251bc10cfd4c5b55734ed5",
+  "samples/bpf/xdp_rfs.h": "35b3f40d1a1a2e20320e4897bc0476e7f0fa9f49ab714c85333e1af5651e441b",
+  "samples/bpf/xdp_rfs_user.c": "d2e4d1a375070d2efd781733c9070bf07a94676cb8829719edd9ddb531ad5155",
+  "samples/bpf/Makefile": "8b4f56b6620f49e4f4f9c2ae2f1203758a9fd5baebd51147c3e208af8cc0567a",
+  "samples/bpf/.gitignore": "28bc1f9ff1acaf1b868a361473743499c81c2177b08a1e5ecf5b7f10b6abde27",
+  "tools/testing/selftests/bpf/progs/test_xdp_rfs.c": "d4a86e55b6011e1f02d26c7d9ee1397381e970c9f91f722e39ee2913cded4b14",
+  "tools/testing/selftests/bpf/prog_tests/xdp_rfs.c": "00f1c878914cde296fe729e31492de23eca556aa4bfbabdd9d0a407dcedd03c1",
+  "tools/testing/selftests/bpf/Makefile": "98f939538bf4f56577dc1e78d08239dbfb2e3b91c7f2f3618ddc82e2ae777ee1"
+}

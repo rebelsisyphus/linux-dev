@@ -1,0 +1,3 @@
+total: 0 errors, 0 warnings, 0 checks, 160 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/patch/20260923-234303-c25630ca/0004-docs-bpf-describe-ordered-CPUMAP-migration.patch has no obvious style problems and is ready for submission.

@@ -1,0 +1,71 @@
+---------------------
+samples/bpf/xdp_rfs.h
+---------------------
+total: 0 errors, 0 warnings, 0 checks, 22 lines checked
+
+samples/bpf/xdp_rfs.h has no obvious style problems and is ready for submission.
+-------------------------
+samples/bpf/xdp_rfs.bpf.c
+-------------------------
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#43: FILE: samples/bpf/xdp_rfs.bpf.c:43:
++const volatile __u32 nr_cpus;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#44: FILE: samples/bpf/xdp_rfs.bpf.c:44:
++const volatile __u32 cpus[RFS_MAX_CPUS];
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#45: FILE: samples/bpf/xdp_rfs.bpf.c:45:
++const volatile __u32 netns_ino;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#46: FILE: samples/bpf/xdp_rfs.bpf.c:46:
++const volatile __u32 hash_seed;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#78: FILE: samples/bpf/xdp_rfs.bpf.c:78:
++	if (*(volatile __u32 *)&hint->cpu_plus_one != cpu)
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#79: FILE: samples/bpf/xdp_rfs.bpf.c:79:
++		*(volatile __u32 *)&hint->cpu_plus_one = cpu;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#246: FILE: samples/bpf/xdp_rfs.bpf.c:246:
++				observed = *(volatile __u32 *)&hint->cpu_plus_one;
+
+total: 0 errors, 7 warnings, 0 checks, 291 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+samples/bpf/xdp_rfs.bpf.c has style problems, please review.
+--------------------------
+samples/bpf/xdp_rfs_user.c
+--------------------------
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#25: FILE: samples/bpf/xdp_rfs_user.c:25:
++static volatile sig_atomic_t exiting;
+
+total: 0 errors, 1 warnings, 0 checks, 341 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+samples/bpf/xdp_rfs_user.c has style problems, please review.
+------------------------------------------------
+tools/testing/selftests/bpf/progs/test_xdp_rfs.c
+------------------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 42 lines checked
+
+tools/testing/selftests/bpf/progs/test_xdp_rfs.c has no obvious style problems and is ready for submission.
+------------------------------------------------
+tools/testing/selftests/bpf/prog_tests/xdp_rfs.c
+------------------------------------------------
+total: 0 errors, 0 warnings, 0 checks, 510 lines checked
+
+tools/testing/selftests/bpf/prog_tests/xdp_rfs.c has no obvious style problems and is ready for submission.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

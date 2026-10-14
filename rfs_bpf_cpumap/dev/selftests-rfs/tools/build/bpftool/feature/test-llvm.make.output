@@ -1,0 +1,4 @@
+test-llvm.cpp:2:10: fatal error: llvm/Support/ManagedStatic.h: No such file or directory
+    2 | #include "llvm/Support/ManagedStatic.h"
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.

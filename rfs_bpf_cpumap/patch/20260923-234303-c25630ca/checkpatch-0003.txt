@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "/tmp/kernel-cpumap-worktrees/rfs_bpf_cpumap/scripts/spdxcheck.py", line 6, in <module>
+    from ply import lex, yacc
+ModuleNotFoundError: No module named 'ply'
+Traceback (most recent call last):
+  File "/tmp/kernel-cpumap-worktrees/rfs_bpf_cpumap/scripts/spdxcheck.py", line 6, in <module>
+    from ply import lex, yacc
+ModuleNotFoundError: No module named 'ply'
+Traceback (most recent call last):
+  File "/tmp/kernel-cpumap-worktrees/rfs_bpf_cpumap/scripts/spdxcheck.py", line 6, in <module>
+    from ply import lex, yacc
+ModuleNotFoundError: No module named 'ply'
+WARNING: added, moved or deleted file(s), does MAINTAINERS need updating?
+#35: 
+new file mode 100644
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#642: FILE: tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c:34:
++volatile __u32 release_gate;
+
+total: 0 errors, 2 warnings, 0 checks, 735 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/patch/20260923-234303-c25630ca/0003-selftests-bpf-cover-ordered-CPUMAP-steering.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

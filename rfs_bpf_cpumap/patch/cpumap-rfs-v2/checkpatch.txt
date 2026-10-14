@@ -1,0 +1,102 @@
+
+0001-bpf-allow-XDP-programs-to-access-socket-storage.patch
+total: 0 errors, 0 warnings, 0 checks, 90 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0001-bpf-allow-XDP-programs-to-access-socket-storage.patch has no obvious style problems and is ready for submission.
+
+0002-skbuff-preserve-MAC-header-length-in-page-pool-copie.patch
+total: 0 errors, 0 warnings, 0 checks, 8 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0002-skbuff-preserve-MAC-header-length-in-page-pool-copie.patch has no obvious style problems and is ready for submission.
+
+0003-bpf-add-optional-ordered-domains-to-CPUMAP.patch
+total: 0 errors, 0 warnings, 0 checks, 687 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0003-bpf-add-optional-ordered-domains-to-CPUMAP.patch has no obvious style problems and is ready for submission.
+
+0004-selftests-bpf-exercise-ordered-CPUMAP-migration-and-.patch
+WARNING: added, moved or deleted file(s), does MAINTAINERS need updating?
+#31: 
+new file mode 100644
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#846: FILE: tools/testing/selftests/bpf/progs/test_xdp_cpumap_ordered.c:37:
++volatile __u32 release_gate;
+
+total: 0 errors, 2 warnings, 0 checks, 965 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0004-selftests-bpf-exercise-ordered-CPUMAP-migration-and-.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.
+
+0005-selftests-bpf-combine-XDP-socket-storage-and-ordered.patch
+WARNING: added, moved or deleted file(s), does MAINTAINERS need updating?
+#32: 
+new file mode 100644
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#695: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:43:
++const volatile __u32 nr_cpus;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#696: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:44:
++const volatile __u32 cpus[RFS_MAX_CPUS];
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#697: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:45:
++const volatile __u32 netns_ino;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#698: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:46:
++const volatile __u32 hash_seed;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#730: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:78:
++	if (*(volatile __u32 *)&hint->cpu_plus_one != cpu)
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#731: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:79:
++		*(volatile __u32 *)&hint->cpu_plus_one = cpu;
+
+WARNING: Use of volatile is usually wrong: see Documentation/process/volatile-considered-harmful.rst
+#897: FILE: tools/testing/selftests/bpf/progs/test_xdp_rfs.c:245:
++				observed = *(volatile __u32 *)&hint->cpu_plus_one;
+
+total: 0 errors, 8 warnings, 0 checks, 1025 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0005-selftests-bpf-combine-XDP-socket-storage-and-ordered.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.
+
+0006-docs-bpf-describe-ordered-CPUMAP-migration.patch
+total: 0 errors, 0 warnings, 0 checks, 160 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0006-docs-bpf-describe-ordered-CPUMAP-migration.patch has no obvious style problems and is ready for submission.
+
+0007-sctp-expose-referenced-association-socket-lookup-to-.patch
+total: 0 errors, 0 warnings, 0 checks, 195 lines checked
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0007-sctp-expose-referenced-association-socket-lookup-to-.patch has no obvious style problems and is ready for submission.
+
+0008-selftests-bpf-check-SCTP-XDP-lookup-and-socket-refer.patch
+WARNING: added, moved or deleted file(s), does MAINTAINERS need updating?
+#25: 
+new file mode 100644
+
+total: 0 errors, 1 warnings, 0 checks, 262 lines checked
+
+NOTE: For some of the reported defects, checkpatch may be able to
+      mechanically convert to the typical style using --fix or --fix-inplace.
+
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/v2-reviewed-patches-20261012/0008-selftests-bpf-check-SCTP-XDP-lookup-and-socket-refer.patch has style problems, please review.
+
+NOTE: If any of the errors are false positives, please report
+      them to the maintainer, see CHECKPATCH in MAINTAINERS.

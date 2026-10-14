@@ -1,0 +1,32 @@
+仓库：/home/sisyphus/code/worktree/rfs_bpf_cpumap
+索引：/home/sisyphus/code/worktree/rfs_bpf_cpumap/.semcode.db
+索引命令：/usr/local/bin/semcode-index --source /home/sisyphus/code/worktree/rfs_bpf_cpumap --database /home/sisyphus/code/worktree/rfs_bpf_cpumap/.semcode.db --jobs 8 --branch develop/rfs_bpf_cpumap
+
+=== Processing branch: develop/rfs_bpf_cpumap ===
+  → Processing range: 3110cb03ac88ddacd2bf9d3ec526b5e13f4bbd61..9de54e62c380e308927758207e9507fcb107e479
+  → Found 3 commits to process
+  ✓ Branch indexed successfully
+
+=== Multi-Branch Indexing Complete ===
+Total time: 0.5s
+Branches indexed: 1
+
+Indexed branches:
+  develop/rfs_bpf_cpumap → 9de54e62 (indexed 2026-09-28 12:29)
+
+To query this database, run:
+  semcode --database /home/sisyphus/code/worktree/rfs_bpf_cpumap/.semcode.db
+=== Database Tables ===
+Functions: 1034667
+Types: 164239
+Typedefs: 18095
+Total: 1217001
+
+Note: Macros are stored in the functions table
+无需修改：/home/sisyphus/code/worktree/rfs_bpf_cpumap/.codex/config.toml
+无需修改：/home/sisyphus/code/worktree/rfs_bpf_cpumap/AGENTS.md
+
+完成。请在该仓库中新开 Codex 会话；已有客户端需重启以加载配置。
+项目级 MCP 仅在受信任项目中加载；首次打开时按 Codex 提示确认项目信任。
+检查配置：先 cd /home/sisyphus/code/worktree/rfs_bpf_cpumap，再运行 codex mcp get semcode
+在 Codex 会话中用 /mcp 检查连接。配置和分析规则已就绪，索引不会自动实时更新。

@@ -1,0 +1,300 @@
+From 354807ea5cc9dadf76ffc78eea5b00c3e41a0abc Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Mon, 12 Oct 2026 13:17:11 +0800
+Subject: [RFC PATCH bpf-next 8/8] selftests/bpf: check SCTP XDP lookup and
+ socket reference lifetime
+
+Resolve established IPv4/IPv6 SCTP associations and read socket local
+storage through the acquired socket. Check invalid tuple sizes and
+verifier rejection of an unreleased lookup result.
+
+For one-to-many sockets, run lookup concurrently with peeloff, close the
+original endpoint and then the association, and check that only live
+socket-storage values are returned. getsockopt(SCTP_SOCKOPT_PEELOFF)
+returns the new descriptor as well as storing it in the argument.
+
+Assisted-by: LLM
+---
+ .../bpf/prog_tests/xdp_sctp_lookup.c          | 210 ++++++++++++++++++
+ .../bpf/progs/test_xdp_sctp_lookup.c          |  52 +++++
+ 2 files changed, 262 insertions(+)
+ create mode 100644 tools/testing/selftests/bpf/prog_tests/xdp_sctp_lookup.c
+ create mode 100644 tools/testing/selftests/bpf/progs/test_xdp_sctp_lookup.c
+
+diff --git a/tools/testing/selftests/bpf/prog_tests/xdp_sctp_lookup.c b/tools/testing/selftests/bpf/prog_tests/xdp_sctp_lookup.c
+new file mode 100644
+index 000000000000..7ba7309929de
+--- /dev/null
++++ b/tools/testing/selftests/bpf/prog_tests/xdp_sctp_lookup.c
+@@ -0,0 +1,210 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <pthread.h>
++#include <net/if.h>
++#include <linux/sctp.h>
++#include <test_progs.h>
++#include <network_helpers.h>
++#include "test_xdp_sctp_lookup.skel.h"
++
++struct lookup_worker {
++	int fd, ifindex, error;
++	bool stop;
++};
++
++static int run_lookup(int fd, int ifindex)
++{
++	char packet[14] = {};
++	struct xdp_md ctx = { .ingress_ifindex = ifindex, .data_end = sizeof(packet) };
++
++	LIBBPF_OPTS(bpf_test_run_opts, opts,
++		    .data_in = packet, .data_size_in = sizeof(packet),
++		    .ctx_in = &ctx, .ctx_size_in = sizeof(ctx));
++
++	return bpf_prog_test_run_opts(fd, &opts);
++}
++
++static void *lookup_loop(void *arg)
++{
++	struct lookup_worker *worker = arg;
++
++	while (!__atomic_load_n(&worker->stop, __ATOMIC_ACQUIRE)) {
++		worker->error = run_lookup(worker->fd, worker->ifindex);
++		if (worker->error)
++			break;
++	}
++	return NULL;
++}
++
++static void test_lookup(int family, bool peeloff)
++{
++	struct network_helper_opts opts = { .proto = IPPROTO_SCTP, .timeout_ms = 3000 };
++	struct test_xdp_sctp_lookup *skel = NULL;
++	struct lookup_worker worker = {};
++	struct sockaddr_storage local, peer;
++	struct nstoken *ns = NULL;
++	sctp_peeloff_arg_t peel = {};
++	struct {
++		__u32 count;
++		sctp_assoc_t id;
++	} ids = {};
++	socklen_t len;
++	__u64 value = 111, before;
++	char name[64], data;
++	int server = -1, client = -1, accepted = -1, fd, i;
++	pthread_t thread;
++	bool started = false;
++
++	snprintf(name, sizeof(name), "sctp_lookup_%d", getpid());
++	SYS(out, "ip netns add %s", name);
++	ns = open_netns(name);
++	if (!ASSERT_OK_PTR(ns, "netns"))
++		goto out;
++	SYS(out, "ip link set lo up");
++	skel = test_xdp_sctp_lookup__open();
++	if (!ASSERT_OK_PTR(skel, "open"))
++		goto out;
++	bpf_program__set_autoload(skel->progs.leak, false);
++	if (!ASSERT_OK(test_xdp_sctp_lookup__load(skel), "load"))
++		goto out;
++	server = start_server_str(family, peeloff ? SOCK_SEQPACKET : SOCK_STREAM,
++				  family == AF_INET ? "127.0.0.1" : "::1", 0, &opts);
++	if (!ASSERT_OK_FD(server, "listener"))
++		goto out;
++	/* start_server() only calls listen() for SOCK_STREAM. */
++	if (peeloff && !ASSERT_OK(listen(server, 8), "listen_seqpacket"))
++		goto out;
++	len = sizeof(local);
++	if (!ASSERT_OK(getsockname(server, (void *)&local, &len), "local_address"))
++		goto out;
++	client = socket(family, SOCK_STREAM, IPPROTO_SCTP);
++	if (!ASSERT_OK_FD(client, "client") ||
++	    !ASSERT_OK(connect(client, (void *)&local, len), "connect"))
++		goto out;
++	if (!peeloff) {
++		accepted = accept(server, NULL, NULL);
++		if (!ASSERT_OK_FD(accepted, "accept"))
++			goto out;
++	}
++	fd = peeloff ? server : accepted;
++	if (!ASSERT_EQ(send(client, "a", 1, 0), 1, "send") ||
++	    !ASSERT_EQ(recv(fd, &data, 1, 0), 1, "recv") ||
++	    !ASSERT_OK(bpf_map_update_elem(bpf_map__fd(skel->maps.storage), &fd,
++					  &value, BPF_ANY), "socket_storage"))
++		goto out;
++	len = sizeof(peer);
++	if (!ASSERT_OK(getsockname(client, (void *)&peer, &len), "peer_address"))
++		goto out;
++	skel->bss->ipv6 = family == AF_INET6;
++	if (family == AF_INET) {
++		struct sockaddr_in *l = (void *)&local, *p = (void *)&peer;
++
++		skel->bss->tuple.ipv4.daddr = l->sin_addr.s_addr;
++		skel->bss->tuple.ipv4.saddr = p->sin_addr.s_addr;
++		skel->bss->tuple.ipv4.dport = l->sin_port;
++		skel->bss->tuple.ipv4.sport = p->sin_port;
++	} else {
++		struct sockaddr_in6 *l = (void *)&local, *p = (void *)&peer;
++
++		memcpy(skel->bss->tuple.ipv6.daddr, &l->sin6_addr, 16);
++		memcpy(skel->bss->tuple.ipv6.saddr, &p->sin6_addr, 16);
++		skel->bss->tuple.ipv6.dport = l->sin6_port;
++		skel->bss->tuple.ipv6.sport = p->sin6_port;
++	}
++	worker.fd = bpf_program__fd(skel->progs.lookup);
++	worker.ifindex = if_nametoindex("lo");
++	if (!ASSERT_OK(run_lookup(worker.fd, worker.ifindex), "lookup") ||
++	    !ASSERT_EQ(skel->bss->found, 1, "found_storage"))
++		goto out;
++	skel->bss->short_tuple = true;
++	if (!ASSERT_OK(run_lookup(worker.fd, worker.ifindex), "short_tuple") ||
++	    !ASSERT_EQ(skel->bss->found, 1, "short_tuple_no_lookup"))
++		goto out;
++	skel->bss->short_tuple = false;
++	if (!peeloff)
++		goto out;
++	len = sizeof(ids);
++	if (!ASSERT_OK(getsockopt(server, IPPROTO_SCTP, SCTP_GET_ASSOC_ID_LIST, &ids, &len),
++		       "association_id") || !ASSERT_EQ(ids.count, 1, "one_association"))
++		goto out;
++	if (!ASSERT_OK(pthread_create(&thread, NULL, lookup_loop, &worker), "lookup_thread"))
++		goto out;
++	started = true;
++	peel.associd = ids.id;
++	len = sizeof(peel);
++	accepted = getsockopt(server, IPPROTO_SCTP, SCTP_SOCKOPT_PEELOFF, &peel, &len);
++	if (!ASSERT_OK_FD(accepted, "peeloff") ||
++	    !ASSERT_EQ(accepted, peel.sd, "peeloff_fd"))
++		goto out;
++	value = 222;
++	if (!ASSERT_OK(bpf_map_update_elem(bpf_map__fd(skel->maps.storage), &accepted,
++					   &value, BPF_ANY), "peeled_storage"))
++		goto out;
++	/* The old endpoint and then the association can die during lookup. */
++	close(server);
++	server = -1;
++	before = __atomic_load_n(&skel->bss->found, __ATOMIC_RELAXED);
++	for (i = 0; i < 1000; i++) {
++		if (__atomic_load_n(&skel->bss->found, __ATOMIC_RELAXED) > before)
++			break;
++		usleep(1000);
++	}
++	ASSERT_LT(i, 1000, "lookup_after_peeloff");
++	close(accepted);
++	accepted = -1;
++	close(client);
++	client = -1;
++	usleep(20000);
++out:
++	if (started) {
++		__atomic_store_n(&worker.stop, true, __ATOMIC_RELEASE);
++		pthread_join(thread, NULL);
++		ASSERT_OK(worker.error, "concurrent_lookup");
++		ASSERT_EQ(skel->bss->bad_value, 0, "socket_storage_lifetime");
++	}
++	if (accepted >= 0)
++		close(accepted);
++	if (client >= 0)
++		close(client);
++	if (server >= 0)
++		close(server);
++	test_xdp_sctp_lookup__destroy(skel);
++	close_netns(ns);
++	SYS_NOFAIL("ip netns del %s", name);
++}
++
++static void test_reference(void)
++{
++	struct test_xdp_sctp_lookup *skel = test_xdp_sctp_lookup__open();
++	char log[16384];
++
++	if (!ASSERT_OK_PTR(skel, "open"))
++		return;
++	bpf_program__set_autoload(skel->progs.lookup, false);
++	bpf_program__set_log_buf(skel->progs.leak, log, sizeof(log));
++	if (ASSERT_ERR(test_xdp_sctp_lookup__load(skel), "reject_unreleased_socket"))
++		ASSERT_HAS_SUBSTR(log, "Unreleased reference", "reference_error");
++	test_xdp_sctp_lookup__destroy(skel);
++}
++
++void test_xdp_sctp_lookup(void)
++{
++	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_SCTP);
++
++	if (fd < 0 && errno == EPROTONOSUPPORT) {
++		test__skip();
++		return;
++	}
++	if (!ASSERT_OK_FD(fd, "sctp_available"))
++		return;
++	close(fd);
++	if (test__start_subtest("ipv4"))
++		test_lookup(AF_INET, false);
++	if (test__start_subtest("ipv6"))
++		test_lookup(AF_INET6, false);
++	if (test__start_subtest("peeloff_ipv4"))
++		test_lookup(AF_INET, true);
++	if (test__start_subtest("peeloff_ipv6"))
++		test_lookup(AF_INET6, true);
++	if (test__start_subtest("reference_tracking"))
++		test_reference();
++}
+diff --git a/tools/testing/selftests/bpf/progs/test_xdp_sctp_lookup.c b/tools/testing/selftests/bpf/progs/test_xdp_sctp_lookup.c
+new file mode 100644
+index 000000000000..7d02c70f653f
+--- /dev/null
++++ b/tools/testing/selftests/bpf/progs/test_xdp_sctp_lookup.c
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: GPL-2.0
++#include "vmlinux.h"
++#include <bpf/bpf_helpers.h>
++
++extern struct sock *bpf_xdp_sctp_lookup(struct xdp_md *ctx,
++					struct bpf_sock_tuple *tuple,
++					__u32 tuple__sz) __ksym;
++extern void bpf_sctp_release(struct sock *sk) __ksym;
++
++struct {
++	__uint(type, BPF_MAP_TYPE_SK_STORAGE);
++	__uint(map_flags, BPF_F_NO_PREALLOC);
++	__type(key, int);
++	__type(value, __u64);
++} storage SEC(".maps");
++
++struct bpf_sock_tuple tuple;
++bool ipv6, short_tuple;
++__u64 found, bad_value;
++
++SEC("xdp")
++int lookup(struct xdp_md *ctx)
++{
++	struct bpf_sock_tuple input = tuple;
++	struct sock *sk;
++	__u64 *value;
++
++	sk = bpf_xdp_sctp_lookup(ctx, &input, short_tuple ? 4 :
++				 (ipv6 ? sizeof(input.ipv6) : sizeof(input.ipv4)));
++	if (!sk)
++		return XDP_PASS;
++	value = bpf_sk_storage_get(&storage, sk, 0, 0);
++	if (value) {
++		found++;
++		if (*value != 111 && *value != 222)
++			bad_value++;
++	}
++	bpf_sctp_release(sk);
++	return XDP_PASS;
++}
++
++/* Loaded separately: the verifier must enforce release on all paths. */
++SEC("xdp")
++int leak(struct xdp_md *ctx)
++{
++	struct bpf_sock_tuple input = tuple;
++
++	bpf_xdp_sctp_lookup(ctx, &input, sizeof(input.ipv4));
++	return XDP_PASS;
++}
++
++char LICENSE[] SEC("license") = "GPL";
+-- 
+2.43.0
+

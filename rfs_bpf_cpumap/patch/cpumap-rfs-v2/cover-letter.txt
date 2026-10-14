@@ -1,0 +1,55 @@
+Subject: [RFC PATCH bpf-next 0/8] XDP socket hints and optional ordered CPUMAP migration
+
+This series provides reusable mechanisms for receive CPU policies expressed
+in BPF. Socket storage can carry application CPU observations, while optional
+CPUMAP ordering domains delay target changes until prior submissions reach
+the synchronous network-stack handoff. No CONFIG_RPS dependency, scheduler
+policy hook, or receive flow-selection policy is added to the kernel.
+
+The domain is chosen by BPF and exists for the map lifetime. Lookup/storage
+misses must retain that identity. The kernel reserves actual submissions,
+accounts for source bulks and queue tickets, and publishes completion after
+GRO/list handoff. Informational snapshots alone cannot authorize a live
+policy/map replacement. Ingress must be quiesced for such transitions.
+CPU offline is the same limited ordering exception as native RFS; queue
+pressure can drop packets. This does not provide a watchdog for arbitrary
+BPF programs or reconstruct wire order before the XDP hook.
+
+Patch 1 adds XDP socket storage access. Patch 2 fixes a baseline generic-XDP
+page-pool copy bug found by the frags protocol tests: missing mac_len leaves
+the Ethernet header at IP input after CPUMAP redirect. Patches 3-6 contain
+the optional ordering mechanism, independent primitive/composition tests
+and interface documentation. Patches 7-8 add referenced SCTP association
+lookup and its lifetime tests; they can be discussed separately from the
+software steering mechanism.
+
+The accompanying external policy implements tuple hashing, TCP/UDP RFS,
+MPTCP master hints, SCTP hints, LLC load avoidance, hotplug control, and an
+RXNFC rule controller. Hardware intents may follow the policy or socket CPU.
+The RXNFC controller requires exclusive rule locations, records durable
+intent and verifies driver readback; it does not integrate native aRFS
+filter IDs/expiration. Hardware packets still traverse the software barrier.
+The kernel selftests have no source dependency on that policy repository.
+
+Validation includes CONFIG_RPS=n, KASAN/lockdep, PREEMPT_RT, native/generic
+paths, real TCP GRO, multi-buffer payloads, targeted allocation failures,
+entry replacement and hotplug. An i386 initramfs run exercises the JIT/kfunc
+ABI, alternating CPU submissions and 64-bit progress snapshots. SCTP tests
+include IPv4/IPv6, peeloff during lookup and reference-leak rejection.
+The accompanying validation manifest gives the exact runs and limitations.
+
+There is no physical NIC/generator result yet. Full GRO flushes, domain
+locks, shared progress and cross-CPU traffic can cost throughput or latency;
+no performance win or zero-overhead ordinary path is claimed. The external
+repository includes five-group measurement procedures and raw-data capture.
+Feedback is particularly requested on domain/map_extra semantics, completion
+boundary, lifetime/CPU-offline rules and whether the cost justifies this
+optional mechanism for socket-aware CPU migration.
+
+Base: 9b87fdc9af2fbfcdb5c24a64139685ef80f6573f
+
+Local draft: the external policy is packaged with these artifacts and has
+not been published. Add its public reference before posting. New/reworked
+patches still require the human submitter's review and DCO certification.
+AI assistance was used for implementation, debugging, tests and documentation.
+No patches or mail have been sent by the assistant.

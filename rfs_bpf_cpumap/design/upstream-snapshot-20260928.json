@@ -1,0 +1,44 @@
+{
+  "checked_at": "2026-09-28",
+  "method": "GitHub commit API, then immutable raw source; exact interface names and XDP helper dispatch inspected. Not an exhaustive equivalence search.",
+  "results": [
+    {
+      "tree": "mainline",
+      "sha": "72d3fcf802c45d00b300f25b848a93c3a2bd7c7e",
+      "date": "2026-09-27T20:55:01Z",
+      "files": [
+        {
+          "path": "kernel/bpf/cpumap.c",
+          "sha256": "e2fcfbfc58f0ed18c988dbcf30b3d77ceebbba5ef5c565479531db0f923a55da",
+          "ordered_interface_present": false,
+          "ordering_domain_present": false
+        },
+        {
+          "path": "net/core/filter.c",
+          "sha256": "39346e539e5b3e28c440096e17bb3edf277b4acdc9c1278a05f6d433a74c9026",
+          "xdp_proto_found": true,
+          "xdp_sk_storage_get_present": false
+        }
+      ]
+    },
+    {
+      "tree": "bpf-next-ci",
+      "sha": "0309bfd7d7780327db8f54a483c27b1ae66c1606",
+      "date": "2026-09-26T12:46:42Z",
+      "files": [
+        {
+          "path": "kernel/bpf/cpumap.c",
+          "sha256": "e2fcfbfc58f0ed18c988dbcf30b3d77ceebbba5ef5c565479531db0f923a55da",
+          "ordered_interface_present": false,
+          "ordering_domain_present": false
+        },
+        {
+          "path": "net/core/filter.c",
+          "sha256": "a7b99b2ca725f170f745bc70731d50ebae77941e5286fcf7af3641d4f8e9c6eb",
+          "xdp_proto_found": true,
+          "xdp_sk_storage_get_present": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+/home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/build/bpftool/map_perf_ring.o: \
+ map_perf_ring.c \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/bpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/types.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/bpf_common.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_common.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_version.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/libbpf_legacy.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/uapi/linux/perf_event.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf.h \
+ main.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/skel_internal.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/bpf.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler_types.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler-context-analysis.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/compiler-gcc.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/kernel.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/build_bug.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/math.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/panic.h \
+ /home/sisyphus/code/worktree/rfs_bpf_cpumap/tools/include/linux/container_of.h \
+ /home/sisyphus/code/kernel-dev/rfs_bpf_cpumap/dev/selftests-rfs//tools/include/bpf/hashmap.h \
+ json_writer.h

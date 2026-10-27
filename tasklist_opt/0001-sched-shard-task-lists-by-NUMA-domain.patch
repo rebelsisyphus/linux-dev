@@ -1,0 +1,2965 @@
+From 21b2c89bb86847ebaf708118fc29e38b4fb3bd86 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <dongchenchen2@huawei.com>
+Date: Tue, 27 Oct 2026 16:39:37 +0800
+Subject: [PATCH 1/2] sched: shard task lists by NUMA domain
+
+Adapt the tasklist work in numa-domain-v2-patches (0001-0024 and 0029),
+originally by robin <robin800601@gmail.com>, to this tree's task lifetime.
+
+Put process leaders on permanent NUMA lists and keep every thread on its
+leader's home shard across migration and nonleader exec. Fork, release and
+exit notification take only their home shard. Snapshot readers and cold
+cross-process writers take all shards in a fixed order.
+
+Complete reparenting and tracer-exit serialization before removing their
+all-shard exclusion. Group state locks protect parent/ptrace transitions;
+parent links locks serialize children and ptraced lists. Reparent nests
+group locks in parent-before-child order, takes links locks by address,
+and rechecks pinned reapers against PF_EXITING. Tracer exit drops its links
+lock before taking a tracee's group lock. Fork protects its unpublished
+child until all links, PIDs and tracing state are ready.
+
+Walk subreaper trees with RCU lookups and pinned groups, without a global
+tasklist reader. Serialize only concurrent walks, retain visited entries,
+and exclude reparenting while marking a group and queueing its children.
+Use separate subreaper boolean fields and inherit under the links lock.
+Pin notification parents and their PIDs, and acquire sighand safely.
+Publish EXIT_ZOMBIE after the exec wakeup and claim autoreap with cmpxchg,
+including the reparented-zombie fix from patch 0029. Serialize orphan-group
+decisions with a per-PGID lock when parent relationships can affect them.
+
+Use a separate PID task-membership lock: reusing the proc inode lock under
+sighand introduces an IRQ lock inversion. Convert fork/thread counters and
+all consumers, including BPF RVI and s390 appldata, to atomic operations.
+Publish namespace reapers atomically while allowing the init_task sentinel.
+Update iteration, the early cgroup assertion and debugfs domain counts.
+
+Model the shard set as one tasklist lockdep identity, preserving external
+ordering without a held-lock entry per node. Keep offline shards visible
+and retain the ordinary rwlock fallback for early boot, UP and PREEMPT_RT.
+
+Validated with an x86_64 NUMA lockdep build and two-node QEMU lifecycle,
+ptrace, pidfd, clone3 and CPU-hotplug tests, plus UP and SMP !NUMA object
+builds. The pre-existing vmaccess attach timeout is excluded explicitly.
+
+Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+---
+ arch/ia64/kernel/mca.c             |   4 +-
+ arch/s390/appldata/appldata_os.c   |   2 +-
+ arch/s390/kernel/guarded_storage.c |   4 +-
+ arch/sh/mm/asids-debugfs.c         |   4 +-
+ arch/um/kernel/reboot.c            |   4 +-
+ block/ioprio.c                     |  10 +-
+ drivers/tty/sysrq.c                |   4 +-
+ drivers/tty/tty_io.c               |   8 +-
+ drivers/tty/tty_jobctrl.c          |  16 +-
+ fs/exec.c                          |  21 +-
+ fs/fcntl.c                         |   8 +-
+ fs/fs_struct.c                     |   4 +-
+ fs/proc/array.c                    |   4 +-
+ fs/proc/loadavg.c                  |  12 +-
+ fs/proc/stat.c                     |   2 +-
+ fs/resctrl/rdtgroup.c              |   4 +-
+ include/linux/pid.h                |   9 +-
+ include/linux/ptrace.h             |   5 +-
+ include/linux/sched.h              |   4 +
+ include/linux/sched/signal.h       |  16 +-
+ include/linux/sched/stat.h         |   5 +-
+ include/linux/sched/task.h         |  39 +++-
+ include/rv/da_monitor.h            |   4 +-
+ init/init_task.c                   |   3 +
+ kernel/Makefile                    |   2 +-
+ kernel/bpf-rvi/common_kfuncs.c     |   2 +-
+ kernel/bpf/helpers.c               |   4 +-
+ kernel/cgroup/cgroup.c             |   2 +-
+ kernel/debug/kdb/kdb_main.c        |   2 +-
+ kernel/exit.c                      | 357 +++++++++++++++++------------
+ kernel/fork.c                      | 142 ++++++++----
+ kernel/livepatch/transition.c      |  28 +--
+ kernel/pid.c                       |  22 +-
+ kernel/pid_namespace.c             |  16 +-
+ kernel/power/process.c             |  16 +-
+ kernel/ptrace.c                    |  70 +++---
+ kernel/sched/core.c                |   8 +-
+ kernel/sched/core_sched.c          |   4 +-
+ kernel/sched/debug.c               |   4 +-
+ kernel/signal.c                    |  65 +++---
+ kernel/sys.c                       |  30 +--
+ kernel/tasklist.c                  | 270 ++++++++++++++++++++++
+ kernel/tracepoint.c                |   8 +-
+ security/keys/keyctl.c             |   4 +-
+ security/selinux/hooks.c           |   4 +-
+ 45 files changed, 871 insertions(+), 385 deletions(-)
+ create mode 100644 kernel/tasklist.c
+
+diff --git a/arch/ia64/kernel/mca.c b/arch/ia64/kernel/mca.c
+index 2671688d349a..cc2495113da4 100644
+--- a/arch/ia64/kernel/mca.c
++++ b/arch/ia64/kernel/mca.c
+@@ -1629,12 +1629,12 @@ default_monarch_init_process(struct notifier_block *self, unsigned long val, voi
+ 		}
+ 	}
+ 	printk("\n\n");
+-	if (read_trylock(&tasklist_lock)) {
++	if (read_trylock_tasklist_all()) {
+ 		for_each_process_thread(g, t) {
+ 			printk("\nBacktrace of pid %d (%s)\n", t->pid, t->comm);
+ 			show_stack(t, NULL, KERN_DEFAULT);
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ 	/* FIXME: This will not restore zapped printk locks. */
+ 	RESTORE_LOGLEVEL(console_loglevel);
+diff --git a/arch/s390/appldata/appldata_os.c b/arch/s390/appldata/appldata_os.c
+index a363d30ce739..46b0e20b21de 100644
+--- a/arch/s390/appldata/appldata_os.c
++++ b/arch/s390/appldata/appldata_os.c
+@@ -98,7 +98,7 @@ static void appldata_get_os_data(void *data)
+ 	os_data = data;
+ 	os_data->sync_count_1++;
+ 
+-	os_data->nr_threads = nr_threads;
++	os_data->nr_threads = atomic_long_read(&nr_threads);
+ 	os_data->nr_running = nr_running();
+ 	os_data->nr_iowait  = nr_iowait();
+ 	os_data->avenrun[0] = avenrun[0] + (FIXED_1/200);
+diff --git a/arch/s390/kernel/guarded_storage.c b/arch/s390/kernel/guarded_storage.c
+index d14dd1c2e524..22a3d9d78a51 100644
+--- a/arch/s390/kernel/guarded_storage.c
++++ b/arch/s390/kernel/guarded_storage.c
+@@ -95,14 +95,14 @@ static int gs_broadcast(void)
+ {
+ 	struct task_struct *sibling;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_thread(current, sibling) {
+ 		if (!sibling->thread.gs_bc_cb)
+ 			continue;
+ 		if (test_and_set_tsk_thread_flag(sibling, TIF_GUARDED_STORAGE))
+ 			kick_process(sibling);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	return 0;
+ }
+ 
+diff --git a/arch/sh/mm/asids-debugfs.c b/arch/sh/mm/asids-debugfs.c
+index d16d6f5ec774..cf3835cacb04 100644
+--- a/arch/sh/mm/asids-debugfs.c
++++ b/arch/sh/mm/asids-debugfs.c
+@@ -30,7 +30,7 @@ static int asids_debugfs_show(struct seq_file *file, void *iter)
+ {
+ 	struct task_struct *p;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 
+ 	for_each_process(p) {
+ 		int pid = p->pid;
+@@ -43,7 +43,7 @@ static int asids_debugfs_show(struct seq_file *file, void *iter)
+ 				   cpu_asid(smp_processor_id(), p->mm));
+ 	}
+ 
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return 0;
+ }
+diff --git a/arch/um/kernel/reboot.c b/arch/um/kernel/reboot.c
+index 48c0610d506e..f916d835ccd1 100644
+--- a/arch/um/kernel/reboot.c
++++ b/arch/um/kernel/reboot.c
+@@ -21,7 +21,7 @@ static void kill_off_processes(void)
+ 	struct task_struct *p;
+ 	int pid;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process(p) {
+ 		struct task_struct *t;
+ 
+@@ -32,7 +32,7 @@ static void kill_off_processes(void)
+ 		task_unlock(t);
+ 		os_kill_ptraced_process(pid, 1);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ void uml_cleanup(void)
+diff --git a/block/ioprio.c b/block/ioprio.c
+index b5a942519a79..1011e9757f38 100644
+--- a/block/ioprio.c
++++ b/block/ioprio.c
+@@ -95,15 +95,15 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
+ 			else
+ 				pgrp = find_vpid(who);
+ 
+-			read_lock(&tasklist_lock);
++			read_lock_tasklist_all();
+ 			do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
+ 				ret = set_task_ioprio(p, ioprio);
+ 				if (ret) {
+-					read_unlock(&tasklist_lock);
++					read_unlock_tasklist_all();
+ 					goto out;
+ 				}
+ 			} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
+-			read_unlock(&tasklist_lock);
++			read_unlock_tasklist_all();
+ 
+ 			break;
+ 		case IOPRIO_WHO_USER:
+@@ -231,7 +231,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
+ 				pgrp = task_pgrp(current);
+ 			else
+ 				pgrp = find_vpid(who);
+-			read_lock(&tasklist_lock);
++			read_lock_tasklist_all();
+ 			do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
+ 				tmpio = get_task_ioprio(p);
+ 				if (tmpio < 0)
+@@ -241,7 +241,7 @@ SYSCALL_DEFINE2(ioprio_get, int, which, int, who)
+ 				else
+ 					ret = ioprio_best(ret, tmpio);
+ 			} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
+-			read_unlock(&tasklist_lock);
++			read_unlock_tasklist_all();
+ 
+ 			break;
+ 		case IOPRIO_WHO_USER:
+diff --git a/drivers/tty/sysrq.c b/drivers/tty/sysrq.c
+index de447b3f061d..64e835fbfeb6 100644
+--- a/drivers/tty/sysrq.c
++++ b/drivers/tty/sysrq.c
+@@ -358,7 +358,7 @@ static void send_sig_all(int sig)
+ {
+ 	struct task_struct *p;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process(p) {
+ 		if (p->flags & PF_KTHREAD)
+ 			continue;
+@@ -367,7 +367,7 @@ static void send_sig_all(int sig)
+ 
+ 		do_send_sig_info(sig, SEND_SIG_PRIV, p, PIDTYPE_MAX);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ static void sysrq_handle_term(u8 key)
+diff --git a/drivers/tty/tty_io.c b/drivers/tty/tty_io.c
+index 117abcf366d9..c70a0866cc21 100644
+--- a/drivers/tty/tty_io.c
++++ b/drivers/tty/tty_io.c
+@@ -1834,11 +1834,11 @@ int tty_release(struct inode *inode, struct file *filp)
+ 	 * tty.
+ 	 */
+ 	if (!tty->count) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		session_clear_tty(tty->ctrl.session);
+ 		if (o_tty)
+ 			session_clear_tty(o_tty->ctrl.session);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ 
+ 	/* check whether both sides are closing ... */
+@@ -3015,7 +3015,7 @@ void __do_SAK(struct tty_struct *tty)
+ 
+ 	tty_driver_flush_buffer(tty);
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	/* Kill the entire session */
+ 	do_each_pid_task(session, PIDTYPE_SID, p) {
+ 		tty_notice(tty, "SAK: killed process %d (%s): by session\n",
+@@ -3042,7 +3042,7 @@ void __do_SAK(struct tty_struct *tty)
+ 		}
+ 		task_unlock(p);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	put_pid(session);
+ }
+ 
+diff --git a/drivers/tty/tty_jobctrl.c b/drivers/tty/tty_jobctrl.c
+index ef8741c3e662..fd1e7948d18d 100644
+--- a/drivers/tty/tty_jobctrl.c
++++ b/drivers/tty/tty_jobctrl.c
+@@ -131,7 +131,7 @@ static void proc_set_tty(struct tty_struct *tty)
+  */
+ void tty_open_proc_set_tty(struct file *filp, struct tty_struct *tty)
+ {
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	spin_lock_irq(&current->sighand->siglock);
+ 	if (current->signal->leader &&
+ 	    !current->signal->tty &&
+@@ -154,7 +154,7 @@ void tty_open_proc_set_tty(struct file *filp, struct tty_struct *tty)
+ 			__proc_set_tty(tty);
+ 	}
+ 	spin_unlock_irq(&current->sighand->siglock);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ struct tty_struct *get_current_tty(void)
+@@ -199,7 +199,7 @@ int tty_signal_session_leader(struct tty_struct *tty, int exit_session)
+ 	int refs = 0;
+ 	struct pid *tty_pgrp = NULL;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	if (tty->ctrl.session) {
+ 		do_each_pid_task(tty->ctrl.session, PIDTYPE_SID, p) {
+ 			spin_lock_irq(&p->sighand->siglock);
+@@ -227,7 +227,7 @@ int tty_signal_session_leader(struct tty_struct *tty, int exit_session)
+ 			spin_unlock_irq(&p->sighand->siglock);
+ 		} while_each_pid_task(tty->ctrl.session, PIDTYPE_SID, p);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	if (tty_pgrp) {
+ 		if (exit_session)
+@@ -326,9 +326,9 @@ void disassociate_ctty(int on_exit)
+ 	spin_unlock_irq(&current->sighand->siglock);
+ 
+ 	/* Now clear signal->tty under the lock */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	session_clear_tty(task_session(current));
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ /*
+@@ -367,7 +367,7 @@ static int tiocsctty(struct tty_struct *tty, struct file *file, int arg)
+ 	int ret = 0;
+ 
+ 	tty_lock(tty);
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 
+ 	if (current->signal->leader &&
+ 			task_session(current) == tty->ctrl.session)
+@@ -406,7 +406,7 @@ static int tiocsctty(struct tty_struct *tty, struct file *file, int arg)
+ 
+ 	proc_set_tty(tty);
+ unlock:
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	tty_unlock(tty);
+ 	return ret;
+ }
+diff --git a/fs/exec.c b/fs/exec.c
+index 936c59235ef7..4ef7dba3bcc4 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1089,7 +1089,7 @@ static int de_thread(struct task_struct *tsk)
+ 
+ 		for (;;) {
+ 			cgroup_threadgroup_change_begin(tsk);
+-			write_lock_irq(&tasklist_lock);
++			write_lock_irq_tasklist_all();
+ 			/*
+ 			 * Do this under tasklist_lock to ensure that
+ 			 * exit_notify() can't miss ->group_exec_task
+@@ -1098,7 +1098,7 @@ static int de_thread(struct task_struct *tsk)
+ 			if (likely(leader->exit_state))
+ 				break;
+ 			__set_current_state(TASK_KILLABLE);
+-			write_unlock_irq(&tasklist_lock);
++			write_unlock_irq_tasklist_all();
+ 			cgroup_threadgroup_change_end(tsk);
+ 			schedule();
+ 			if (__fatal_signal_pending(tsk))
+@@ -1129,13 +1129,17 @@ static int de_thread(struct task_struct *tsk)
+ 		/* Become a process group leader with the old leader's pid.
+ 		 * The old leader becomes a thread of the this thread group.
+ 		 */
++		spin_lock(&sig->tasklist_state_lock);
+ 		exchange_tids(tsk, leader);
+ 		transfer_pid(leader, tsk, PIDTYPE_TGID);
+ 		transfer_pid(leader, tsk, PIDTYPE_PGID);
+ 		transfer_pid(leader, tsk, PIDTYPE_SID);
+ 
+ 		list_replace_rcu(&leader->tasks, &tsk->tasks);
+-		list_replace_init(&leader->sibling, &tsk->sibling);
++		spin_lock(&leader->real_parent->tasklist_links_lock);
++		list_replace_rcu(&leader->sibling, &tsk->sibling);
++		INIT_LIST_HEAD(&leader->sibling);
++		spin_unlock(&leader->real_parent->tasklist_links_lock);
+ 
+ 		tsk->group_leader = tsk;
+ 		leader->group_leader = tsk;
+@@ -1153,7 +1157,8 @@ static int de_thread(struct task_struct *tsk)
+ 		 */
+ 		if (unlikely(leader->ptrace))
+ 			__wake_up_parent(leader, leader->parent);
+-		write_unlock_irq(&tasklist_lock);
++		spin_unlock(&sig->tasklist_state_lock);
++		write_unlock_irq_tasklist_all();
+ 		cgroup_threadgroup_change_end(tsk);
+ 
+ 		release_task(leader);
+@@ -1171,10 +1176,10 @@ static int de_thread(struct task_struct *tsk)
+ 
+ killed:
+ 	/* protects against exit_notify() and __exit_signal() */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	sig->group_exec_task = NULL;
+ 	sig->notify_count = 0;
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	return -EAGAIN;
+ }
+ 
+@@ -1201,13 +1206,13 @@ static int unshare_sighand(struct task_struct *me)
+ 
+ 		refcount_set(&newsighand->count, 1);
+ 
+-		write_lock_irq(&tasklist_lock);
++		write_lock_irq_tasklist_all();
+ 		spin_lock(&oldsighand->siglock);
+ 		memcpy(newsighand->action, oldsighand->action,
+ 		       sizeof(newsighand->action));
+ 		rcu_assign_pointer(me->sighand, newsighand);
+ 		spin_unlock(&oldsighand->siglock);
+-		write_unlock_irq(&tasklist_lock);
++		write_unlock_irq_tasklist_all();
+ 
+ 		__cleanup_sighand(oldsighand);
+ 	}
+diff --git a/fs/fcntl.c b/fs/fcntl.c
+index 1484f062ee65..2e63805aa0da 100644
+--- a/fs/fcntl.c
++++ b/fs/fcntl.c
+@@ -783,11 +783,11 @@ void send_sigio(struct fown_struct *fown, int fd, int band)
+ 			send_sigio_to_task(p, fown, fd, band, type);
+ 		rcu_read_unlock();
+ 	} else {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_each_pid_task(pid, type, p) {
+ 			send_sigio_to_task(p, fown, fd, band, type);
+ 		} while_each_pid_task(pid, type, p);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+  out_unlock_fown:
+ 	read_unlock_irqrestore(&fown->lock, flags);
+@@ -824,11 +824,11 @@ int send_sigurg(struct fown_struct *fown)
+ 			send_sigurg_to_task(p, fown, type);
+ 		rcu_read_unlock();
+ 	} else {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_each_pid_task(pid, type, p) {
+ 			send_sigurg_to_task(p, fown, type);
+ 		} while_each_pid_task(pid, type, p);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+  out_unlock_fown:
+ 	read_unlock_irqrestore(&fown->lock, flags);
+diff --git a/fs/fs_struct.c b/fs/fs_struct.c
+index 64c2d0814ed6..5c668bb5ff8c 100644
+--- a/fs/fs_struct.c
++++ b/fs/fs_struct.c
+@@ -61,7 +61,7 @@ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
+ 	struct fs_struct *fs;
+ 	int count = 0;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, p) {
+ 		task_lock(p);
+ 		fs = p->fs;
+@@ -80,7 +80,7 @@ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
+ 		}
+ 		task_unlock(p);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	while (count--)
+ 		path_put(old_root);
+ }
+diff --git a/fs/proc/array.c b/fs/proc/array.c
+index 6a4b0a850dce..fa64c808f4ff 100644
+--- a/fs/proc/array.c
++++ b/fs/proc/array.c
+@@ -735,7 +735,7 @@ get_children_pid(struct inode *inode, struct pid *pid_prev, loff_t pos)
+ 	struct task_struct *start, *task;
+ 	struct pid *pid = NULL;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 
+ 	start = pid_task(proc_pid(inode), PIDTYPE_PID);
+ 	if (!start)
+@@ -781,7 +781,7 @@ get_children_pid(struct inode *inode, struct pid *pid_prev, loff_t pos)
+ 	}
+ 
+ out:
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	return pid;
+ }
+ 
+diff --git a/fs/proc/loadavg.c b/fs/proc/loadavg.c
+index 817981e57223..41d64bc08982 100644
+--- a/fs/proc/loadavg.c
++++ b/fs/proc/loadavg.c
+@@ -17,12 +17,12 @@ static int loadavg_proc_show(struct seq_file *m, void *v)
+ 
+ 	get_avenrun(avnrun, FIXED_1/200, 0);
+ 
+-	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %u/%d %d\n",
+-		LOAD_INT(avnrun[0]), LOAD_FRAC(avnrun[0]),
+-		LOAD_INT(avnrun[1]), LOAD_FRAC(avnrun[1]),
+-		LOAD_INT(avnrun[2]), LOAD_FRAC(avnrun[2]),
+-		nr_running(), nr_threads,
+-		idr_get_cursor(&task_active_pid_ns(current)->idr) - 1);
++	seq_printf(m, "%lu.%02lu %lu.%02lu %lu.%02lu %u/%ld %d\n",
++		   LOAD_INT(avnrun[0]), LOAD_FRAC(avnrun[0]),
++		   LOAD_INT(avnrun[1]), LOAD_FRAC(avnrun[1]),
++		   LOAD_INT(avnrun[2]), LOAD_FRAC(avnrun[2]),
++		   nr_running(), atomic_long_read(&nr_threads),
++		   idr_get_cursor(&task_active_pid_ns(current)->idr) - 1);
+ 	return 0;
+ }
+ 
+diff --git a/fs/proc/stat.c b/fs/proc/stat.c
+index dc21a2c9a25d..a0a328b0e12c 100644
+--- a/fs/proc/stat.c
++++ b/fs/proc/stat.c
+@@ -186,7 +186,7 @@ static int show_stat(struct seq_file *p, void *v)
+ 		"procs_blocked %u\n",
+ 		nr_context_switches(),
+ 		(unsigned long long)boottime.tv_sec,
+-		total_forks,
++		(unsigned long)atomic_long_read(&total_forks),
+ 		nr_running(),
+ 		nr_iowait());
+ 
+diff --git a/fs/resctrl/rdtgroup.c b/fs/resctrl/rdtgroup.c
+index 96a9c3d001db..c7c30636bdfa 100644
+--- a/fs/resctrl/rdtgroup.c
++++ b/fs/resctrl/rdtgroup.c
+@@ -2882,7 +2882,7 @@ static void rdt_move_group_tasks(struct rdtgroup *from, struct rdtgroup *to,
+ {
+ 	struct task_struct *p, *t;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(p, t) {
+ 		if (!from || is_closid_match(t, from) ||
+ 		    is_rmid_match(t, from)) {
+@@ -2908,7 +2908,7 @@ static void rdt_move_group_tasks(struct rdtgroup *from, struct rdtgroup *to,
+ 				cpumask_set_cpu(task_cpu(t), mask);
+ 		}
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ static void free_all_child_rdtgrp(struct rdtgroup *rdtgrp)
+diff --git a/include/linux/pid.h b/include/linux/pid.h
+index 9ddee8589956..ca93e639038b 100644
+--- a/include/linux/pid.h
++++ b/include/linux/pid.h
+@@ -60,7 +60,11 @@ struct pid
+ {
+ 	refcount_t count;
+ 	unsigned int level;
+-	spinlock_t lock;
++	spinlock_t lock;		/* proc inode list */
++	/* Task membership nests under siglock; never acquire with IRQs on. */
++	spinlock_t tasks_lock;
++	/* Serialize orphan-group decisions with changes of real_parent. */
++	spinlock_t jobctl_lock;
+ 	/* lists of tasks that use this pid */
+ 	struct hlist_head tasks[PIDTYPE_MAX];
+ 	struct hlist_head inodes;
+@@ -100,7 +104,8 @@ extern struct task_struct *get_pid_task(struct pid *pid, enum pid_type);
+ extern struct pid *get_task_pid(struct task_struct *task, enum pid_type type);
+ 
+ /*
+- * these helpers must be called with the tasklist_lock write-held.
++ * Callers must hold the relevant tasklist shard or all shards for writing.
++ * attach_pid()/detach_pid() also serialize hlist writers with pid->tasks_lock.
+  */
+ extern void attach_pid(struct task_struct *task, enum pid_type);
+ extern void detach_pid(struct task_struct *task, enum pid_type);
+diff --git a/include/linux/ptrace.h b/include/linux/ptrace.h
+index 90507d4afcd6..6d4b567ad99d 100644
+--- a/include/linux/ptrace.h
++++ b/include/linux/ptrace.h
+@@ -195,7 +195,8 @@ static inline void ptrace_event_pid(int event, struct pid *pid)
+  * This is called immediately after adding @child to its parent's children
+  * list.  @ptrace is false in the normal case, and true to ptrace @child.
+  *
+- * Called with current's siglock and write_lock_irq(&tasklist_lock) held.
++ * Called with current's group state lock and siglock, and the child's
++ * home shard write-locked.
+  */
+ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
+ {
+@@ -222,7 +223,7 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
+  * ptrace_release_task - final ptrace-related cleanup of a zombie being reaped
+  * @task:	task in %EXIT_DEAD state
+  *
+- * Called with write_lock(&tasklist_lock) held.
++ * Called with the task's home shard and group state lock held.
+  */
+ static inline void ptrace_release_task(struct task_struct *task)
+ {
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 3014da820ba6..2c31c326d1a7 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -918,6 +918,10 @@ struct task_struct {
+ 	struct sched_info		sched_info;
+ 
+ 	struct list_head		tasks;
++	/* Immutable home shard; shared by all threads of a process. */
++	int				task_domain_nid;
++	/* Serializes fork/release updates to children and ptraced lists. */
++	spinlock_t			tasklist_links_lock;
+ #ifdef CONFIG_SMP
+ 	struct plist_node		pushable_tasks;
+ 	struct rb_node			pushable_dl_tasks;
+diff --git a/include/linux/sched/signal.h b/include/linux/sched/signal.h
+index 57b6e31fa360..4cce33b87aa0 100644
+--- a/include/linux/sched/signal.h
++++ b/include/linux/sched/signal.h
+@@ -99,6 +99,11 @@ struct signal_struct {
+ 	int			nr_threads;
+ 	int			quick_threads;
+ 	struct list_head	thread_head;
++	/* Parent/ptrace/exit state across independently locked NUMA shards. */
++	spinlock_t		tasklist_state_lock;
++	/* Private to the serialized, reference-pinned process-tree walker. */
++	struct list_head	tasklist_walk_entry;
++	struct task_struct	*tasklist_walk_task;
+ 
+ 	wait_queue_head_t	wait_chldexit;	/* for wait4() */
+ 
+@@ -132,8 +137,8 @@ struct signal_struct {
+ 	 * process will inherit a flag if they should look for a
+ 	 * child_subreaper process at exit.
+ 	 */
+-	unsigned int		is_child_subreaper:1;
+-	unsigned int		has_child_subreaper:1;
++	bool			is_child_subreaper;
++	bool			has_child_subreaper;
+ 
+ #ifdef CONFIG_POSIX_TIMERS
+ 
+@@ -644,11 +649,10 @@ static inline unsigned long sigsp(unsigned long sp, struct ksignal *ksig)
+ extern void __cleanup_sighand(struct sighand_struct *);
+ extern void flush_itimer_signals(void);
+ 
+-#define tasklist_empty() \
+-	list_empty(&init_task.tasks)
++bool tasklist_empty(void);
+ 
+-#define next_task(p) \
+-	list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
++/* Walk every home shard under RCU or the all-shard tasklist lock. */
++struct task_struct *next_task(struct task_struct *p);
+ 
+ #define for_each_process(p) \
+ 	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
+diff --git a/include/linux/sched/stat.h b/include/linux/sched/stat.h
+index 0108a38bb64d..b597be6ef212 100644
+--- a/include/linux/sched/stat.h
++++ b/include/linux/sched/stat.h
+@@ -2,6 +2,7 @@
+ #ifndef _LINUX_SCHED_STAT_H
+ #define _LINUX_SCHED_STAT_H
+ 
++#include <linux/atomic.h>
+ #include <linux/percpu.h>
+ #include <linux/kconfig.h>
+ 
+@@ -13,8 +14,8 @@
+  *   so they can only be relied on in narrow circumstances. )
+  */
+ 
+-extern unsigned long total_forks;
+-extern int nr_threads;
++extern atomic_long_t total_forks;
++extern atomic_long_t nr_threads;
+ DECLARE_PER_CPU(unsigned long, process_counts);
+ extern int nr_processes(void);
+ extern unsigned int nr_running(void);
+diff --git a/include/linux/sched/task.h b/include/linux/sched/task.h
+index a4f5fd4774ce..b0c7e5df2584 100644
+--- a/include/linux/sched/task.h
++++ b/include/linux/sched/task.h
+@@ -44,14 +44,45 @@ struct kernel_clone_args {
+ };
+ 
+ /*
+- * This serializes "schedule()" and also protects
+- * the run-queue from deletions/modifications (but
+- * _adding_ to the beginning of the run-queue has
+- * a separate lock).
++ * Global lockdep identity and early-boot/UP/RT fallback lock. Process-tree
++ * callers must use the shard-aware helpers below, not this rwlock directly.
+  */
+ extern rwlock_t tasklist_lock;
+ extern spinlock_t mmlist_lock;
+ 
++/*
++ * Process leaders are linked into permanent NUMA shards. All threads of a
++ * process use the leader's home shard, independent of subsequent migration.
++ * Fork/release/exit_notify hold one shard. Snapshot readers and legacy cold
++ * writers use the all-shard helpers, never the bare tasklist_lock. Reparent
++ * and tracer exit also lock the affected child's signal->tasklist_state_lock.
++ *
++ * Lock order: shard(s), tasklist_state_lock, pid->jobctl_lock, sighand/stats
++ * locks, tasklist_links_lock or pid->tasks_lock. The job-control lock is used
++ * when changing orphan-group relationships. Reparent nests parent and child
++ * group state locks in that order; tracer exit holds only the tracee's state
++ * lock. Fork may nest its unpublished child's state lock. Parent links locks
++ * are taken in address order, and dropped before sending signals. The subtree walker
++ * uses state/links locks without a shard; exec also takes the group state lock.
++ */
++struct task_domain {
++	struct list_head tasks;
++	rwlock_t lock;
++	unsigned long nr_tasks;
++} ____cacheline_aligned_in_smp;
++
++extern struct task_domain **task_domains;
++void init_task_domains(void);
++void read_lock_tasklist_all(void) __acquires(&tasklist_lock);
++int read_trylock_tasklist_all(void) __cond_acquires(&tasklist_lock);
++void read_unlock_tasklist_all(void) __releases(&tasklist_lock);
++void write_lock_tasklist_all(void) __acquires(&tasklist_lock);
++void write_unlock_tasklist_all(void) __releases(&tasklist_lock);
++void write_lock_irq_tasklist_all(void) __acquires(&tasklist_lock);
++void write_unlock_irq_tasklist_all(void) __releases(&tasklist_lock);
++void write_lock_irq_task_domain(int nid) __acquires(&tasklist_lock);
++void write_unlock_irq_task_domain(int nid) __releases(&tasklist_lock);
++
+ extern union thread_union init_thread_union;
+ extern struct task_struct init_task;
+ 
+diff --git a/include/rv/da_monitor.h b/include/rv/da_monitor.h
+index 510c88bfabd4..897276171f58 100644
+--- a/include/rv/da_monitor.h
++++ b/include/rv/da_monitor.h
+@@ -327,12 +327,12 @@ static void da_monitor_reset_all_##name(void)							\
+ 	struct task_struct *g, *p;								\
+ 	int cpu;										\
+ 												\
+-	read_lock(&tasklist_lock);								\
++	read_lock_tasklist_all();								\
+ 	for_each_process_thread(g, p)								\
+ 		da_monitor_reset_##name(da_get_monitor_##name(p));				\
+ 	for_each_present_cpu(cpu)								\
+ 		da_monitor_reset_##name(da_get_monitor_##name(idle_task(cpu)));			\
+-	read_unlock(&tasklist_lock);								\
++	read_unlock_tasklist_all();								\
+ }												\
+ 												\
+ /*												\
+diff --git a/init/init_task.c b/init/init_task.c
+index 59ef4d370ef6..022a72fad8b2 100644
+--- a/init/init_task.c
++++ b/init/init_task.c
+@@ -22,6 +22,8 @@
+ static struct signal_struct init_signals = {
+ 	.nr_threads	= 1,
+ 	.thread_head	= LIST_HEAD_INIT(init_task.thread_node),
++	.tasklist_state_lock = __SPIN_LOCK_UNLOCKED(init_signals.tasklist_state_lock),
++	.tasklist_walk_entry = LIST_HEAD_INIT(init_signals.tasklist_walk_entry),
+ 	.wait_chldexit	= __WAIT_QUEUE_HEAD_INITIALIZER(init_signals.wait_chldexit),
+ 	.shared_pending	= {
+ 		.list = LIST_HEAD_INIT(init_signals.shared_pending.list),
+@@ -149,6 +151,7 @@ struct task_struct init_task
+ 	},
+ 	.blocked	= {{0}},
+ 	.alloc_lock	= __SPIN_LOCK_UNLOCKED(init_task.alloc_lock),
++	.tasklist_links_lock = __SPIN_LOCK_UNLOCKED(init_task.tasklist_links_lock),
+ 	.journal_info	= NULL,
+ 	INIT_CPU_TIMERS(init_task)
+ 	.pi_lock	= __RAW_SPIN_LOCK_UNLOCKED(init_task.pi_lock),
+diff --git a/kernel/Makefile b/kernel/Makefile
+index fe3559ee90d9..541d33970434 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -3,7 +3,7 @@
+ # Makefile for the linux kernel.
+ #
+ 
+-obj-y     = fork.o exec_domain.o panic.o \
++obj-y     = fork.o tasklist.o exec_domain.o panic.o \
+ 	    cpu.o exit.o softirq.o resource.o \
+ 	    sysctl.o capability.o ptrace.o user.o \
+ 	    signal.o sys.o umh.o workqueue.o pid.o task_work.o \
+diff --git a/kernel/bpf-rvi/common_kfuncs.c b/kernel/bpf-rvi/common_kfuncs.c
+index d790a7b65da6..1c1a276086d7 100644
+--- a/kernel/bpf-rvi/common_kfuncs.c
++++ b/kernel/bpf-rvi/common_kfuncs.c
+@@ -125,7 +125,7 @@ __bpf_kfunc void bpf_get_boottime_timens(struct task_struct *tsk, struct timespe
+ 
+ __bpf_kfunc unsigned long bpf_get_total_forks(void)
+ {
+-	return total_forks;
++	return (unsigned long)atomic_long_read(&total_forks);
+ }
+ 
+ __bpf_kfunc unsigned int bpf_nr_running(void)
+diff --git a/kernel/bpf/helpers.c b/kernel/bpf/helpers.c
+index 0b73d8548a2f..74c6d9301a1c 100644
+--- a/kernel/bpf/helpers.c
++++ b/kernel/bpf/helpers.c
+@@ -2388,11 +2388,11 @@ __bpf_kfunc struct task_struct *bpf_current_level1_reaper(void)
+ 		ns = ns->parent;
+ 	}
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	p = ns->child_reaper;
+ 	if (p)
+ 		p = bpf_task_acquire(p);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return p;
+ }
+diff --git a/kernel/cgroup/cgroup.c b/kernel/cgroup/cgroup.c
+index 5aecd71826e4..21b8dcb92237 100644
+--- a/kernel/cgroup/cgroup.c
++++ b/kernel/cgroup/cgroup.c
+@@ -6207,7 +6207,7 @@ static void __init cgroup_init_subsys(struct cgroup_subsys *ss, bool early)
+ 	/* At system boot, before all subsystems have been
+ 	 * registered, no tasks have been forked, so we don't
+ 	 * need to invoke fork callbacks here. */
+-	BUG_ON(!list_empty(&init_task.tasks));
++	BUG_ON(!tasklist_empty());
+ 
+ 	BUG_ON(online_css(css));
+ 
+diff --git a/kernel/debug/kdb/kdb_main.c b/kernel/debug/kdb/kdb_main.c
+index 35aa2e98a92a..6eecc3776f4a 100644
+--- a/kernel/debug/kdb/kdb_main.c
++++ b/kernel/debug/kdb/kdb_main.c
+@@ -2487,7 +2487,7 @@ static void kdb_sysinfo(struct sysinfo *val)
+ 	val->loads[0] = avenrun[0];
+ 	val->loads[1] = avenrun[1];
+ 	val->loads[2] = avenrun[2];
+-	val->procs = nr_threads-1;
++	val->procs = atomic_long_read(&nr_threads) - 1;
+ 	si_meminfo(val);
+ 
+ 	return;
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 4c7a08ad7456..1fbb5b1a561c 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -122,7 +122,7 @@ late_initcall(kernel_exit_sysfs_init);
+ 
+ static void __unhash_process(struct task_struct *p, bool group_dead)
+ {
+-	nr_threads--;
++	atomic_long_dec(&nr_threads);
+ 	detach_pid(p, PIDTYPE_PID);
+ 	if (group_dead) {
+ 		detach_pid(p, PIDTYPE_TGID);
+@@ -130,7 +130,10 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
+ 		detach_pid(p, PIDTYPE_SID);
+ 
+ 		list_del_rcu(&p->tasks);
+-		list_del_init(&p->sibling);
++		task_domains[p->task_domain_nid]->nr_tasks--;
++		spin_lock(&p->real_parent->tasklist_links_lock);
++		list_del_rcu(&p->sibling);
++		spin_unlock(&p->real_parent->tasklist_links_lock);
+ 		__this_cpu_dec(process_counts);
+ 	}
+ 	list_del_rcu(&p->thread_group);
+@@ -138,7 +141,7 @@ static void __unhash_process(struct task_struct *p, bool group_dead)
+ }
+ 
+ /*
+- * This function expects the tasklist_lock write-locked.
++ * The caller holds the home shard and group state lock, with IRQs disabled.
+  */
+ static void __exit_signal(struct task_struct *tsk)
+ {
+@@ -240,7 +243,7 @@ void release_task(struct task_struct *p)
+ {
+ 	struct task_struct *leader;
+ 	struct pid *thread_pid;
+-	int zap_leader;
++	int zap_leader, nid;
+ repeat:
+ 	/* don't need to get the RCU readlock here - the process is dead and
+ 	 * can't be modifying its own credentials. But shut RCU-lockdep up */
+@@ -250,7 +253,9 @@ void release_task(struct task_struct *p)
+ 
+ 	cgroup_release(p);
+ 
+-	write_lock_irq(&tasklist_lock);
++	nid = p->task_domain_nid;
++	write_lock_irq_task_domain(nid);
++	spin_lock(&p->signal->tasklist_state_lock);
+ 	ptrace_release_task(p);
+ 	thread_pid = get_pid(p->thread_pid);
+ 	__exit_signal(p);
+@@ -262,19 +267,21 @@ void release_task(struct task_struct *p)
+ 	 */
+ 	zap_leader = 0;
+ 	leader = p->group_leader;
+-	if (leader != p && thread_group_empty(leader)
+-			&& leader->exit_state == EXIT_ZOMBIE) {
++	if (leader != p && thread_group_empty(leader) &&
++	    READ_ONCE(leader->exit_state) == EXIT_ZOMBIE) {
+ 		/*
+ 		 * If we were the last child thread and the leader has
+ 		 * exited already, and the leader's parent ignores SIGCHLD,
+ 		 * then we are the one who should release the leader.
+ 		 */
+-		zap_leader = do_notify_parent(leader, leader->exit_signal);
+-		if (zap_leader)
+-			leader->exit_state = EXIT_DEAD;
++		if (do_notify_parent(leader, leader->exit_signal) &&
++		    cmpxchg(&leader->exit_state, EXIT_ZOMBIE, EXIT_DEAD) ==
++			    EXIT_ZOMBIE)
++			zap_leader = 1;
+ 	}
+ 
+-	write_unlock_irq(&tasklist_lock);
++	spin_unlock(&p->signal->tasklist_state_lock);
++	write_unlock_irq_task_domain(nid);
+ 	seccomp_filter_release(p);
+ 	proc_flush_pid(thread_pid);
+ 	put_pid(thread_pid);
+@@ -326,16 +333,18 @@ EXPORT_SYMBOL_GPL(rcuwait_wake_up);
+ static int will_become_orphaned_pgrp(struct pid *pgrp,
+ 					struct task_struct *ignored_task)
+ {
+-	struct task_struct *p;
++	struct task_struct *p, *parent;
+ 
+ 	do_each_pid_task(pgrp, PIDTYPE_PGID, p) {
++		parent = rcu_dereference_check(p->real_parent,
++					       lockdep_tasklist_lock_is_held());
+ 		if ((p == ignored_task) ||
+-		    (p->exit_state && thread_group_empty(p)) ||
+-		    is_global_init(p->real_parent))
++		    (READ_ONCE(p->exit_state) && thread_group_empty(p)) ||
++		    is_global_init(parent))
+ 			continue;
+ 
+-		if (task_pgrp(p->real_parent) != pgrp &&
+-		    task_session(p->real_parent) == task_session(p))
++		if (task_pgrp(parent) != pgrp &&
++		    task_session(parent) == task_session(p))
+ 			return 0;
+ 	} while_each_pid_task(pgrp, PIDTYPE_PGID, p);
+ 
+@@ -346,9 +355,9 @@ int is_current_pgrp_orphaned(void)
+ {
+ 	int retval;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	retval = will_become_orphaned_pgrp(task_pgrp(current), NULL);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return retval;
+ }
+@@ -461,7 +470,7 @@ void mm_update_next_owner(struct mm_struct *mm)
+ 		return;
+ 	}
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	/*
+ 	 * Search in the children
+ 	 */
+@@ -493,7 +502,7 @@ void mm_update_next_owner(struct mm_struct *mm)
+ 				break;
+ 		}
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	/*
+ 	 * We found no owner yet mm_users > 1: this implies that we are
+ 	 * most likely racing with swapoff (try_to_unuse()) or /proc or
+@@ -514,7 +523,7 @@ void mm_update_next_owner(struct mm_struct *mm)
+ 	 * Delay read_unlock() till we have the task_lock()
+ 	 * to ensure that c does not slip away underneath us
+ 	 */
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	if (c->mm != mm) {
+ 		task_unlock(c);
+ 		put_task_struct(c);
+@@ -573,191 +582,243 @@ static struct task_struct *find_alive_thread(struct task_struct *p)
+ 	struct task_struct *t;
+ 
+ 	for_each_thread(p, t) {
+-		if (!(t->flags & PF_EXITING))
++		if (!(READ_ONCE(t->flags) & PF_EXITING))
+ 			return t;
+ 	}
+ 	return NULL;
+ }
+ 
+-static struct task_struct *find_child_reaper(struct task_struct *father,
+-						struct list_head *dead)
++static void find_child_reaper(struct task_struct *father, struct list_head *dead)
+ 	__releases(&tasklist_lock)
+ 	__acquires(&tasklist_lock)
+ {
+ 	struct pid_namespace *pid_ns = task_active_pid_ns(father);
+-	struct task_struct *reaper = pid_ns->child_reaper;
+-	struct task_struct *p, *n;
++	struct task_struct *reaper, *p, *n;
++	int nid = father->task_domain_nid;
+ 
+-	if (likely(reaper != father))
+-		return reaper;
++	if (likely(READ_ONCE(pid_ns->child_reaper) != father))
++		return;
+ 
++	/* Threads of the namespace reaper share the shard held by the caller. */
+ 	reaper = find_alive_thread(father);
+ 	if (reaper) {
+-		pid_ns->child_reaper = reaper;
+-		return reaper;
++		WRITE_ONCE(pid_ns->child_reaper, reaper);
++		return;
+ 	}
+ 
+-	write_unlock_irq(&tasklist_lock);
+-
++	write_unlock_irq_task_domain(nid);
+ 	list_for_each_entry_safe(p, n, dead, ptrace_entry) {
+ 		list_del_init(&p->ptrace_entry);
+ 		release_task(p);
+ 	}
+-
+ 	zap_pid_ns_processes(pid_ns);
+-	write_lock_irq(&tasklist_lock);
+-
+-	return father;
++	write_lock_irq_task_domain(nid);
+ }
+ 
+-/*
+- * When we die, we re-parent all our children, and try to:
+- * 1. give them to another thread in our thread group, if such a member exists
+- * 2. give it to the first ancestor process which prctl'd itself as a
+- *    child_subreaper for its children (like a service manager)
+- * 3. give it to the init process (PID 1) in our pid namespace
+- */
+-static struct task_struct *find_new_reaper(struct task_struct *father,
+-					   struct task_struct *child_reaper)
++/* Return a pinned candidate; its exit state is rechecked under its links lock. */
++static struct task_struct *find_new_reaper(struct task_struct *father)
+ {
+ 	struct task_struct *thread, *reaper;
++	struct pid_namespace *ns = task_active_pid_ns(father);
++	unsigned int level = task_pid(father)->level;
++	struct pid *pid;
+ 
+-	thread = find_alive_thread(father);
+-	if (thread)
+-		return thread;
+-
+-	if (father->signal->has_child_subreaper) {
+-		unsigned int ns_level = task_pid(father)->level;
+-		/*
+-		 * Find the first ->is_child_subreaper ancestor in our pid_ns.
+-		 * We can't check reaper != child_reaper to ensure we do not
+-		 * cross the namespaces, the exiting parent could be injected
+-		 * by setns() + fork().
+-		 * We check pid->level, this is slightly more efficient than
+-		 * task_active_pid_ns(reaper) != task_active_pid_ns(father).
+-		 */
+-		for (reaper = father->real_parent;
+-		     task_pid(reaper)->level == ns_level;
+-		     reaper = reaper->real_parent) {
+-			if (reaper == &init_task)
++	rcu_read_lock();
++	reaper = find_alive_thread(father);
++	if (reaper)
++		goto found;
++
++	if (READ_ONCE(father->signal->has_child_subreaper)) {
++		for (reaper = rcu_dereference(father->real_parent);
++		     reaper != &init_task;
++		     reaper = rcu_dereference(reaper->real_parent)) {
++			pid = task_pid(reaper);
++			if (!pid)
++				continue;
++			if (pid->level != level)
+ 				break;
+-			if (!reaper->signal->is_child_subreaper)
++			if (!READ_ONCE(reaper->signal->is_child_subreaper))
+ 				continue;
+ 			thread = find_alive_thread(reaper);
+-			if (thread)
+-				return thread;
++			if (thread) {
++				reaper = thread;
++				goto found;
++			}
+ 		}
+ 	}
++	reaper = READ_ONCE(ns->child_reaper);
++found:
++	get_task_struct(reaper);
++	rcu_read_unlock();
++	return reaper;
++}
+ 
+-	return child_reaper;
++/* Address order also covers reparents between unrelated subreaper trees. */
++static void lock_parent_links(struct task_struct *a, struct task_struct *b)
++{
++	if ((unsigned long)a > (unsigned long)b)
++		swap(a, b);
++	spin_lock(&a->tasklist_links_lock);
++	if (a != b)
++		spin_lock_nested(&b->tasklist_links_lock, SINGLE_DEPTH_NESTING);
+ }
+ 
+-/*
+-* Any that need to be release_task'd are put on the @dead list.
+- */
++static void unlock_parent_links(struct task_struct *a, struct task_struct *b)
++{
++	if ((unsigned long)a > (unsigned long)b)
++		swap(a, b);
++	if (a != b)
++		spin_unlock(&b->tasklist_links_lock);
++	spin_unlock(&a->tasklist_links_lock);
++}
++
++/* The child's state and process-group job-control locks are held. */
+ static void reparent_leader(struct task_struct *father, struct task_struct *p,
+-				struct list_head *dead)
++			    struct list_head *dead)
+ {
+-	if (unlikely(p->exit_state == EXIT_DEAD))
++	if (unlikely(READ_ONCE(p->exit_state) == EXIT_DEAD))
+ 		return;
+ 
+-	/* We don't want people slaying init. */
+ 	p->exit_signal = SIGCHLD;
+-
+-	/* If it has exited notify the new parent about this child's death. */
+-	if (!p->ptrace &&
+-	    p->exit_state == EXIT_ZOMBIE && thread_group_empty(p)) {
+-		if (do_notify_parent(p, p->exit_signal)) {
+-			p->exit_state = EXIT_DEAD;
+-			list_add(&p->ptrace_entry, dead);
+-		}
+-	}
++	/* Only the winner may queue this zombie for release_task(). */
++	if (!p->ptrace && READ_ONCE(p->exit_state) == EXIT_ZOMBIE &&
++	    thread_group_empty(p) && do_notify_parent(p, p->exit_signal) &&
++	    cmpxchg(&p->exit_state, EXIT_ZOMBIE, EXIT_DEAD) == EXIT_ZOMBIE)
++		list_add(&p->ptrace_entry, dead);
+ 
+ 	kill_orphaned_pgrp(p, father);
+ }
+ 
+-/*
+- * This does two things:
+- *
+- * A.  Make init inherit all the child processes
+- * B.  Check to see if any process groups have become orphaned
+- *	as a result of our exiting, and if they have any stopped
+- *	jobs, send them a SIGHUP and then a SIGCONT.  (POSIX 3.2.2.2)
+- */
+ static void forget_original_parent(struct task_struct *father,
+-					struct list_head *dead)
++				   struct list_head *dead)
+ {
++	struct pid_namespace *ns = task_active_pid_ns(father);
+ 	struct task_struct *p, *t, *reaper;
++	struct pid *pgrp;
+ 
+-	if (unlikely(!list_empty(&father->ptraced)))
+-		exit_ptrace(father, dead);
++	exit_ptrace(father, dead);
++	find_child_reaper(father, dead);
+ 
+-	/* Can drop and reacquire tasklist_lock */
+-	reaper = find_child_reaper(father, dead);
+-	if (list_empty(&father->children))
+-		return;
++	/*
++	 * The subtree walker sets this group's subreaper flag and queues its
++	 * children while holding the same lock. Do not move a child between
++	 * those steps: it could land in a reaper the walk has already visited.
++	 * Existing group locks nest in parent-before-child order here; tracer
++	 * exit above must not hold the tracer's group lock.
++	 */
++	spin_lock(&father->signal->tasklist_state_lock);
++	for (;;) {
++		/* Never wait for a child state lock while holding a links lock. */
++		spin_lock(&father->tasklist_links_lock);
++		p = list_first_entry_or_null(&father->children,
++					     struct task_struct, sibling);
++		if (p)
++			get_task_struct(p);
++		spin_unlock(&father->tasklist_links_lock);
++		if (!p)
++			break;
+ 
+-	reaper = find_new_reaper(father, reaper);
+-	list_for_each_entry(p, &father->children, sibling) {
+-		for_each_thread(p, t) {
+-			RCU_INIT_POINTER(t->real_parent, reaper);
+-			BUG_ON((!t->ptrace) != (rcu_access_pointer(t->parent) == father));
+-			if (likely(!t->ptrace))
+-				t->parent = t->real_parent;
+-			if (t->pdeath_signal)
+-				group_send_sig_info(t->pdeath_signal,
+-						    SEND_SIG_NOINFO, t,
+-						    PIDTYPE_TGID);
+-		}
++		spin_lock_nested(&p->signal->tasklist_state_lock,
++				 SINGLE_DEPTH_NESTING);
++		if (!pid_alive(p) || p->real_parent != father)
++			goto next;
++		pgrp = task_pgrp(p);
++		spin_lock(&pgrp->jobctl_lock);
++retry:
++		reaper = find_new_reaper(father);
++		lock_parent_links(father, reaper);
+ 		/*
+-		 * If this is a threaded reparent there is no need to
+-		 * notify anyone anything has happened.
++		 * PF_EXITING precedes the candidate's own links-lock drain.
++		 * Either we insert before that drain, or choose another reaper.
++		 * A dying PID namespace's init must still adopt children while
++		 * zap_pid_ns_processes() waits for the namespace to drain.
+ 		 */
++		if ((READ_ONCE(reaper->flags) & PF_EXITING) &&
++		    reaper != READ_ONCE(ns->child_reaper)) {
++			unlock_parent_links(father, reaper);
++			put_task_struct(reaper);
++			goto retry;
++		}
++
++		for_each_thread(p, t) {
++			rcu_assign_pointer(t->real_parent, reaper);
++			BUG_ON(!t->ptrace && t->parent != father);
++			if (!t->ptrace)
++				rcu_assign_pointer(t->parent, reaper);
++		}
++		list_del_rcu(&p->sibling);
++		list_add_tail_rcu(&p->sibling, &reaper->children);
++		unlock_parent_links(father, reaper);
++
++		/* Signal locks nest outside links locks, as on the fork path. */
++		rcu_read_lock();
++		for_each_thread(p, t)
++			if (t->pdeath_signal)
++				group_send_sig_info(t->pdeath_signal, SEND_SIG_NOINFO,
++						    t, PIDTYPE_TGID);
+ 		if (!same_thread_group(reaper, father))
+ 			reparent_leader(father, p, dead);
++		rcu_read_unlock();
++		put_task_struct(reaper);
++		spin_unlock(&pgrp->jobctl_lock);
++next:
++		spin_unlock(&p->signal->tasklist_state_lock);
++		put_task_struct(p);
+ 	}
+-	list_splice_tail_init(&father->children, &reaper->children);
++	spin_unlock(&father->signal->tasklist_state_lock);
++}
++
++/* An edge within a process group cannot prevent that group being orphaned. */
++static bool exit_changes_orphan_group(struct task_struct *tsk)
++{
++	struct task_struct *parent = tsk->real_parent;
++
++	return task_pgrp(parent) != task_pgrp(tsk) &&
++		task_session(parent) == task_session(tsk);
+ }
+ 
+-/*
+- * Send signals to all our closest relatives so that they know
+- * to properly mourn us..
+- */
+ static void exit_notify(struct task_struct *tsk, int group_dead)
+ {
+-	bool autoreap;
++	int nid = tsk->task_domain_nid;
++	struct pid *pgrp = NULL;
+ 	struct task_struct *p, *n;
++	bool autoreap;
+ 	LIST_HEAD(dead);
+ 
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_task_domain(nid);
+ 	forget_original_parent(tsk, &dead);
+-
+-	if (group_dead)
++	spin_lock(&tsk->signal->tasklist_state_lock);
++	rcu_read_lock();
++	if (group_dead && exit_changes_orphan_group(tsk->group_leader)) {
++		pgrp = task_pgrp(tsk);
++		spin_lock(&pgrp->jobctl_lock);
+ 		kill_orphaned_pgrp(tsk->group_leader, NULL);
++	}
+ 
+-	tsk->exit_state = EXIT_ZOMBIE;
++	/* Complete the exec wakeup before another reaper can claim the zombie. */
++	if (unlikely(tsk->signal->notify_count < 0))
++		wake_up_process(tsk->signal->group_exec_task);
++	WRITE_ONCE(tsk->exit_state, EXIT_ZOMBIE);
+ 	if (unlikely(tsk->ptrace)) {
+-		int sig = thread_group_leader(tsk) &&
+-				thread_group_empty(tsk) &&
+-				!ptrace_reparented(tsk) ?
+-			tsk->exit_signal : SIGCHLD;
++		int sig = thread_group_leader(tsk) && thread_group_empty(tsk) &&
++			  !ptrace_reparented(tsk) ? tsk->exit_signal : SIGCHLD;
++
+ 		autoreap = do_notify_parent(tsk, sig);
+ 	} else if (thread_group_leader(tsk)) {
+ 		autoreap = thread_group_empty(tsk) &&
+-			do_notify_parent(tsk, tsk->exit_signal);
++			   do_notify_parent(tsk, tsk->exit_signal);
+ 	} else {
+ 		autoreap = true;
+ 	}
+-
+-	if (autoreap) {
+-		tsk->exit_state = EXIT_DEAD;
++	if (autoreap &&
++	    cmpxchg(&tsk->exit_state, EXIT_ZOMBIE, EXIT_DEAD) == EXIT_ZOMBIE)
+ 		list_add(&tsk->ptrace_entry, &dead);
+-	}
+ 
+-	/* mt-exec, de_thread() is waiting for group leader */
+-	if (unlikely(tsk->signal->notify_count < 0))
+-		wake_up_process(tsk->signal->group_exec_task);
+-	write_unlock_irq(&tasklist_lock);
++	if (pgrp)
++		spin_unlock(&pgrp->jobctl_lock);
++	rcu_read_unlock();
++	spin_unlock(&tsk->signal->tasklist_state_lock);
++	write_unlock_irq_task_domain(nid);
+ 
+ 	list_for_each_entry_safe(p, n, &dead, ptrace_entry) {
+ 		list_del_init(&p->ptrace_entry);
+@@ -1089,7 +1150,7 @@ eligible_child(struct wait_opts *wo, bool ptrace, struct task_struct *p)
+ 
+ /*
+  * Handle sys_wait4 work for one task in state EXIT_ZOMBIE.  We hold
+- * read_lock(&tasklist_lock) on entry.  If we return zero, we still hold
++ * read_lock_tasklist_all() on entry.  If we return zero, we still hold
+  * the lock and this task is uninteresting.  If we return nonzero, we have
+  * released the lock and the system call should return.
+  */
+@@ -1107,7 +1168,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
+ 		status = (p->signal->flags & SIGNAL_GROUP_EXIT)
+ 			? p->signal->group_exit_code : p->exit_code;
+ 		get_task_struct(p);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 		sched_annotate_sleep();
+ 		if (wo->wo_rusage)
+ 			getrusage(p, RUSAGE_BOTH, wo->wo_rusage);
+@@ -1124,7 +1185,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
+ 	/*
+ 	 * We own this thread, nobody else can reap it.
+ 	 */
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	sched_annotate_sleep();
+ 
+ 	/*
+@@ -1192,7 +1253,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
+ 	wo->wo_stat = status;
+ 
+ 	if (state == EXIT_TRACE) {
+-		write_lock_irq(&tasklist_lock);
++		write_lock_irq_tasklist_all();
+ 		/* We dropped tasklist, ptracer could die and untrace */
+ 		ptrace_unlink(p);
+ 
+@@ -1201,7 +1262,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
+ 		if (do_notify_parent(p, p->exit_signal))
+ 			state = EXIT_DEAD;
+ 		p->exit_state = state;
+-		write_unlock_irq(&tasklist_lock);
++		write_unlock_irq_tasklist_all();
+ 	}
+ 	if (state == EXIT_DEAD)
+ 		release_task(p);
+@@ -1244,7 +1305,7 @@ static int *task_stopped_code(struct task_struct *p, bool ptrace)
+  * Handle sys_wait4() work for %p in state %TASK_STOPPED or %TASK_TRACED.
+  *
+  * CONTEXT:
+- * read_lock(&tasklist_lock), which is released if return value is
++ * read_lock_tasklist_all(), which is released if return value is
+  * non-zero.  Also, grabs and releases @p->sighand->siglock.
+  *
+  * RETURNS:
+@@ -1300,7 +1361,7 @@ static int wait_task_stopped(struct wait_opts *wo,
+ 	get_task_struct(p);
+ 	pid = task_pid_vnr(p);
+ 	why = ptrace ? CLD_TRAPPED : CLD_STOPPED;
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	sched_annotate_sleep();
+ 	if (wo->wo_rusage)
+ 		getrusage(p, RUSAGE_BOTH, wo->wo_rusage);
+@@ -1321,7 +1382,7 @@ static int wait_task_stopped(struct wait_opts *wo,
+ 
+ /*
+  * Handle do_wait work for one task in a live, non-stopped state.
+- * read_lock(&tasklist_lock) on entry.  If we return zero, we still hold
++ * read_lock_tasklist_all() on entry.  If we return zero, we still hold
+  * the lock and this task is uninteresting.  If we return nonzero, we have
+  * released the lock and the system call should return.
+  */
+@@ -1350,7 +1411,7 @@ static int wait_task_continued(struct wait_opts *wo, struct task_struct *p)
+ 
+ 	pid = task_pid_vnr(p);
+ 	get_task_struct(p);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	sched_annotate_sleep();
+ 	if (wo->wo_rusage)
+ 		getrusage(p, RUSAGE_BOTH, wo->wo_rusage);
+@@ -1493,7 +1554,8 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
+ {
+ 	struct task_struct *p;
+ 
+-	list_for_each_entry(p, &tsk->children, sibling) {
++	list_for_each_entry_rcu(p, &tsk->children, sibling,
++				lockdep_tasklist_lock_is_held()) {
+ 		int ret = wait_consider_task(wo, 0, p);
+ 
+ 		if (ret)
+@@ -1507,7 +1569,8 @@ static int ptrace_do_wait(struct wait_opts *wo, struct task_struct *tsk)
+ {
+ 	struct task_struct *p;
+ 
+-	list_for_each_entry(p, &tsk->ptraced, ptrace_entry) {
++	list_for_each_entry_rcu(p, &tsk->ptraced, ptrace_entry,
++				lockdep_tasklist_lock_is_held()) {
+ 		int ret = wait_consider_task(wo, 1, p);
+ 
+ 		if (ret)
+@@ -1601,7 +1664,7 @@ static long do_wait(struct wait_opts *wo)
+ 		goto notask;
+ 
+ 	set_current_state(TASK_INTERRUPTIBLE);
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 
+ 	if (wo->wo_type == PIDTYPE_PID) {
+ 		retval = do_wait_pid(wo);
+@@ -1623,7 +1686,7 @@ static long do_wait(struct wait_opts *wo)
+ 				break;
+ 		} while_each_thread(current, tsk);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ notask:
+ 	retval = wo->notask_error;
+diff --git a/kernel/fork.c b/kernel/fork.c
+index b36bfe393c03..90cabe33d98d 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -138,11 +138,9 @@
+  */
+ #define MAX_THREADS FUTEX_TID_MASK
+ 
+-/*
+- * Protected counters by write_lock_irq(&tasklist_lock)
+- */
+-unsigned long total_forks;	/* Handle normal Linux uptimes. */
+-int nr_threads;			/* The idle threads do not count.. */
++/* Updated by fork/release on independent tasklist shards. */
++atomic_long_t total_forks;	/* Handle normal Linux uptimes. */
++atomic_long_t nr_threads;		/* The idle threads do not count. */
+ 
+ static int max_threads;		/* tunable limit on nr_threads */
+ 
+@@ -1287,6 +1285,7 @@ void __init fork_init(void)
+ 
+ 	lockdep_init_task(&init_task);
+ 	uprobes_init();
++	init_task_domains();
+ }
+ 
+ int __weak arch_dup_task_struct(struct task_struct *dst,
+@@ -2122,6 +2121,8 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
+ 
+ 	sig->nr_threads = 1;
+ 	sig->quick_threads = 1;
++	spin_lock_init(&sig->tasklist_state_lock);
++	INIT_LIST_HEAD(&sig->tasklist_walk_entry);
+ 	atomic_set(&sig->live, 1);
+ 	refcount_set(&sig->sigcnt, 1);
+ 
+@@ -2507,7 +2508,7 @@ __latent_entropy struct task_struct *copy_process(
+ 					int node,
+ 					struct kernel_clone_args *args)
+ {
+-	int pidfd = -1, retval;
++	int pidfd = -1, retval, nid;
+ 	struct task_struct *p;
+ 	struct multiprocess_signals delayed;
+ 	struct file *pidfile = NULL;
+@@ -2660,7 +2661,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	 * to stop root fork bombs.
+ 	 */
+ 	retval = -EAGAIN;
+-	if (data_race(nr_threads >= max_threads))
++	if (atomic_long_read(&nr_threads) >= max_threads)
+ 		goto bad_fork_cleanup_count;
+ 
+ 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
+@@ -2671,6 +2672,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	rcu_copy_process(p);
+ 	p->vfork_done = NULL;
+ 	spin_lock_init(&p->alloc_lock);
++	spin_lock_init(&p->tasklist_links_lock);
+ 
+ 	init_sigpending(&p->pending);
+ 
+@@ -2908,9 +2910,21 @@ __latent_entropy struct task_struct *copy_process(
+ 
+ 	/*
+ 	 * Make it visible to the rest of the system, but dont wake it up yet.
+-	 * Need tasklist lock for parent etc handling!
++	 * Threads share their leader's shard, including across de_thread().
++	 * The group state lock excludes reparenting and tracer exit. All-shard
++	 * writers exclude exec and process-group changes.
+ 	 */
+-	write_lock_irq(&tasklist_lock);
++	nid = (clone_flags & CLONE_THREAD) ?
++		p->group_leader->task_domain_nid : cpu_to_node(task_cpu(p));
++	if (nid == NUMA_NO_NODE || nid >= nr_node_ids)
++		nid = 0;
++	p->task_domain_nid = nid;
++	write_lock_irq_task_domain(nid);
++	spin_lock(&current->signal->tasklist_state_lock);
++	/* A reparent/tracer can find the child as soon as its links appear. */
++	if (p->signal != current->signal)
++		spin_lock_nested(&p->signal->tasklist_state_lock,
++				 SINGLE_DEPTH_NESTING);
+ 
+ 	/* CLONE_PARENT re-uses the old parent */
+ 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {
+@@ -2967,20 +2981,27 @@ __latent_entropy struct task_struct *copy_process(
+ 			init_task_pid(p, PIDTYPE_SID, task_session(current));
+ 
+ 			if (is_child_reaper(pid)) {
+-				ns_of_pid(pid)->child_reaper = p;
++				struct task_struct *old;
++
++				old = xchg(&ns_of_pid(pid)->child_reaper, p);
++				WARN_ON_ONCE(old && old != &init_task);
+ 				p->signal->flags |= SIGNAL_UNKILLABLE;
+ 			}
+ 			p->signal->shared_pending.signal = delayed.signal;
+ 			p->signal->tty = tty_kref_get(current->signal->tty);
+ 			/*
+ 			 * Inherit has_child_subreaper flag under the same
+-			 * tasklist_lock with adding child to the process tree
++			 * parent links lock as adding the child to the process tree
+ 			 * for propagate_has_child_subreaper optimization.
+ 			 */
+-			p->signal->has_child_subreaper = p->real_parent->signal->has_child_subreaper ||
+-							 p->real_parent->signal->is_child_subreaper;
+-			list_add_tail(&p->sibling, &p->real_parent->children);
+-			list_add_tail_rcu(&p->tasks, &init_task.tasks);
++			spin_lock(&p->real_parent->tasklist_links_lock);
++			p->signal->has_child_subreaper =
++				READ_ONCE(p->real_parent->signal->has_child_subreaper) ||
++				READ_ONCE(p->real_parent->signal->is_child_subreaper);
++			list_add_tail_rcu(&p->sibling, &p->real_parent->children);
++			spin_unlock(&p->real_parent->tasklist_links_lock);
++			list_add_tail_rcu(&p->tasks, &task_domains[nid]->tasks);
++			task_domains[nid]->nr_tasks++;
+ 			attach_pid(p, PIDTYPE_TGID);
+ 			attach_pid(p, PIDTYPE_PGID);
+ 			attach_pid(p, PIDTYPE_SID);
+@@ -2997,13 +3018,16 @@ __latent_entropy struct task_struct *copy_process(
+ 					  &p->signal->thread_head);
+ 		}
+ 		attach_pid(p, PIDTYPE_PID);
+-		nr_threads++;
++		atomic_long_inc(&nr_threads);
+ 	}
+-	total_forks++;
++	atomic_long_inc(&total_forks);
+ 	hlist_del_init(&delayed.node);
+ 	spin_unlock(&current->sighand->siglock);
+ 	syscall_tracepoint_update(p);
+-	write_unlock_irq(&tasklist_lock);
++	if (p->signal != current->signal)
++		spin_unlock(&p->signal->tasklist_state_lock);
++	spin_unlock(&current->signal->tasklist_state_lock);
++	write_unlock_irq_task_domain(nid);
+ 
+ 	if (pidfile)
+ 		fd_install(pidfd, pidfile);
+@@ -3024,7 +3048,10 @@ __latent_entropy struct task_struct *copy_process(
+ bad_fork_core_free:
+ 	sched_core_free(p);
+ 	spin_unlock(&current->sighand->siglock);
+-	write_unlock_irq(&tasklist_lock);
++	if (p->signal != current->signal)
++		spin_unlock(&p->signal->tasklist_state_lock);
++	spin_unlock(&current->signal->tasklist_state_lock);
++	write_unlock_irq_task_domain(nid);
+ bad_fork_cancel_cgroup:
+ 	cgroup_cancel_fork(p, args);
+ bad_fork_put_pidfd:
+@@ -3501,36 +3528,73 @@ SYSCALL_DEFINE2(clone3, struct clone_args __user *, uargs, size_t, size)
+ }
+ #endif
+ 
++static DEFINE_MUTEX(tasklist_walk_mutex);
++
++static void tasklist_walk_enqueue(struct task_struct *task, struct list_head *todo)
++{
++	struct signal_struct *sig = task->signal;
++
++	if (!list_empty(&sig->tasklist_walk_entry))
++		return;
++	get_task_struct(task);
++	sig->tasklist_walk_task = task;
++	list_add_tail(&sig->tasklist_walk_entry, todo);
++}
++
++/*
++ * The sole in-tree caller propagates subreaper state from process context.
++ * Pin queued groups instead of following a sibling cursor across a reparent.
++ * RCU protects task lookups; each parent's links lock protects its list while
++ * it is scanned. No allocation or global tasklist lock is needed. Keeping
++ * visited entries until the end prevents duplicate visits after reparenting.
++ */
+ void walk_process_tree(struct task_struct *top, proc_visitor visitor, void *data)
+ {
++	struct signal_struct *sig, *next;
+ 	struct task_struct *leader, *parent, *child;
++	unsigned long flags;
++	LIST_HEAD(todo);
++	LIST_HEAD(done);
+ 	int res;
+ 
+-	read_lock(&tasklist_lock);
+-	leader = top = top->group_leader;
+-down:
+-	for_each_thread(leader, parent) {
+-		list_for_each_entry(child, &parent->children, sibling) {
+-			res = visitor(child, data);
+-			if (res) {
+-				if (res < 0)
+-					goto out;
+-				leader = child;
+-				goto down;
++	mutex_lock(&tasklist_walk_mutex);
++	rcu_read_lock();
++	tasklist_walk_enqueue(top, &todo);
++	rcu_read_unlock();
++	while (!list_empty(&todo)) {
++		sig = list_first_entry(&todo, struct signal_struct,
++				       tasklist_walk_entry);
++		list_move_tail(&sig->tasklist_walk_entry, &done);
++		rcu_read_lock();
++		spin_lock_irqsave(&sig->tasklist_state_lock, flags);
++		leader = sig->tasklist_walk_task->group_leader;
++		res = 0;
++		if (pid_alive(leader))
++			res = sig == top->signal ? 1 : visitor(leader, data);
++		if (res > 0) {
++			for_each_thread(leader, parent) {
++				spin_lock(&parent->tasklist_links_lock);
++				list_for_each_entry_rcu(child, &parent->children,
++							sibling)
++					tasklist_walk_enqueue(child, &todo);
++				spin_unlock(&parent->tasklist_links_lock);
+ 			}
+-up:
+-			;
+ 		}
++		spin_unlock_irqrestore(&sig->tasklist_state_lock, flags);
++		rcu_read_unlock();
++		if (res < 0)
++			break;
++		cond_resched();
+ 	}
+ 
+-	if (leader != top) {
+-		child = leader;
+-		parent = child->real_parent;
+-		leader = parent->group_leader;
+-		goto up;
++	list_splice_tail_init(&todo, &done);
++	list_for_each_entry_safe(sig, next, &done, tasklist_walk_entry) {
++		leader = sig->tasklist_walk_task;
++		sig->tasklist_walk_task = NULL;
++		list_del_init(&sig->tasklist_walk_entry);
++		put_task_struct(leader);
+ 	}
+-out:
+-	read_unlock(&tasklist_lock);
++	mutex_unlock(&tasklist_walk_mutex);
+ }
+ 
+ #ifndef ARCH_MIN_MMSTRUCT_ALIGN
+diff --git a/kernel/livepatch/transition.c b/kernel/livepatch/transition.c
+index e54c3d60a904..2f6b06df33fc 100644
+--- a/kernel/livepatch/transition.c
++++ b/kernel/livepatch/transition.c
+@@ -127,12 +127,12 @@ static void klp_complete_transition(void)
+ 	if (klp_target_state == KLP_PATCHED)
+ 		klp_synchronize_transition();
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task) {
+ 		WARN_ON_ONCE(test_tsk_thread_flag(task, TIF_PATCH_PENDING));
+ 		task->patch_state = KLP_UNDEFINED;
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	for_each_possible_cpu(cpu) {
+ 		task = idle_task(cpu);
+@@ -412,7 +412,7 @@ static void klp_send_signals(void)
+ 	if (klp_signals_cnt == SIGNALS_TIMEOUT)
+ 		pr_notice("signaling remaining tasks\n");
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task) {
+ 		if (!klp_patch_pending(task))
+ 			continue;
+@@ -437,7 +437,7 @@ static void klp_send_signals(void)
+ 			set_notify_signal(task);
+ 		}
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ /*
+@@ -466,11 +466,11 @@ void klp_try_complete_transition(void)
+ 	 * Usually this will transition most (or all) of the tasks on a system
+ 	 * unless the patch includes changes to a very common function.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task)
+ 		if (!klp_try_switch_task(task))
+ 			complete = false;
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	/*
+ 	 * Ditto for the idle "swapper" tasks.
+@@ -543,11 +543,11 @@ void klp_start_transition(void)
+ 	 * switch either in klp_try_complete_transition() or as they exit the
+ 	 * kernel.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task)
+ 		if (task->patch_state != klp_target_state)
+ 			set_tsk_thread_flag(task, TIF_PATCH_PENDING);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	/*
+ 	 * Mark all idle tasks as needing a patch state update.  They'll switch
+@@ -595,12 +595,12 @@ void klp_init_transition(struct klp_patch *patch, int state)
+ 	 * Initialize all tasks to the initial patch state to prepare them for
+ 	 * switching to the target state.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task) {
+ 		WARN_ON_ONCE(task->patch_state != KLP_UNDEFINED);
+ 		task->patch_state = initial_state;
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	/*
+ 	 * Ditto for the idle "swapper" tasks.
+@@ -660,10 +660,10 @@ void klp_reverse_transition(void)
+ 	 * klp_update_patch_state() or __klp_sched_try_switch() running in
+ 	 * parallel with the reverse transition.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task)
+ 		clear_tsk_thread_flag(task, TIF_PATCH_PENDING);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	for_each_possible_cpu(cpu)
+ 		clear_tsk_thread_flag(idle_task(cpu), TIF_PATCH_PENDING);
+@@ -732,10 +732,10 @@ void klp_force_transition(void)
+ 
+ 	pr_warn("forcing remaining tasks to the patched state\n");
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, task)
+ 		klp_update_patch_state(task);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	for_each_possible_cpu(cpu)
+ 		klp_update_patch_state(idle_task(cpu));
+diff --git a/kernel/pid.c b/kernel/pid.c
+index bc2f0a6cd3bc..aaa980766b75 100644
+--- a/kernel/pid.c
++++ b/kernel/pid.c
+@@ -47,6 +47,9 @@
+ 
+ struct pid init_struct_pid = {
+ 	.count		= REFCOUNT_INIT(1),
++	.lock		= __SPIN_LOCK_UNLOCKED(init_struct_pid.lock),
++	.tasks_lock	= __SPIN_LOCK_UNLOCKED(init_struct_pid.tasks_lock),
++	.jobctl_lock	= __SPIN_LOCK_UNLOCKED(init_struct_pid.jobctl_lock),
+ 	.tasks		= {
+ 		{ .first = NULL },
+ 		{ .first = NULL },
+@@ -286,6 +289,8 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
+ 	get_pid_ns(ns);
+ 	refcount_set(&pid->count, 1);
+ 	spin_lock_init(&pid->lock);
++	spin_lock_init(&pid->tasks_lock);
++	spin_lock_init(&pid->jobctl_lock);
+ 	for (type = 0; type < PIDTYPE_MAX; ++type)
+ 		INIT_HLIST_HEAD(&pid->tasks[type]);
+ 
+@@ -353,12 +358,16 @@ static struct pid **task_pid_ptr(struct task_struct *task, enum pid_type type)
+ }
+ 
+ /*
+- * attach_pid() must be called with the tasklist_lock write-held.
++ * The caller holds a tasklist shard or all shards for writing.
++ * pid->tasks_lock serializes hlist updates from different home shards.
++ * The separate proc inode lock can be acquired with interrupts enabled.
+  */
+ void attach_pid(struct task_struct *task, enum pid_type type)
+ {
+ 	struct pid *pid = *task_pid_ptr(task, type);
++	spin_lock(&pid->tasks_lock);
+ 	hlist_add_head_rcu(&task->pid_links[type], &pid->tasks[type]);
++	spin_unlock(&pid->tasks_lock);
+ }
+ 
+ static void __change_pid(struct task_struct *task, enum pid_type type,
+@@ -370,12 +379,16 @@ static void __change_pid(struct task_struct *task, enum pid_type type,
+ 
+ 	pid = *pid_ptr;
+ 
++	spin_lock(&pid->tasks_lock);
+ 	hlist_del_rcu(&task->pid_links[type]);
+ 	*pid_ptr = new;
+ 
+ 	for (tmp = PIDTYPE_MAX; --tmp >= 0; )
+-		if (pid_has_task(pid, tmp))
++		if (pid_has_task(pid, tmp)) {
++			spin_unlock(&pid->tasks_lock);
+ 			return;
++		}
++	spin_unlock(&pid->tasks_lock);
+ 
+ 	free_pid(pid);
+ }
+@@ -392,6 +405,7 @@ void change_pid(struct task_struct *task, enum pid_type type,
+ 	attach_pid(task, type);
+ }
+ 
++/* Both tasks are excluded from fork/release by the all-shard write lock. */
+ void exchange_tids(struct task_struct *left, struct task_struct *right)
+ {
+ 	struct pid *pid1 = left->thread_pid;
+@@ -822,11 +836,11 @@ struct task_struct *get_current_level1_reaper(void)
+ 		ns = ns->parent;
+ 	}
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	reaper = ns->child_reaper;
+ 	if (reaper)
+ 		get_task_struct(reaper);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return reaper;
+ }
+diff --git a/kernel/pid_namespace.c b/kernel/pid_namespace.c
+index b321c02f382e..561ec622407a 100644
+--- a/kernel/pid_namespace.c
++++ b/kernel/pid_namespace.c
+@@ -230,14 +230,14 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
+ 	 *
+ 	 */
+ 	rcu_read_lock();
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	nr = 2;
+ 	idr_for_each_entry_continue(&pid_ns->idr, pid, nr) {
+ 		task = pid_task(pid, PIDTYPE_PID);
+ 		if (task && !__fatal_signal_pending(task))
+ 			group_send_sig_info(SIGKILL, SEND_SIG_PRIV, task, PIDTYPE_MAX);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	rcu_read_unlock();
+ 
+ 	/*
+@@ -376,9 +376,9 @@ int reboot_pid_ns(struct pid_namespace *pid_ns, int cmd)
+ 		return -EINVAL;
+ 	}
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	send_sig(SIGKILL, pid_ns->child_reaper, 1);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	do_exit(0);
+ 
+@@ -416,12 +416,12 @@ static struct ns_common *pidns_for_children_get(struct task_struct *task)
+ 	task_unlock(task);
+ 
+ 	if (ns) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		if (!ns->child_reaper) {
+ 			put_pid_ns(ns);
+ 			ns = NULL;
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ 
+ 	return ns ? &ns->ns : NULL;
+@@ -551,7 +551,7 @@ static void pidns_update_load_tasks(void)
+ 	struct task_struct *p, *t;
+ 
+ 	rcu_read_lock();
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(p, t) {
+ 		// exists for sure, don't need get_pid_ns()
+ 		struct pid_namespace *pidns = task_active_pid_ns(t);
+@@ -566,7 +566,7 @@ static void pidns_update_load_tasks(void)
+ 			pidns = pidns->parent;
+ 		}
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	rcu_read_unlock();
+ }
+ 
+diff --git a/kernel/power/process.c b/kernel/power/process.c
+index 66ac067d9ae6..59c71e525449 100644
+--- a/kernel/power/process.c
++++ b/kernel/power/process.c
+@@ -49,14 +49,14 @@ static int try_to_freeze_tasks(bool user_only)
+ 
+ 	while (true) {
+ 		todo = 0;
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		for_each_process_thread(g, p) {
+ 			if (p == current || !freeze_task(p))
+ 				continue;
+ 
+ 			todo++;
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 
+ 		if (!user_only) {
+ 			wq_busy = freeze_workqueues_busy();
+@@ -96,12 +96,12 @@ static int try_to_freeze_tasks(bool user_only)
+ 			show_freezable_workqueues();
+ 
+ 		if (!wakeup || pm_debug_messages_on) {
+-			read_lock(&tasklist_lock);
++			read_lock_tasklist_all();
+ 			for_each_process_thread(g, p) {
+ 				if (p != current && freezing(p) && !frozen(p))
+ 					sched_show_task(p);
+ 			}
+-			read_unlock(&tasklist_lock);
++			read_unlock_tasklist_all();
+ 		}
+ 	} else {
+ 		pr_info("Freezing %s completed (elapsed %d.%03d seconds)\n",
+@@ -194,13 +194,13 @@ void thaw_processes(void)
+ 	__usermodehelper_set_disable_depth(UMH_FREEZING);
+ 	thaw_workqueues();
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, p) {
+ 		/* No other threads should have PF_SUSPEND_TASK set */
+ 		WARN_ON((p != curr) && (p->flags & PF_SUSPEND_TASK));
+ 		__thaw_task(p);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	WARN_ON(!(curr->flags & PF_SUSPEND_TASK));
+ 	curr->flags &= ~PF_SUSPEND_TASK;
+@@ -221,12 +221,12 @@ void thaw_kernel_threads(void)
+ 
+ 	thaw_workqueues();
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, p) {
+ 		if (p->flags & PF_KTHREAD)
+ 			__thaw_task(p);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	schedule();
+ 	pr_cont("done.\n");
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+index a8682842c840..ad999db1ec29 100644
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -70,8 +70,10 @@ void __ptrace_link(struct task_struct *child, struct task_struct *new_parent,
+ 		   const struct cred *ptracer_cred)
+ {
+ 	BUG_ON(!list_empty(&child->ptrace_entry));
+-	list_add(&child->ptrace_entry, &new_parent->ptraced);
+-	child->parent = new_parent;
++	spin_lock(&new_parent->tasklist_links_lock);
++	list_add_rcu(&child->ptrace_entry, &new_parent->ptraced);
++	spin_unlock(&new_parent->tasklist_links_lock);
++	rcu_assign_pointer(child->parent, new_parent);
+ 	child->ptracer_cred = get_cred(ptracer_cred);
+ }
+ 
+@@ -112,10 +114,12 @@ static void ptrace_link(struct task_struct *child, struct task_struct *new_paren
+  * re-attaches and performs a WNOHANG wait(2), it may fail.
+  *
+  * CONTEXT:
+- * write_lock_irq(tasklist_lock)
++ * All tasklist shards, or the caller's home shard and child's group state
++ * lock, with interrupts disabled.
+  */
+ void __ptrace_unlink(struct task_struct *child)
+ {
++	struct task_struct *tracer = child->parent;
+ 	const struct cred *old_cred;
+ 	BUG_ON(!child->ptrace);
+ 
+@@ -124,8 +128,10 @@ void __ptrace_unlink(struct task_struct *child)
+ 	clear_task_syscall_work(child, SYSCALL_EMU);
+ #endif
+ 
+-	child->parent = child->real_parent;
++	rcu_assign_pointer(child->parent, child->real_parent);
++	spin_lock(&tracer->tasklist_links_lock);
+ 	list_del_init(&child->ptrace_entry);
++	spin_unlock(&tracer->tasklist_links_lock);
+ 	old_cred = child->ptracer_cred;
+ 	child->ptracer_cred = NULL;
+ 	put_cred(old_cred);
+@@ -258,7 +264,7 @@ static int ptrace_check_attach(struct task_struct *child, bool ignore_state)
+ 	 * we are sure that this is our traced child and that can only
+ 	 * be changed by us so it's not changing right after this.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	if (child->ptrace && child->parent == current) {
+ 		/*
+ 		 * child->sighand can't be NULL, release_task()
+@@ -267,7 +273,7 @@ static int ptrace_check_attach(struct task_struct *child, bool ignore_state)
+ 		if (ignore_state || ptrace_freeze_traced(child))
+ 			ret = 0;
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	if (!ret && !ignore_state &&
+ 	    WARN_ON_ONCE(!wait_task_inactive(child, __TASK_TRACED|TASK_FROZEN)))
+@@ -435,7 +441,7 @@ static int ptrace_attach(struct task_struct *task, long request,
+ 	if (retval)
+ 		goto unlock_creds;
+ 
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 	retval = -EPERM;
+ 	if (unlikely(task->exit_state))
+ 		goto unlock_tasklist;
+@@ -479,7 +485,7 @@ static int ptrace_attach(struct task_struct *task, long request,
+ 
+ 	retval = 0;
+ unlock_tasklist:
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ unlock_creds:
+ 	mutex_unlock(&task->signal->cred_guard_mutex);
+ out:
+@@ -508,7 +514,7 @@ static int ptrace_traceme(void)
+ {
+ 	int ret = -EPERM;
+ 
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 	/* Are we already being traced? */
+ 	if (!current->ptrace) {
+ 		ret = security_ptrace_traceme(current->parent);
+@@ -522,7 +528,7 @@ static int ptrace_traceme(void)
+ 			ptrace_link(current, current->real_parent);
+ 		}
+ 	}
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ 
+ 	return ret;
+ }
+@@ -561,7 +567,7 @@ static bool __ptrace_detach(struct task_struct *tracer, struct task_struct *p)
+ 
+ 	__ptrace_unlink(p);
+ 
+-	if (p->exit_state != EXIT_ZOMBIE)
++	if (READ_ONCE(p->exit_state) != EXIT_ZOMBIE)
+ 		return false;
+ 
+ 	dead = !thread_group_leader(p);
+@@ -575,9 +581,8 @@ static bool __ptrace_detach(struct task_struct *tracer, struct task_struct *p)
+ 		}
+ 	}
+ 	/* Mark it as in the process of being reaped. */
+-	if (dead)
+-		p->exit_state = EXIT_DEAD;
+-	return dead;
++	return dead &&
++		cmpxchg(&p->exit_state, EXIT_ZOMBIE, EXIT_DEAD) == EXIT_ZOMBIE;
+ }
+ 
+ static int ptrace_detach(struct task_struct *child, unsigned int data)
+@@ -588,7 +593,7 @@ static int ptrace_detach(struct task_struct *child, unsigned int data)
+ 	/* Architecture-specific hardware disable .. */
+ 	ptrace_disable(child);
+ 
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 	/*
+ 	 * We rely on ptrace_freeze_traced(). It can't be killed and
+ 	 * untraced by another thread, it can't be a zombie.
+@@ -600,27 +605,38 @@ static int ptrace_detach(struct task_struct *child, unsigned int data)
+ 	 */
+ 	child->exit_code = data;
+ 	__ptrace_detach(current, child);
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ 
+ 	proc_ptrace_connector(child, PTRACE_DETACH);
+ 
+ 	return 0;
+ }
+ 
+-/*
+- * Detach all tasks we were using ptrace on. Called with tasklist held
+- * for writing.
+- */
++/* The tracer's home shard is held; tracees may belong to other shards. */
+ void exit_ptrace(struct task_struct *tracer, struct list_head *dead)
+ {
+-	struct task_struct *p, *n;
+-
+-	list_for_each_entry_safe(p, n, &tracer->ptraced, ptrace_entry) {
+-		if (unlikely(p->ptrace & PT_EXITKILL))
+-			send_sig_info(SIGKILL, SEND_SIG_PRIV, p);
++	struct task_struct *p;
++
++	for (;;) {
++		spin_lock(&tracer->tasklist_links_lock);
++		p = list_first_entry_or_null(&tracer->ptraced,
++					     struct task_struct, ptrace_entry);
++		if (p)
++			get_task_struct(p);
++		spin_unlock(&tracer->tasklist_links_lock);
++		if (!p)
++			break;
+ 
+-		if (__ptrace_detach(tracer, p))
+-			list_add(&p->ptrace_entry, dead);
++		spin_lock(&p->signal->tasklist_state_lock);
++		/* release_task() or another exiting thread may have unlinked it. */
++		if (p->ptrace && p->parent == tracer) {
++			if (unlikely(p->ptrace & PT_EXITKILL))
++				send_sig_info(SIGKILL, SEND_SIG_PRIV, p);
++			if (__ptrace_detach(tracer, p))
++				list_add(&p->ptrace_entry, dead);
++		}
++		spin_unlock(&p->signal->tasklist_state_lock);
++		put_task_struct(p);
+ 	}
+ }
+ 
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index b50746de64c7..72ec99fc2b16 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1822,9 +1822,9 @@ static void uclamp_sync_util_min_rt_default(void)
+ 	 * uclamp_min_rt or for_each_process_thread() will observe the new
+ 	 * task.
+ 	 */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	smp_mb__after_spinlock();
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	guard(rcu)();
+ 	for_each_process_thread(g, p)
+@@ -8682,7 +8682,7 @@ void normalize_rt_tasks(void)
+ 		.sched_policy = SCHED_NORMAL,
+ 	};
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	for_each_process_thread(g, p) {
+ 		/*
+ 		 * Only normalize user tasks:
+@@ -8707,7 +8707,7 @@ void normalize_rt_tasks(void)
+ 
+ 		__sched_setscheduler(p, &attr, false, false);
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ #endif /* CONFIG_MAGIC_SYSRQ */
+diff --git a/kernel/sched/core_sched.c b/kernel/sched/core_sched.c
+index a57fd8f27498..eca92172f7db 100644
+--- a/kernel/sched/core_sched.c
++++ b/kernel/sched/core_sched.c
+@@ -212,7 +212,7 @@ int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
+ 		goto out;
+ 	}
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	grp = task_pid_type(task, type);
+ 
+ 	do_each_pid_thread(grp, type, p) {
+@@ -226,7 +226,7 @@ int sched_core_share_pid(unsigned int cmd, pid_t pid, enum pid_type type,
+ 		__sched_core_set(p, cookie);
+ 	} while_each_pid_thread(grp, type, p);
+ out_tasklist:
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ out:
+ 	sched_core_put_cookie(cookie);
+diff --git a/kernel/sched/debug.c b/kernel/sched/debug.c
+index b084af523ce7..08986ffcd96e 100644
+--- a/kernel/sched/debug.c
++++ b/kernel/sched/debug.c
+@@ -110,7 +110,7 @@ static void sched_feat_disable_paral(char *cmp)
+ 	struct task_struct *tsk, *t;
+ 
+ 	if (strncmp(cmp, "PARAL", 5) == 0) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		for_each_process(tsk) {
+ 			if (tsk->flags & PF_KTHREAD || is_global_init(tsk))
+ 				continue;
+@@ -118,7 +118,7 @@ static void sched_feat_disable_paral(char *cmp)
+ 			for_each_thread(tsk, t)
+ 				cpumask_clear(t->prefer_cpus);
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ }
+ 
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 50aa72d6ff4e..97bebdd94ce0 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1614,7 +1614,7 @@ static int kill_something_info(int sig, struct kernel_siginfo *info, pid_t pid)
+ 	if (pid == INT_MIN)
+ 		return -ESRCH;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	if (pid != -1) {
+ 		ret = __kill_pgrp_info(sig, info,
+ 				pid ? find_vpid(-pid) : task_pgrp(current));
+@@ -1634,7 +1634,7 @@ static int kill_something_info(int sig, struct kernel_siginfo *info, pid_t pid)
+ 		}
+ 		ret = count ? retval : -ESRCH;
+ 	}
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return ret;
+ }
+@@ -1924,9 +1924,9 @@ int kill_pgrp(struct pid *pid, int sig, int priv)
+ {
+ 	int ret;
+ 
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	ret = __kill_pgrp_info(sig, __si_special(priv), pid);
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 
+ 	return ret;
+ }
+@@ -2060,6 +2060,8 @@ static void do_notify_pidfd(struct task_struct *task)
+  */
+ bool do_notify_parent(struct task_struct *tsk, int sig)
+ {
++	struct task_struct *parent;
++	struct pid *parent_pid;
+ 	struct kernel_siginfo info;
+ 	unsigned long flags;
+ 	struct sighand_struct *psig;
+@@ -2074,6 +2076,15 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 	WARN_ON_ONCE(!tsk->ptrace &&
+ 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
+ 
++	/* The caller holds the child's state lock or every tasklist shard. */
++	rcu_read_lock();
++	parent = rcu_dereference(tsk->parent);
++	get_task_struct(parent);
++	rcu_read_unlock();
++	parent_pid = get_task_pid(parent, PIDTYPE_PID);
++	if (!parent_pid)
++		goto out_parent;
++
+ 	/* Wake up all pidfd waiters */
+ 	do_notify_pidfd(tsk);
+ 
+@@ -2082,27 +2093,16 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 		 * This is only possible if parent == real_parent.
+ 		 * Check if it has changed security domain.
+ 		 */
+-		if (tsk->parent_exec_id != READ_ONCE(tsk->parent->self_exec_id))
++		if (tsk->parent_exec_id != READ_ONCE(parent->self_exec_id))
+ 			sig = SIGCHLD;
+ 	}
+ 
+ 	clear_siginfo(&info);
+ 	info.si_signo = sig;
+ 	info.si_errno = 0;
+-	/*
+-	 * We are under tasklist_lock here so our parent is tied to
+-	 * us and cannot change.
+-	 *
+-	 * task_active_pid_ns will always return the same pid namespace
+-	 * until a task passes through release_task.
+-	 *
+-	 * write_lock() currently calls preempt_disable() which is the
+-	 * same as rcu_read_lock(), but according to Oleg, this is not
+-	 * correct to rely on this
+-	 */
+ 	rcu_read_lock();
+-	info.si_pid = task_pid_nr_ns(tsk, task_active_pid_ns(tsk->parent));
+-	info.si_uid = from_kuid_munged(task_cred_xxx(tsk->parent, user_ns),
++	info.si_pid = task_pid_nr_ns(tsk, ns_of_pid(parent_pid));
++	info.si_uid = from_kuid_munged(task_cred_xxx(parent, user_ns),
+ 				       task_uid(tsk));
+ 	rcu_read_unlock();
+ 
+@@ -2120,8 +2120,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 		info.si_status = tsk->exit_code >> 8;
+ 	}
+ 
+-	psig = tsk->parent->sighand;
+-	spin_lock_irqsave(&psig->siglock, flags);
++	psig = lock_task_sighand(parent, &flags);
++	if (!psig)
++		goto out_pid;
+ 	if (!tsk->ptrace && sig == SIGCHLD &&
+ 	    (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN ||
+ 	     (psig->action[SIGCHLD-1].sa.sa_flags & SA_NOCLDWAIT))) {
+@@ -2149,10 +2150,14 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 	 * parent's namespaces.
+ 	 */
+ 	if (valid_signal(sig) && sig)
+-		__send_signal_locked(sig, &info, tsk->parent, PIDTYPE_TGID, false);
+-	__wake_up_parent(tsk, tsk->parent);
++		__send_signal_locked(sig, &info, parent, PIDTYPE_TGID, false);
++	__wake_up_parent(tsk, parent);
+ 	spin_unlock_irqrestore(&psig->siglock, flags);
+ 
++out_pid:
++	put_pid(parent_pid);
++out_parent:
++	put_task_struct(parent);
+ 	return autoreap;
+ }
+ 
+@@ -2315,7 +2320,7 @@ static int ptrace_stop(int exit_code, int why, unsigned long message,
+ 	task_clear_jobctl_trapping(current);
+ 
+ 	spin_unlock_irq(&current->sighand->siglock);
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	/*
+ 	 * Notify parents of the stop.
+ 	 *
+@@ -2338,7 +2343,7 @@ static int ptrace_stop(int exit_code, int why, unsigned long message,
+ 	 * XXX: implement read_unlock_no_resched().
+ 	 */
+ 	preempt_disable();
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ 	cgroup_enter_frozen();
+ 	preempt_enable_no_resched();
+ 	schedule();
+@@ -2503,9 +2508,9 @@ static bool do_signal_stop(int signr)
+ 		 * TASK_TRACED.
+ 		 */
+ 		if (notify) {
+-			read_lock(&tasklist_lock);
++			read_lock_tasklist_all();
+ 			do_notify_parent_cldstop(current, false, notify);
+-			read_unlock(&tasklist_lock);
++			read_unlock_tasklist_all();
+ 		}
+ 
+ 		/* Now we don't run again until woken by SIGCONT or SIGKILL */
+@@ -2719,13 +2724,13 @@ bool get_signal(struct ksignal *ksig)
+ 		 * the ptracer of the group leader too unless it's gonna be
+ 		 * a duplicate.
+ 		 */
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_notify_parent_cldstop(current, false, why);
+ 
+ 		if (ptrace_reparented(current->group_leader))
+ 			do_notify_parent_cldstop(current->group_leader,
+ 						true, why);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 
+ 		goto relock;
+ 	}
+@@ -3029,9 +3034,9 @@ void exit_signals(struct task_struct *tsk)
+ 	 * should always go to the real parent of the group leader.
+ 	 */
+ 	if (unlikely(group_stop)) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_notify_parent_cldstop(tsk, false, group_stop);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ }
+ 
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 47cb10a16b00..0495a5b25b51 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -249,11 +249,11 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
+ 			pgrp = find_vpid(who);
+ 		else
+ 			pgrp = task_pgrp(current);
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
+ 			error = set_one_prio(p, niceval, error);
+ 		} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 		break;
+ 	case PRIO_USER:
+ 		uid = make_kuid(cred->user_ns, who);
+@@ -315,13 +315,13 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
+ 			pgrp = find_vpid(who);
+ 		else
+ 			pgrp = task_pgrp(current);
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
+ 			niceval = nice_to_rlimit(task_nice(p));
+ 			if (niceval > retval)
+ 				retval = niceval;
+ 		} while_each_pid_thread(pgrp, PIDTYPE_PGID, p);
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 		break;
+ 	case PRIO_USER:
+ 		uid = make_kuid(cred->user_ns, who);
+@@ -1088,7 +1088,7 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
+ 	/* From this point forward we keep holding onto the tasklist lock
+ 	 * so that our parent does not change from under us. -DaveM
+ 	 */
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 
+ 	err = -ESRCH;
+ 	p = find_task_by_vpid(pid);
+@@ -1136,7 +1136,7 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
+ 	err = 0;
+ out:
+ 	/* All paths lead to here, thus we are safe. -DaveM */
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ 	rcu_read_unlock();
+ 	return err;
+ }
+@@ -1229,7 +1229,7 @@ int ksys_setsid(void)
+ 	pid_t session = pid_vnr(sid);
+ 	int err = -EPERM;
+ 
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 	/* Fail if I am already a session leader */
+ 	if (group_leader->signal->leader)
+ 		goto out;
+@@ -1247,7 +1247,7 @@ int ksys_setsid(void)
+ 
+ 	err = session;
+ out:
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ 	if (err > 0) {
+ 		proc_sid_connector(group_leader);
+ 		sched_autogroup_create_attach(group_leader);
+@@ -1723,7 +1723,7 @@ SYSCALL_DEFINE4(prlimit64, pid_t, pid, unsigned int, resource,
+ 		 * so tsk->group_leader can't be freed or changed until
+ 		 * read_unlock(tasklist_lock) below.
+ 		 */
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		if (!pid_alive(tsk))
+ 			ret = -ESRCH;
+ 	}
+@@ -1734,7 +1734,7 @@ SYSCALL_DEFINE4(prlimit64, pid_t, pid, unsigned int, resource,
+ 	}
+ 
+ 	if (need_tasklist)
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 
+ 	if (!ret && old_rlim) {
+ 		rlim_to_rlim64(&old, &old64);
+@@ -2301,11 +2301,11 @@ static int propagate_has_child_subreaper(struct task_struct *p, void *data)
+ 	 * If we've found child_reaper - skip descendants in
+ 	 * it's subtree as they will never get out pidns.
+ 	 */
+-	if (p->signal->has_child_subreaper ||
++	if (READ_ONCE(p->signal->has_child_subreaper) ||
+ 	    is_child_reaper(task_pid(p)))
+ 		return 0;
+ 
+-	p->signal->has_child_subreaper = 1;
++	WRITE_ONCE(p->signal->has_child_subreaper, true);
+ 	return 1;
+ }
+ 
+@@ -2602,14 +2602,14 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 		error = prctl_get_tid_address(me, (int __user * __user *)arg2);
+ 		break;
+ 	case PR_SET_CHILD_SUBREAPER:
+-		me->signal->is_child_subreaper = !!arg2;
++		WRITE_ONCE(me->signal->is_child_subreaper, !!arg2);
+ 		if (!arg2)
+ 			break;
+ 
+ 		walk_process_tree(me, propagate_has_child_subreaper, NULL);
+ 		break;
+ 	case PR_GET_CHILD_SUBREAPER:
+-		error = put_user(me->signal->is_child_subreaper,
++		error = put_user(READ_ONCE(me->signal->is_child_subreaper),
+ 				 (int __user *)arg2);
+ 		break;
+ 	case PR_SET_NO_NEW_PRIVS:
+@@ -2805,7 +2805,7 @@ static int do_sysinfo(struct sysinfo *info)
+ 
+ 	get_avenrun(info->loads, 0, SI_LOAD_SHIFT - FSHIFT);
+ 
+-	info->procs = nr_threads;
++	info->procs = atomic_long_read(&nr_threads);
+ 
+ 	si_meminfo(info);
+ 	si_swapinfo(info);
+diff --git a/kernel/tasklist.c b/kernel/tasklist.c
+new file mode 100644
+index 000000000000..258094297364
+--- /dev/null
++++ b/kernel/tasklist.c
+@@ -0,0 +1,270 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/debugfs.h>
++#include <linux/init.h>
++#include <linux/sched/signal.h>
++#include <linux/sched/task.h>
++#include <linux/seq_file.h>
++#include <linux/slab.h>
++
++struct task_domain **task_domains __read_mostly;
++
++/*
++ * Shards are permanent, including those belonging to offline nodes. A task
++ * keeps its home shard after migration, and every thread shares its leader's
++ * shard so that release_task() can also serialize the last-thread notification.
++ */
++void __init init_task_domains(void)
++{
++	struct task_domain **domains;
++	int nid;
++
++	domains = kcalloc(nr_node_ids, sizeof(*domains), GFP_KERNEL);
++	if (!domains)
++		panic("fork_init: failed to allocate task domains\n");
++
++	for (nid = 0; nid < nr_node_ids; nid++) {
++		int alloc_nid = node_state(nid, N_MEMORY) ? nid : NUMA_NO_NODE;
++		struct task_domain *td;
++
++		td = kzalloc_node(sizeof(*td), GFP_KERNEL, alloc_nid);
++		if (!td)
++			panic("fork_init: failed to allocate task domain %d\n", nid);
++		INIT_LIST_HEAD(&td->tasks);
++		rwlock_init(&td->lock);
++		domains[nid] = td;
++	}
++
++	/* Publish only after every slot is ready for interrupt-side readers. */
++	task_domains = domains;
++}
++
++struct task_struct *next_task(struct task_struct *p)
++{
++	struct list_head *next;
++	int nid;
++
++	if (!task_domains)
++		return &init_task;
++	if (p == &init_task) {
++		nid = 0;
++		next = rcu_dereference_check(task_domains[nid]->tasks.next,
++					     lockdep_tasklist_lock_is_held());
++	} else {
++		nid = p->task_domain_nid;
++		next = rcu_dereference_check(p->tasks.next,
++					     lockdep_tasklist_lock_is_held());
++	}
++
++	while (next == &task_domains[nid]->tasks) {
++		if (++nid == nr_node_ids)
++			return &init_task;
++		next = rcu_dereference_check(task_domains[nid]->tasks.next,
++					     lockdep_tasklist_lock_is_held());
++	}
++	return list_entry(next, struct task_struct, tasks);
++}
++EXPORT_SYMBOL(next_task);
++
++bool tasklist_empty(void)
++{
++	int nid;
++
++	if (!task_domains)
++		return list_empty(&init_task.tasks);
++	for (nid = 0; nid < nr_node_ids; nid++)
++		if (!list_empty(&task_domains[nid]->tasks))
++			return false;
++	return true;
++}
++EXPORT_SYMBOL(tasklist_empty);
++
++/*
++ * Model the complete set of shards as one lockdep lock, using the historic
++ * tasklist_lock map. This retains the external lock ordering and assertions
++ * without consuming one held-lock entry per NUMA node. Single-shard writers
++ * use the same map; none of these helpers may be nested. Raw operations below
++ * retain rwlock debugging, while preemption and lockdep are handled once for
++ * the entire operation. Readers/writers acquire shards in ascending order.
++ *
++ * UP and PREEMPT_RT retain the ordinary tasklist rwlock. The latter must not
++ * use raw rwlock operations on its sleeping rwlock implementation.
++ */
++#if defined(CONFIG_SMP) && !defined(CONFIG_PREEMPT_RT)
++#define TASKLIST_SHARDS 1
++#else
++#define TASKLIST_SHARDS 0
++#endif
++
++void read_lock_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	int nid;
++
++	if (task_domains) {
++		preempt_disable();
++		rwlock_acquire_read(&tasklist_lock.dep_map, 0, 0, _RET_IP_);
++		for (nid = 0; nid < nr_node_ids; nid++)
++			do_raw_read_lock(&task_domains[nid]->lock);
++		return;
++	}
++#endif
++	read_lock(&tasklist_lock);
++}
++EXPORT_SYMBOL(read_lock_tasklist_all);
++
++int read_trylock_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	int nid;
++
++	if (task_domains) {
++		preempt_disable();
++		for (nid = 0; nid < nr_node_ids; nid++) {
++			if (!do_raw_read_trylock(&task_domains[nid]->lock))
++				goto undo;
++		}
++		rwlock_acquire_read(&tasklist_lock.dep_map, 0, 1, _RET_IP_);
++		return 1;
++undo:
++		while (nid--)
++			do_raw_read_unlock(&task_domains[nid]->lock);
++		preempt_enable();
++		return 0;
++	}
++#endif
++	return read_trylock(&tasklist_lock);
++}
++EXPORT_SYMBOL(read_trylock_tasklist_all);
++
++void read_unlock_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	int nid;
++
++	if (task_domains) {
++		rwlock_release(&tasklist_lock.dep_map, _RET_IP_);
++		for (nid = nr_node_ids - 1; nid >= 0; nid--)
++			do_raw_read_unlock(&task_domains[nid]->lock);
++		preempt_enable();
++		return;
++	}
++#endif
++	read_unlock(&tasklist_lock);
++}
++EXPORT_SYMBOL(read_unlock_tasklist_all);
++
++void write_lock_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	int nid;
++
++	if (task_domains) {
++		preempt_disable();
++		rwlock_acquire(&tasklist_lock.dep_map, 0, 0, _RET_IP_);
++		for (nid = 0; nid < nr_node_ids; nid++)
++			do_raw_write_lock(&task_domains[nid]->lock);
++		return;
++	}
++#endif
++	write_lock(&tasklist_lock);
++}
++EXPORT_SYMBOL(write_lock_tasklist_all);
++
++void write_unlock_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	int nid;
++
++	if (task_domains) {
++		rwlock_release(&tasklist_lock.dep_map, _RET_IP_);
++		for (nid = nr_node_ids - 1; nid >= 0; nid--)
++			do_raw_write_unlock(&task_domains[nid]->lock);
++		preempt_enable();
++		return;
++	}
++#endif
++	write_unlock(&tasklist_lock);
++}
++EXPORT_SYMBOL(write_unlock_tasklist_all);
++
++void write_lock_irq_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	local_irq_disable();
++	preempt_disable();
++	write_lock_tasklist_all();
++#else
++	write_lock_irq(&tasklist_lock);
++#endif
++}
++EXPORT_SYMBOL(write_lock_irq_tasklist_all);
++
++void write_unlock_irq_tasklist_all(void)
++{
++#if TASKLIST_SHARDS
++	write_unlock_tasklist_all();
++	local_irq_enable();
++	preempt_enable();
++#else
++	write_unlock_irq(&tasklist_lock);
++#endif
++}
++EXPORT_SYMBOL(write_unlock_irq_tasklist_all);
++
++void write_lock_irq_task_domain(int nid)
++{
++#if TASKLIST_SHARDS
++	local_irq_disable();
++	preempt_disable();
++	rwlock_acquire(&tasklist_lock.dep_map, 0, 0, _RET_IP_);
++	do_raw_write_lock(&task_domains[nid]->lock);
++#else
++	write_lock_irq(&tasklist_lock);
++#endif
++}
++
++void write_unlock_irq_task_domain(int nid)
++{
++#if TASKLIST_SHARDS
++	rwlock_release(&tasklist_lock.dep_map, _RET_IP_);
++	do_raw_write_unlock(&task_domains[nid]->lock);
++	local_irq_enable();
++	preempt_enable();
++#else
++	write_unlock_irq(&tasklist_lock);
++#endif
++}
++
++#ifdef CONFIG_DEBUG_FS
++static int task_domain_nr_tasks_show(struct seq_file *m, void *v)
++{
++	struct task_domain *td = m->private;
++
++	seq_printf(m, "%lu\n", READ_ONCE(td->nr_tasks));
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(task_domain_nr_tasks);
++
++static int __init task_domains_debugfs_init(void)
++{
++	struct dentry *root;
++	int nid;
++
++	root = debugfs_create_dir("task_domains", NULL);
++	if (IS_ERR(root))
++		return 0;
++	for (nid = 0; nid < nr_node_ids; nid++) {
++		struct dentry *dir;
++		char name[16];
++
++		snprintf(name, sizeof(name), "%d", nid);
++		dir = debugfs_create_dir(name, root);
++		if (IS_ERR(dir))
++			continue;
++		debugfs_create_file("nr_tasks", 0444, dir, task_domains[nid],
++				    &task_domain_nr_tasks_fops);
++	}
++	return 0;
++}
++late_initcall(task_domains_debugfs_init);
++#endif
+diff --git a/kernel/tracepoint.c b/kernel/tracepoint.c
+index 8d1507dd0724..e4ade434098f 100644
+--- a/kernel/tracepoint.c
++++ b/kernel/tracepoint.c
+@@ -760,11 +760,11 @@ int syscall_regfunc(void)
+ 	struct task_struct *p, *t;
+ 
+ 	if (!sys_tracepoint_refcount) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		for_each_process_thread(p, t) {
+ 			set_task_syscall_work(t, SYSCALL_TRACEPOINT);
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ 	sys_tracepoint_refcount++;
+ 
+@@ -777,11 +777,11 @@ void syscall_unregfunc(void)
+ 
+ 	sys_tracepoint_refcount--;
+ 	if (!sys_tracepoint_refcount) {
+-		read_lock(&tasklist_lock);
++		read_lock_tasklist_all();
+ 		for_each_process_thread(p, t) {
+ 			clear_task_syscall_work(t, SYSCALL_TRACEPOINT);
+ 		}
+-		read_unlock(&tasklist_lock);
++		read_unlock_tasklist_all();
+ 	}
+ }
+ #endif
+diff --git a/security/keys/keyctl.c b/security/keys/keyctl.c
+index aa1dc43b16dd..b5ebf648461a 100644
+--- a/security/keys/keyctl.c
++++ b/security/keys/keyctl.c
+@@ -1652,7 +1652,7 @@ long keyctl_session_to_parent(void)
+ 
+ 	me = current;
+ 	rcu_read_lock();
+-	write_lock_irq(&tasklist_lock);
++	write_lock_irq_tasklist_all();
+ 
+ 	ret = -EPERM;
+ 	oldwork = NULL;
+@@ -1702,7 +1702,7 @@ long keyctl_session_to_parent(void)
+ 	if (!ret)
+ 		newwork = NULL;
+ unlock:
+-	write_unlock_irq(&tasklist_lock);
++	write_unlock_irq_tasklist_all();
+ 	rcu_read_unlock();
+ 	if (oldwork)
+ 		put_cred(container_of(oldwork, struct cred, rcu));
+diff --git a/security/selinux/hooks.c b/security/selinux/hooks.c
+index 7296141ec7cd..da78dd8f72ee 100644
+--- a/security/selinux/hooks.c
++++ b/security/selinux/hooks.c
+@@ -2537,9 +2537,9 @@ static void selinux_bprm_committed_creds(struct linux_binprm *bprm)
+ 
+ 	/* Wake up the parent if it is waiting so that it can recheck
+ 	 * wait permission to the new task SID. */
+-	read_lock(&tasklist_lock);
++	read_lock_tasklist_all();
+ 	__wake_up_parent(current, unrcu_pointer(current->real_parent));
+-	read_unlock(&tasklist_lock);
++	read_unlock_tasklist_all();
+ }
+ 
+ /* superblock security operations */
+-- 
+2.43.0
+

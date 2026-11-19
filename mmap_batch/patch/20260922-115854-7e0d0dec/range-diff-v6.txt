@@ -1,0 +1,355 @@
+1:  dc7c9c045bab ! 1:  aeb884f315c6 mm: batch file VMA insertions in dup_mmap
+    @@ Metadata
+     Author: Dong Chenchen <dongchenchen2@huawei.com>
+     
+      ## Commit message ##
+    -    mm: batch file VMA insertions in dup_mmap
+    +    mm: batch file VMA insertion and page table copying in dup_mmap
+     
+    -    dup_mmap() acquires mapping->i_mmap_rwsem for every file-backed VMA
+    -    copied into the child mm. Processes with multiple regions backed by the
+    -    same address_space repeatedly acquire the same lock, even when the
+    -    child's page tables can be populated on demand.
+    +    dup_mmap() acquires mapping->i_mmap_rwsem separately for each file VMA.
+    +    Regions of the same executable or shared library repeatedly acquire the
+    +    same lock. Flushing a pending insertion batch whenever a VMA needs page
+    +    table copying also separates adjacent COW mappings into small batches.
+     
+    -    Batch up to eight file VMA insertions for the same address_space under
+    -    one acquisition of i_mmap_rwsem and the architecture's dcache mmap lock.
+    -    Group by address_space so separate file descriptors for the same inode
+    -    can share a batch. Preserve the existing shared-writable accounting and
+    -    insert each child VMA immediately after its parent in the interval tree.
+    +    Queue up to eight destination/source VMA pairs for one address_space.
+    +    Insert the whole batch under one i_mmap write lock and dcache mmap lock,
+    +    then release both locks before copying any of its page tables. A local
+    +    copy_page_range_batch() entry iterates over the saved pairs, preserves
+    +    WIPEONFORK and delegates all per-VMA copying to copy_page_range(). This
+    +    keeps every child discoverable through file rmap before it gains PTEs,
+    +    without flushing merely because the current VMA needs a page table copy.
+     
+    -    Follow the init/add/process/final helper pattern introduced by commit
+    -    3577dbb19241 ("mm: batch unlink_file_vma calls in free_pgd_range").
+    -    Rename unlink_vma_file_batch to vma_file_batch and embed it in
+    -    link_vma_file_batch alongside the source VMA pointers needed for
+    -    insert_after(). This shares the counted VMA array and capacity without
+    -    increasing the unlink batch's size or changing its grouping rules.
+    +    Follow the init/add/process/final pattern introduced by commit
+    +    3577dbb19241 ("mm: batch unlink_file_vma calls in free_pgd_range"). Share
+    +    the counted VMA array and capacity as vma_file_batch, while keeping the
+    +    source pointers in the insertion-specific link_vma_file_batch. Group by
+    +    address_space, preserve shared-writable accounting and insert each child
+    +    immediately after its parent. The unlink grouping rules are unchanged.
+     
+    -    Move vma_needs_copy() to mm/internal.h as an inline helper, preserving
+    -    its checks of VM_COPY_ON_FORK on the destination and anon_vma on the
+    -    source. Share this predicate with copy_page_range() so batching cannot
+    -    leave a child VMA unlinked when its file page tables are copied. Use the
+    -    same dst_vma, src_vma argument names and order for the insertion helper.
+    -    The shared predicate controls only the batch flush. Keep the original
+    -    copy_page_range() call condition; its own predicate handles early returns.
+    +    The parent and child mmap write locks protect the queued VMAs, and each
+    +    child owns a file reference before queueing. Keep the existing open
+    +    callback before queueing. VMAs without vm_file retain their immediate
+    +    page table copy path. Finish the last file batch before arch_dup_mmap().
+     
+    -    Both mmap write locks keep the queued VMAs alive, and each child VMA
+    -    owns a file reference before it is queued. Flush before copying file
+    -    page tables so reverse mapping walks can find the child as soon as it
+    -    has file PTEs. Copying an anonymous VMA need not interrupt a file batch.
+    -    Retain the existing open callback before queueing the current VMA.
+    +    Propagate copy failures from batch processing. When add flushes a prior
+    +    batch, its new destination VMA is already in the child maple tree. Queue
+    +    that VMA even if copying the prior batch failed; loop_out must link it
+    +    before the ordinary teardown can remove it. On any earlier failure,
+    +    link remaining entries without attempting more page table copies.
+     
+    -    Drain remaining entries at loop_out on both success and failure, before
+    -    registration with KSM/khugepaged or failed-fork teardown. Teardown expects
+    -    the child VMAs to be linked into their file mapping trees. Keep the
+    -    existing placement of arch_dup_mmap(); its context setup does not need
+    -    pending file VMAs to have been inserted. A full batch reduces eight
+    -    insertion lock acquisitions to one at the cost of a bounded stack buffer.
+    +    Keep the teardown boundary at the first VMA not installed in the child,
+    +    not at the VMA whose deferred copy failed. This includes all installed
+    +    VMAs with no copied page tables. Clear the insertion count before copying
+    +    so a partially copied batch is never linked a second time on failure.
+    +    The bounded batch continues to use 136 bytes on x86_64.
+     
+         Signed-off-by: Dong Chenchen <dongchenchen2@huawei.com>
+         Assisted-by: LLM
+         Signed-off-by: Dong Chenchen <superdcc97@163.com>
+     
+    - ## mm/internal.h ##
+    -@@ mm/internal.h: void unmap_vmas(struct mmu_gather *tlb, struct unmap_desc *unmap);
+    - 
+    - #ifdef CONFIG_MMU
+    - 
+    -+/*
+    -+ * Return true if the vma needs to copy the pgtable during this fork().  Return
+    -+ * false when we can speed up fork() by allowing lazy page faults later until
+    -+ * when the child accesses the memory range.
+    -+ */
+    -+static inline bool
+    -+vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+    -+{
+    -+	/*
+    -+	 * We check against dst_vma as while sane VMA flags will have been
+    -+	 * copied, VM_UFFD_WP may be set only on dst_vma.
+    -+	 */
+    -+	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
+    -+		return true;
+    -+	/*
+    -+	 * The presence of an anon_vma indicates an anonymous VMA has page
+    -+	 * tables which naturally cannot be reconstituted on page fault.
+    -+	 */
+    -+	if (src_vma->anon_vma)
+    -+		return true;
+    -+
+    -+	/*
+    -+	 * Don't copy ptes where a page fault will fill them correctly.  Fork
+    -+	 * becomes much lighter when there are big shared or private readonly
+    -+	 * mappings. The tradeoff is that copy_page_range is more efficient
+    -+	 * than faulting.
+    -+	 */
+    -+	return false;
+    -+}
+    -+
+    - bool cond_install_uffd_wp_ptes(struct vm_area_struct *vma,
+    - 		unsigned long addr, pte_t *ptep, pte_t pte,
+    - 		unsigned long nr_ptes);
+    -
+      ## mm/memory.c ##
+     @@ mm/memory.c: void free_pgd_range(struct mmu_gather *tlb,
+       */
+    @@ mm/memory.c: void free_pgd_range(struct mmu_gather *tlb,
+      	struct ma_state *mas = unmap->mas;
+      	struct vm_area_struct *vma = unmap->first;
+      
+    -@@ mm/memory.c: copy_p4d_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+    - 	return 0;
+    - }
+    - 
+    --/*
+    -- * Return true if the vma needs to copy the pgtable during this fork().  Return
+    -- * false when we can speed up fork() by allowing lazy page faults later until
+    -- * when the child accesses the memory range.
+    -- */
+    --static bool
+    --vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+    --{
+    --	/*
+    --	 * We check against dst_vma as while sane VMA flags will have been
+    --	 * copied, VM_UFFD_WP may be set only on dst_vma.
+    --	 */
+    --	if (dst_vma->vm_flags & VM_COPY_ON_FORK)
+    --		return true;
+    --	/*
+    --	 * The presence of an anon_vma indicates an anonymous VMA has page
+    --	 * tables which naturally cannot be reconstituted on page fault.
+    --	 */
+    --	if (src_vma->anon_vma)
+    --		return true;
+    --
+    --	/*
+    --	 * Don't copy ptes where a page fault will fill them correctly.  Fork
+    --	 * becomes much lighter when there are big shared or private readonly
+    --	 * mappings. The tradeoff is that copy_page_range is more efficient
+    --	 * than faulting.
+    --	 */
+    --	return false;
+    --}
+    --
+    - int
+    - copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+    - {
+     
+      ## mm/mmap.c ##
+     @@ mm/mmap.c: bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+    @@ mm/mmap.c: bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+      }
+      
+     +/*
+    -+ * File VMAs without copied page tables can be linked into the rmap tree in
+    -+ * batches. Both mmap write locks keep the parent and child VMAs alive, and
+    -+ * each child VMA already owns a file reference. Flush before copying file
+    -+ * page tables, and drain remaining entries before finishing dup_mmap() or
+    -+ * tearing down a failed fork.
+    ++ * Delay copying file page tables until the whole batch is linked into the
+    ++ * rmap tree. Both mmap write locks keep the parent and child VMAs alive, and
+    ++ * each child VMA already owns a file reference. On failure, link any remaining
+    ++ * entries without copying their page tables before tearing down the child.
+     + */
+     +struct link_vma_file_batch {
+     +	struct vma_file_batch batch;
+    @@ mm/mmap.c: bool mmap_read_lock_maybe_expand(struct mm_struct *mm,
+     +	link_file_vma_batch_init(lvb);
+     +}
+     +
+    -+static void link_file_vma_batch_add(struct link_vma_file_batch *lvb,
+    -+				    struct vm_area_struct *dst_vma,
+    -+				    struct vm_area_struct *src_vma)
+    ++static int copy_page_range_batch(struct link_vma_file_batch *lvb, int count)
+    ++{
+    ++	int i, ret;
+    ++
+    ++	for (i = 0; i < count; i++) {
+    ++		struct vm_area_struct *dst_vma = lvb->batch.vmas[i];
+    ++
+    ++		if (vma_test(dst_vma, VMA_WIPEONFORK_BIT))
+    ++			continue;
+    ++		ret = copy_page_range(dst_vma, lvb->src_vmas[i]);
+    ++		if (ret)
+    ++			return ret;
+    ++	}
+    ++	return 0;
+    ++}
+    ++
+    ++static int dup_file_vma_batch(struct link_vma_file_batch *lvb)
+    ++{
+    ++	int count = lvb->batch.count;
+    ++
+    ++	if (!count)
+    ++		return 0;
+    ++
+    ++	/* Link the whole batch before copying any of its page tables. */
+    ++	link_file_vma_batch_process(lvb);
+    ++	/* The arrays remain valid after process resets the count. */
+    ++	return copy_page_range_batch(lvb, count);
+    ++}
+    ++
+    ++static int link_file_vma_batch_add(struct link_vma_file_batch *lvb,
+    ++				   struct vm_area_struct *dst_vma,
+    ++				   struct vm_area_struct *src_vma)
+     +{
+     +	struct vma_file_batch *vb = &lvb->batch;
+    ++	int ret = 0;
+     +
+     +	if ((vb->count > 0 && vb->vmas[0]->vm_file->f_mapping !=
+     +	     dst_vma->vm_file->f_mapping) || vb->count == ARRAY_SIZE(vb->vmas))
+    -+		link_file_vma_batch_process(lvb);
+    ++		ret = dup_file_vma_batch(lvb);
+     +
+    ++	/*
+    ++	 * dst_vma is already in the child's maple tree. Queue it even if the
+    ++	 * previous batch failed to copy, so error cleanup can link it first.
+    ++	 */
+     +	vb->vmas[vb->count] = dst_vma;
+     +	lvb->src_vmas[vb->count] = src_vma;
+     +	vb->count++;
+    ++	return ret;
+     +}
+     +
+     +static void link_file_vma_batch_final(struct link_vma_file_batch *lvb)
+    @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct
+     -			mapping_rmap_tree_insert_after(tmp, mpnt, mapping);
+     -			flush_dcache_mmap_unlock(mapping);
+     -			i_mmap_unlock_write(mapping);
+    -+			link_file_vma_batch_add(&vb, tmp, mpnt);
+    - 		}
+    - 
+    +-		}
+    +-
+     -		if (!vma_test(tmp, VMA_WIPEONFORK_BIT))
+    -+		if (!vma_test(tmp, VMA_WIPEONFORK_BIT)) {
+    -+			/* Rmap must find the child before it gains page tables. */
+    -+			if (file && vma_needs_copy(tmp, mpnt))
+    -+				link_file_vma_batch_final(&vb);
+    ++			retval = link_file_vma_batch_add(&vb, tmp, mpnt);
+    ++		} else if (!vma_test(tmp, VMA_WIPEONFORK_BIT)) {
+      			retval = copy_page_range(tmp, mpnt);
+     +		}
+      
+      		if (retval) {
+      			mpnt = vma_next(&vmi);
+     @@ mm/mmap.c: __latent_entropy int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
+    + 		}
+    + 	}
+      	/* a new mm has just been created */
+    - 	retval = arch_dup_mmap(oldmm, mm);
+    +-	retval = arch_dup_mmap(oldmm, mm);
+    ++	retval = dup_file_vma_batch(&vb);
+    ++	if (!retval)
+    ++		retval = arch_dup_mmap(oldmm, mm);
+      loop_out:
+     +	link_file_vma_batch_final(&vb);
+      	vma_iter_free(&vmi);
+2:  1796d45180f5 ! 2:  668fa34e8896 selftests/mm: cover file VMA lifetime across fork
+    @@ Commit message
+         selftests/mm: cover file VMA lifetime across fork
+     
+         File VMAs inherited by a child must remain visible to truncation and
+    -    must keep the mapping's shared-writable count balanced after the parent
+    -    unmaps them. Exercise these properties with multiple disjoint mappings
+    -    in the existing rmap selftest.
+    +    keep the mapping's shared-writable count balanced after the parent
+    +    unmaps them. Exercise these properties with disjoint file mappings in
+    +    the existing rmap selftest.
+    +
+    +    Cover shared, private, sparse private COW, all-private-COW, alternating
+    +    shared files, alternating private COW files and read-only mappings.
+    +    Reopen the same memfd to cover distinct struct files sharing one
+    +    address_space. The all-COW cases exercise batches where every VMA needs
+    +    a page table copy, including batches ended by a change of mapping.
+     
+    -    Add shared, private, private COW, alternating-file and read-only variants.
+    -    Reopen the same memfd to also cover distinct file objects sharing one
+    -    address_space. Populate the child mappings before truncating and growing
+    -    the backing file, then check that the child observes the replacement
+    -    data, including for pages that were privately copied before fork.
+         Use two pages per file VMA and fault the second page before creating a
+    -    private COW page. The same VMA then exercises copying both private data
+    -    and a file PTE, as required to check fork-time file rmap visibility.
+    +    private COW page in the first. Verify the inherited contents before
+    +    truncating and growing the backing file, then check that the child sees
+    +    the replacement data for both the file and private pages.
+     
+         Unmap the parent's regions while the child is alive and verify that
+         writable shared mappings still prevent F_SEAL_WRITE. Check that the seal
+    @@ tools/testing/selftests/mm/rmap.c: TEST_F(migrate, ksm_and_mremap)
+     +FIXTURE_VARIANT(fork_file)
+     +{
+     +	bool shared;
+    -+	bool cow;
+    ++	unsigned int cow_every;
+     +	bool separate_files;
+     +	bool readonly;
+     +};
+    @@ tools/testing/selftests/mm/rmap.c: TEST_F(migrate, ksm_and_mremap)
+     +
+     +FIXTURE_VARIANT_ADD(fork_file, private_cow)
+     +{
+    -+	.cow = true,
+    ++	.cow_every = 3,
+    ++};
+    ++
+    ++FIXTURE_VARIANT_ADD(fork_file, private_cow_all)
+    ++{
+    ++	.cow_every = 1,
+    ++};
+    ++
+    ++FIXTURE_VARIANT_ADD(fork_file, different_files_cow)
+    ++{
+    ++	.cow_every = 1,
+    ++	.separate_files = true,
+     +};
+     +
+     +FIXTURE_VARIANT_ADD(fork_file, different_files)
+    @@ tools/testing/selftests/mm/rmap.c: TEST_F(migrate, ksm_and_mremap)
+     +		ASSERT_EQ(mmap(addr, self->vma_size, prot, flags, fd, 0), addr);
+     +		/* Keep a file PTE alongside the first page when it becomes COW. */
+     +		FORCE_READ(addr[self->page_size]);
+    -+		if (variant->cow && i % 3 == 1)
+    ++		if (variant->cow_every && !(i % variant->cow_every))
+     +			*addr = 'c';
+     +	}
+     +}
+    @@ tools/testing/selftests/mm/rmap.c: TEST_F(migrate, ksm_and_mremap)
+     +			char *addr = self->region + i * (self->vma_size + self->page_size);
+     +
+     +			ASSERT_EQ(addr[self->page_size], expected);
+    -+			if (variant->cow && i % 3 == 1)
+    ++			if (variant->cow_every && !(i % variant->cow_every))
+     +				expected = 'c';
+     +			ASSERT_EQ(*addr, expected);
+     +		}

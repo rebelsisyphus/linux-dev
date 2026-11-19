@@ -1,0 +1,55 @@
+From 9ed28899f15dd4538d94e48e0526176731a320a5 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 22 Sep 2026 17:47:15 +0800
+Subject: [PATCH 0/3] mm: batch file VMA insertion during fork
+
+This series batches file VMA insertion during fork. The first patch shares
+batch storage conventions with unlink_file_vma and inserts up to eight
+VMAs for one address_space under a single i_mmap write lock. File VMAs
+needing page-table copying are linked before copy_page_range, and all
+remaining entries are linked before successful completion or teardown.
+
+The second patch adds file VMA lifetime tests. The third keeps four active
+mapping batches, allowing interleaved files to accumulate independently,
+and extends those tests to four and five files, including private COW.
+It retains synchronous page-table copying and the existing flush points.
+
+In an x86_64 QEMU diagnostic, 64 VMAs interleaved over two or four files
+used eight insertion batches. The preceding single-batch implementation
+would use 64 for these sequences. A five-file, 65-VMA sequence used 32
+batches, reflecting the bounded four-slot cache. The buffers grow from
+136 to 544 bytes on x86_64, with no new allocation. UnixBench spawn kept
+its prior 4+1 batch shape per file; its layout does not gain additional
+coalescing from the extra slots.
+
+Validation used KASAN and lockdep: 16 file VMA selftests passed, guard
+checks passed five with four skips, SysV SHM lifetime checks passed, and
+128 overcommit-induced fork failures passed cleanup and write-seal checks.
+Traces verified homogeneous batches, complete insertion, and insertion
+before required file page-table copies, with no lost events or probe hits.
+The kernel builds and all three patches pass strict checkpatch.
+
+These measurements establish batching behavior, not hardware throughput
+improvements. UFFD, hugetlb, device-specific callbacks and other
+architectures have not been exercised at runtime for this revision.
+
+The changes and validation were prepared with LLM assistance. The batch
+tracing and failure-injection diagnostics are local project artifacts;
+the upstream-facing tests check inherited contents, truncate and sealing.
+
+Dong Chenchen (3):
+  mm: batch file VMA insertions in dup_mmap
+  selftests/mm: cover file VMA lifetime across fork
+  mm: keep multiple file VMA batches in dup_mmap
+
+ mm/internal.h                     |  30 +++++
+ mm/memory.c                       |  32 +----
+ mm/mmap.c                         | 116 ++++++++++++++--
+ mm/vma.c                          |   8 +-
+ mm/vma.h                          |  12 +-
+ tools/testing/selftests/mm/rmap.c | 216 ++++++++++++++++++++++++++++++
+ 6 files changed, 362 insertions(+), 52 deletions(-)
+
+-- 
+2.43.0
+

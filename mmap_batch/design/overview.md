@@ -1,5 +1,11 @@
 # mmap_batch: fork 文件 VMA 插入批处理
 
+## 当前版本
+
+当前以 v6 为基础新增多 mapping 批次提交 9ed28899f15d，形成三个补丁
+（本地 v8）。v6 原有两个提交保持不变；v7 继续挂起，其设计仍为
+copy-batch.md。本轮实现和测试见 multiple-file-batches.md 与 dev/review-v8/。
+
 ## 输入与基线
 
 用户提供 `patch/mm_batch_file_vma_insert_v1.patch`，原作者 Dong Chenchen，
@@ -23,56 +29,50 @@
   process 从首个 VMA 获取 mapping，处理后调用 init；final 处理非空
   批次。add 与已有 unlink 接口一致，在接收下一项前处理满批。
   插入仍按 address_space 合批；unlink 的分组和执行逻辑保持原样。
+- 同时保存 4 个 mapping 的批次，每槽容量为 8；优先匹配已有槽，再用
+  空槽，满槽组遇到新 mapping 时刷新并复用首槽。final 处理全部非空槽。
 - 单批获取一次 i_mmap 写锁和架构 dcache mmap 锁；沿用当前
   `vma_is_shared_maywrite()` 计数规则及 `mapping_rmap_tree_insert_after()`。
-- 将现有 `vma_needs_copy()` 原样移至 mm/internal.h 作为共享 inline，
-  与批处理实现放在同一份补丁中。插入 API 参数统一为 dst_vma、src_vma，
-  顺序与 vma_needs_copy()、copy_page_range() 一致。
-  dup_mmap 与 copy_page_range 共用判断，覆盖完整 VM_COPY_ON_FORK
-  （含 VM_MAYBE_GUARD、VM_UFFD_RWP）以及父 VMA 的 anon_vma。
-  v6 将该判断限定在 `if (file && vma_needs_copy(tmp, mpnt))`，仅控制
-  批次刷新。copy_page_range 的外层调用条件恢复为原来的非 WIPEONFORK；
-  不需要复制的情况仍由 copy_page_range 内部原有判断直接返回。
-- 需要复制文件 VMA 的页表之前刷新队列。可延迟插入的子 VMA 尚无复制的页表，
-  且子 mm 尚未交给新任务执行；truncate/rmap 在此期间不会漏掉其 PTE。
-- vm_ops->open 按基线的原有时机执行，然后为当前文件 VMA 取得引用并
-  入队；不再因为存在回调就强制刷新。不关联文件的 VMA 复制也不刷新
-  已积攒的文件批次。
-- 地址空间变更、满批需要继续入队时由 add 调用 process。正常结束和
-  失败统一在 loop_out 处理尾批，之后再注册 KSM/khugepaged 或错误回收。
-  arch_dup_mmap 恢复在循环结束后、loop_out 之前的原位置；其返回错误
-  时仍先处理尾批，再进入原清理路径。
-  __mt_dup 成功后才初始化批次，失败直接到 out 时没有批次需要处理。
+- 文件 VMA 入队后，若非 WIPEONFORK 且 vma_needs_copy(dst, src) 为真，
+  在 copy_page_range 前刷新队列，使实际页表复制前目标已进入文件 rmap 树。
+  无需复制的文件 VMA 可继续排队；没有 vm_file 的 VMA 不触发该刷新。
+- vma_needs_copy 在 mm/internal.h 中共享，参数为 dst_vma、src_vma。
+  该条件只控制文件批次刷新，copy_page_range 保持原有调用条件和内部判断。
+- vm_ops->open 保持在当前 VMA 入队之前；arch_dup_mmap 的位置不变。
+  loop_out 的 final 处理成功和失败路径的剩余项，然后进入原有清理流程。
 
-## 错误路径核对
+## 错误路径与 final（沿用 v6）
 
-在当前 VMA 尚未入队时发生 vma_start_write_killable、DONTCOPY tree
-修改、内存记账、vm_area_dup、policy、userfaultfd 或 anon_vma_fork
-失败，loop_out 先插入先前已成功创建的子 VMA，再按现有 end 边界回收。
-文件 VMA 的页表复制失败之前，队列已经刷新；不关联文件的 VMA 复制
-失败时，可能仍有之前的文件批次，由 loop_out 处理。后续 teardown
-沿用原实现；文件引用、可写计数、interval-tree 删除仍由既有生命周期负责。
+显式 final 有两处：需要复制的文件 VMA 在复制前刷新，以及 loop_out
+无条件完成非空队列。批处理仅负责插入，本身不会分配页表或返回错误。
+失败路径在删除子 VMA 前补齐已创建项的文件树链接，使插入、可写计数
+和原有 teardown 配对；未安装的 VMA 仍按原有 mpnt 边界排除。
 
-## final 刷新点（v6）
+当前系列保持 v6 的同步页表复制，因此 arch_dup_mmap 前不额外刷新。
+相关回调、架构与清理风险核对在 dev/review-v6/risk-audit/risk-review.md；
+没有把 v7 的错误边界或测试结果套用于 v6。
 
-dup_mmap 中只保留两处显式 final 调用：
+## v6 UnixBench spawn 的合批边界（2026-09-22）
 
-1. 当前 VMA 有 vm_file 且 vma_needs_copy 为真时：保证复制文件页表
-   之前，目标 VMA 已在 rmap 树中。
-2. 公共 loop_out：处理正常结束、循环错误或架构初始化失败时的剩余批次。
+QEMU 上静态和动态链接的 spawn，各运行 1、4 个 worker，3328 次 fork
+均显示每个文件的 5 个 VMA 合为 4 + 1 两批：前三个无需复制，第四个
+已有 anon_vma，入队后触发 final；第五个也需复制，形成单项批次。
+动态版的可执行文件、libc、ld 均采用这一形态。平均批大小 2.5，插入侧
+i_mmap 写锁次数节省 60%，但本轮没有整体吞吐收益证明。
+因此复制前 final 是合批边界，不能据其触发频繁推断没有合批。
+详情及原始证据见 dev/spawn-batch-20260922/report.md。
 
-v3 有五个调用点，v4 减少为三个。v5 去掉剩余 has_open 特殊处理，
-并恢复 arch_dup_mmap 的原位置。当前 generic、arm64、powerpc、x86
-（含 Xen enter_mmap）实现不依赖文件 rmap 树，也不为待入队文件 VMA
-建立页表；不要求 arch_dup_mmap 前刷新。初始锁和 __mt_dup 错误绕过
-loop_out，因为此时没有入队对象。
+## 多 mapping 批次验证
 
-final 在队列为空时直接返回，不会重复插入，也不会再次获取 i_mmap 锁。
+64 段交错 2/4 文件实测 8 批，5 文件 65 段实测 32 批。当前 spawn 的
+192 次 fork 仍保持每文件 4 + 1：静态每次 2 批，动态 6 批。优化针对
+交错布局，未消除复制前边界。16 项文件自测和 128 次 ENOMEM 清理通过。
+完整结果与限制见 dev/review-v8/report.md。
 
 ## 测试设计
 
 扩展现有 mm/rmap.c：33 段不合并的文件映射，每段两页，覆盖共享、
-私有、混合 COW、交替不同文件、只读 fd，以及同 inode 的不同 struct file。
+私有、混合 COW、交错 2/4/5 个文件、只读 fd，以及同 inode 的不同 struct file。
 COW 场景写第一页并预先读入第二页，覆盖同一 VMA 内的私有页和文件 PTE。
 验证 fork 内容、子进程已缺页后的 truncate 失效、重新扩展后数据、
 父进程解除映射后子映射阻止 F_SEAL_WRITE、子退出后计数恢复。

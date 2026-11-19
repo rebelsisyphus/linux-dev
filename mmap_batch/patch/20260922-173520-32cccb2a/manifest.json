@@ -1,0 +1,13 @@
+{
+  "base_commit": "9b87fdc9af2fbfcdb5c24a64139685ef80f6573f",
+  "head": "9ed28899f15dd4538d94e48e0526176731a320a5",
+  "created_at": "2026-09-22T09:35:20.862237+00:00",
+  "untracked": [],
+  "dirty": false,
+  "revision": "v8",
+  "based_on": "v6",
+  "paused_revision": "v7",
+  "new_commit": "9ed28899f15dd4538d94e48e0526176731a320a5",
+  "design": "../../design/multiple-file-batches.md",
+  "validation": "../../dev/review-v8/results.json"
+}

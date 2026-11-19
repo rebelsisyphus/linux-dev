@@ -1,0 +1,55 @@
+From 668fa34e8896ac58334ef040ac81ec0f9f32a540 Mon Sep 17 00:00:00 2001
+From: Dong Chenchen <superdcc97@163.com>
+Date: Tue, 22 Sep 2026 12:06:25 +0800
+Subject: [PATCH 0/2] mm: batch file VMA insertion and defer page table copying
+
+This series batches file VMA insertion during fork. Each batch links up to
+eight VMAs for one address_space under one i_mmap write lock, then copies
+their page tables after releasing the mapping and dcache locks.
+
+Deferring copies permits adjacent COW VMAs to share an insertion batch.
+The batch entry still processes individual VMAs through copy_page_range;
+MMU notifiers, write-protect sequencing and the page-table copy semantics
+are unchanged. Error paths link all installed VMAs before teardown, even
+when an earlier member of the batch failed to copy.
+
+The local v7 revision keeps the common vma_file_batch layout introduced
+while following 3577dbb19241 ("mm: batch unlink_file_vma calls in
+free_pgd_range"). The source/destination pair buffer remains 136 bytes on
+x86_64. The second patch adds fork/truncate/sealing coverage, including
+all-COW batches and alternating files that need copying.
+
+Validation used an x86_64 QEMU guest with KASAN and lockdep: 14 fork_file
+selftests passed, guard tests passed 5 with 4 skips, SysV SHM lifetime
+checks passed, and 64 overcommit-induced fork failures were cleaned up.
+A project diagnostic tested 84 allocation-injection cases in
+copy_page_range, with 54 ENOMEM failures followed by successful recovery
+forks and write-seal checks. Traces confirmed insertion of the whole
+batch before copying and covered errors at capacity, mapping changes,
+the tail and an anonymous copy with pending file VMAs.
+
+With the same UnixBench spawn binaries used for the previous local
+revision, 3481 observed forks at one and four workers changed from two
+to one insertion batch for the static executable, and from six to three
+for the dynamically linked executable. Each batch held five VMAs.
+These are batching measurements, not hardware throughput results.
+
+The implementation and tests were developed with LLM assistance. The
+fault-injection and tracing diagnostics are project artifacts, not part
+of the upstream selftest patch. UFFD, hugetlb and device-specific paths
+were not exercised at runtime in this revision.
+
+Dong Chenchen (2):
+  mm: batch file VMA insertion and page table copying in dup_mmap
+  selftests/mm: cover file VMA lifetime across fork
+
+ mm/memory.c                       |   2 +-
+ mm/mmap.c                         | 117 +++++++++++++++--
+ mm/vma.c                          |   8 +-
+ mm/vma.h                          |  12 +-
+ tools/testing/selftests/mm/rmap.c | 206 ++++++++++++++++++++++++++++++
+ 5 files changed, 321 insertions(+), 24 deletions(-)
+
+-- 
+2.43.0
+

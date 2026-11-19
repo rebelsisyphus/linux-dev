@@ -1,0 +1,11 @@
+{
+  "base_commit": "9b87fdc9af2fbfcdb5c24a64139685ef80f6573f",
+  "head": "668fa34e8896ac58334ef040ac81ec0f9f32a540",
+  "created_at": "2026-09-22T03:58:54.810971+00:00",
+  "untracked": [],
+  "dirty": false,
+  "revision": "v7",
+  "implementation": "aeb884f315c6d69a5ba9995bafb9ce8604357efc",
+  "validation": "../../dev/review-v7/results.json",
+  "design": "../../design/copy-batch.md"
+}
